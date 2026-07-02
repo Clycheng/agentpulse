@@ -1,1 +1,1 @@
-"""IntentPulse API package."""
+"""AgentPulse API package."""

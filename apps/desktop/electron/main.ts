@@ -11,7 +11,7 @@ async function createWindow() {
     height: 760,
     minWidth: 920,
     minHeight: 640,
-    title: 'IntentPulse',
+    title: 'AgentPulse',
     backgroundColor: '#101614',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

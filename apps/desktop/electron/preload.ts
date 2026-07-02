@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron';
 
-contextBridge.exposeInMainWorld('intentpulse', {
+contextBridge.exposeInMainWorld('agentpulse', {
   platform: process.platform,
 });
