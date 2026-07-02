@@ -1,26 +1,26 @@
 TALENT_CATEGORIES = [
     {
-        "id": "ops-growth",
-        "name": "运营增长",
-        "description": "渠道、投放、数据分析、增长节奏与经营复盘类岗位",
+        "id": "business-ops",
+        "name": "经营管理",
+        "description": "目标拆解、经营复盘、流程优化、项目推进与跨岗位协同类官方人才",
         "sort_order": 10,
     },
     {
-        "id": "content-production",
-        "name": "内容创作",
-        "description": "选题、文案、脚本、品牌叙事与内容分发类岗位",
+        "id": "content-growth",
+        "name": "内容增长",
+        "description": "选题、文案、脚本、品牌叙事、SEO 与内容分发类官方人才",
         "sort_order": 20,
     },
     {
-        "id": "sales-customer",
+        "id": "sales-success",
         "name": "销售客户",
-        "description": "线索跟进、客户响应、报价、FAQ 与成交支持类岗位",
+        "description": "线索跟进、客户响应、报价、FAQ、成交支持与客户成功类官方人才",
         "sort_order": 30,
     },
     {
-        "id": "finance-admin",
+        "id": "finance-office",
         "name": "财务行政",
-        "description": "记账、对账、报表、行政支持与异常提醒类岗位",
+        "description": "记账、对账、报表、行政支持、合规检查与异常提醒类官方人才",
         "sort_order": 40,
     },
 ]
@@ -30,8 +30,8 @@ AGENT_TEMPLATES = [
     {
         "id": "ops-lead",
         "name": "运营负责人",
-        "category_id": "ops-growth",
-        "category": "运营增长",
+        "category_id": "business-ops",
+        "category": "经营管理",
         "department": "运营部",
         "description": "渠道、预算、节奏",
         "prompt": "你是一名资深运营负责人。负责渠道盘点、预算分配与节奏把控，输出可直接执行的运营方案，并统筹团队成员分工。",
@@ -44,8 +44,8 @@ AGENT_TEMPLATES = [
     {
         "id": "content-writer",
         "name": "内容主笔",
-        "category_id": "content-production",
-        "category": "内容创作",
+        "category_id": "content-growth",
+        "category": "内容增长",
         "department": "内容部",
         "description": "文案、品牌叙事",
         "prompt": "你是一名内容主笔。擅长品牌叙事与转化型文案，为官网、公众号与销售物料产出高质量内容。",
@@ -58,8 +58,8 @@ AGENT_TEMPLATES = [
     {
         "id": "video-planner",
         "name": "短视频策划",
-        "category_id": "content-production",
-        "category": "内容创作",
+        "category_id": "content-growth",
+        "category": "内容增长",
         "department": "内容部",
         "description": "选题、脚本、分发",
         "prompt": "你是一名短视频策划。负责选题、脚本与分发节奏，选题要能挂钩获客目标。",
@@ -72,7 +72,7 @@ AGENT_TEMPLATES = [
     {
         "id": "sales-consultant",
         "name": "销售顾问",
-        "category_id": "sales-customer",
+        "category_id": "sales-success",
         "category": "销售客户",
         "department": "增长与客户",
         "description": "线索、报价、周报",
@@ -86,7 +86,7 @@ AGENT_TEMPLATES = [
     {
         "id": "support-agent",
         "name": "客服专员",
-        "category_id": "sales-customer",
+        "category_id": "sales-success",
         "category": "销售客户",
         "department": "增长与客户",
         "description": "FAQ、话术、响应",
@@ -100,7 +100,7 @@ AGENT_TEMPLATES = [
     {
         "id": "finance-assistant",
         "name": "财务助理",
-        "category_id": "finance-admin",
+        "category_id": "finance-office",
         "category": "财务行政",
         "department": "财务行政",
         "description": "记账、对账、报表",

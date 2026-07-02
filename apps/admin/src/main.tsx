@@ -48,21 +48,21 @@ const fallbackCatalog: CatalogResponse = {
   note: '本地 API 未启动时显示内置预览数据。',
   categories: [
     {
-      id: 'ops-growth',
-      name: '运营增长',
-      description: '渠道、投放、数据分析、增长节奏与经营复盘类岗位',
+      id: 'business-ops',
+      name: '经营管理',
+      description: '目标拆解、经营复盘、流程优化、项目推进与跨岗位协同类官方人才',
       sort_order: 10,
     },
     {
-      id: 'content-production',
-      name: '内容创作',
-      description: '选题、文案、脚本、品牌叙事与内容分发类岗位',
+      id: 'content-growth',
+      name: '内容增长',
+      description: '选题、文案、脚本、品牌叙事、SEO 与内容分发类官方人才',
       sort_order: 20,
     },
     {
-      id: 'sales-customer',
+      id: 'sales-success',
       name: '销售客户',
-      description: '线索跟进、客户响应、报价、FAQ 与成交支持类岗位',
+      description: '线索跟进、客户响应、报价、FAQ、成交支持与客户成功类官方人才',
       sort_order: 30,
     },
   ],
@@ -70,8 +70,8 @@ const fallbackCatalog: CatalogResponse = {
     {
       id: 'ops-lead',
       name: '运营负责人',
-      category_id: 'ops-growth',
-      category: '运营增长',
+      category_id: 'business-ops',
+      category: '经营管理',
       department: '运营部',
       description: '渠道、预算、节奏',
       prompt:
@@ -85,8 +85,8 @@ const fallbackCatalog: CatalogResponse = {
     {
       id: 'content-writer',
       name: '内容主笔',
-      category_id: 'content-production',
-      category: '内容创作',
+      category_id: 'content-growth',
+      category: '内容增长',
       department: '内容部',
       description: '文案、品牌叙事',
       prompt:
@@ -199,7 +199,7 @@ function App() {
         </header>
 
         <section className="metrics" aria-label="人才市场指标">
-          <Metric icon={Layers3} label="岗位分类" value={categories.length} />
+          <Metric icon={Layers3} label="官方类目" value={categories.length} />
           <Metric
             icon={Boxes}
             label="员工模板"
@@ -223,7 +223,7 @@ function App() {
           <aside className="category-panel">
             <div className="panel-title">
               <strong>官方类目</strong>
-              <span>由后台统一创建</span>
+              <span>由官方后台创建、审核和排序</span>
             </div>
             <button
               className={activeCategoryId === 'all' ? 'active' : ''}
@@ -262,14 +262,14 @@ function App() {
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </label>
-              <button type="button">新建模板</button>
+              <button type="button">新建官方模板</button>
             </div>
 
             <div className="template-table">
               <div className="table-head">
                 <span>模板</span>
-                <span>分类</span>
-                <span>默认部门</span>
+                <span>官方类目</span>
+                <span>建议部门</span>
                 <span>状态</span>
                 <span>版本</span>
               </div>
@@ -321,11 +321,11 @@ function App() {
                     <dd>{selectedTemplate.id}</dd>
                   </div>
                   <div>
-                    <dt>岗位分类</dt>
+                    <dt>官方类目</dt>
                     <dd>{selectedTemplate.category}</dd>
                   </div>
                   <div>
-                    <dt>默认部门</dt>
+                    <dt>建议入职部门</dt>
                     <dd>{selectedTemplate.department}</dd>
                   </div>
                   <div>

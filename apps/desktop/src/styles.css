@@ -1576,6 +1576,7 @@ textarea::placeholder {
   overflow: hidden;
   flex: 1;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
   padding: 28px 36px 0;
 }
@@ -1639,15 +1640,14 @@ textarea::placeholder {
   display: grid;
   overflow: hidden;
   flex: 1;
-  align-items: start;
+  align-items: stretch;
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 0;
   gap: 16px;
 }
 
 .market-filter {
-  position: sticky;
-  top: 0;
+  align-self: start;
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1721,6 +1721,7 @@ textarea::placeholder {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  height: 100%;
 }
 
 .market-toolbar {
@@ -1762,7 +1763,9 @@ textarea::placeholder {
 .market-list {
   display: flex;
   overflow-y: auto;
+  overscroll-behavior: contain;
   flex-direction: column;
+  flex: 1;
   min-height: 0;
   padding: 0 4px 28px 0;
   gap: 10px;
@@ -1770,7 +1773,7 @@ textarea::placeholder {
 
 .market-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   padding: 16px 18px;
   border: 1px solid var(--border);
@@ -1903,10 +1906,10 @@ textarea::placeholder {
 .talent-detail-head {
   display: flex;
   align-items: center;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
-  background: var(--surface-muted);
+  background: linear-gradient(180deg, var(--surface-muted), var(--surface));
   gap: 12px;
 }
 
@@ -1933,7 +1936,7 @@ textarea::placeholder {
 
 .talent-detail-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -1959,6 +1962,16 @@ textarea::placeholder {
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.talent-profile-note {
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .market-admin-note {

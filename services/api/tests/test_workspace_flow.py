@@ -63,9 +63,9 @@ def test_register_bootstrap_creates_real_workspace_foundation(tmp_path, monkeypa
     assert welcome_messages[0]["sender_type"] == "agent"
     assert "我是小秘" in welcome_messages[0]["content"]
     assert data["agent_template_categories"]
-    assert data["agent_template_categories"][0]["id"] == "ops-growth"
+    assert data["agent_template_categories"][0]["id"] == "business-ops"
     assert data["agent_templates"]
-    assert data["agent_templates"][0]["category_id"] == "ops-growth"
+    assert data["agent_templates"][0]["category_id"] == "business-ops"
 
     completed = client.post(
         "/api/me/onboarding/complete",
@@ -87,7 +87,7 @@ def test_admin_talent_market_catalog_exposes_official_templates(tmp_path, monkey
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["categories"][0]["id"] == "ops-growth"
+    assert payload["categories"][0]["id"] == "business-ops"
     assert payload["templates"][0]["publisher"] == "AgentPulse 官方"
     assert payload["templates"][0]["status"] == "published"
 

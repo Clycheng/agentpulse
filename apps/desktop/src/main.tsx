@@ -2496,7 +2496,7 @@ function TalentMarketView({
     {
       id: '全部',
       name: '全部',
-      description: '查看官方人才库里的全部可招募员工',
+      description: '查看官方人才库里的全部可招募员工模板',
     },
     ...categories,
   ];
@@ -2532,7 +2532,7 @@ function TalentMarketView({
           <div>
             <h1>人才市场中心</h1>
             <p>
-              官方 AI 员工模板库，分类、上架和版本由 AgentPulse 后台统一维护
+              从官方岗位模板招募 AI 员工，类目、上架和版本由 AgentPulse 官方后台统一维护
             </p>
           </div>
         </header>
@@ -2570,8 +2570,8 @@ function TalentMarketView({
 
         <section className="market-layout">
           <aside className="market-filter" aria-label="岗位筛选">
-            <strong>岗位分类</strong>
-            <p>这里不是你的部门结构，而是官方后台配置的人才类目。</p>
+            <strong>官方岗位类目</strong>
+            <p>这里不是你的公司部门，而是官方后台配置、审核和发布的人才市场类目。</p>
             <div>
               {categoryOptions.map((category) => {
                 const count =
@@ -2594,7 +2594,9 @@ function TalentMarketView({
                 );
               })}
             </div>
-            <footer>分类和岗位模板后续只在官方后台新增、审核、发布。</footer>
+            <footer>
+              类目和模板只由官方后台新增、审核、发布；招募时再选择加入你的哪个部门。
+            </footer>
           </aside>
 
           <div className="market-main">
@@ -2603,7 +2605,7 @@ function TalentMarketView({
                 {materialIcon('search')}
                 <input
                   value={keyword}
-                  placeholder="搜索岗位、能力、工具或分类"
+                  placeholder="搜索岗位、能力、工具或官方类目"
                   onChange={(event) => setKeyword(event.target.value)}
                 />
               </label>
@@ -2640,7 +2642,7 @@ function TalentMarketView({
                         <span>官方模板</span>
                       </div>
                       <p>
-                        {template.category} · 默认入职 {template.dept} ·{' '}
+                        {template.category} · 建议入职 {template.dept} ·{' '}
                         {template.desc}
                       </p>
                       <em>{template.prompt}</em>
@@ -2708,8 +2710,8 @@ function TalentDetailModal({
   return (
     <Modal
       title={template.name}
-      description={`${template.category} · 默认入职 ${template.dept}`}
-      width={680}
+      description={`${template.category} · 建议入职 ${template.dept}`}
+      width={760}
       onClose={onClose}
     >
       <div className="talent-detail-head">
@@ -2723,7 +2725,7 @@ function TalentDetailModal({
           <strong>{template.name}</strong>
           <p>{template.desc}</p>
           <span>
-            {template.publisher} · {template.version} · 可招募
+            {template.publisher} · {template.version} · 官方已上架
           </span>
         </div>
       </div>
@@ -2731,12 +2733,20 @@ function TalentDetailModal({
       <FieldLabel>基础信息</FieldLabel>
       <div className="talent-detail-grid">
         <div>
-          <span>岗位分类</span>
+          <span>官方类目</span>
           <strong>{template.category}</strong>
         </div>
         <div>
-          <span>默认部门</span>
+          <span>建议入职部门</span>
           <strong>{template.dept}</strong>
+        </div>
+        <div>
+          <span>模板 ID</span>
+          <strong>{template.id}</strong>
+        </div>
+        <div>
+          <span>类目 ID</span>
+          <strong>{template.categoryId}</strong>
         </div>
         <div>
           <span>模板来源</span>
@@ -2750,6 +2760,9 @@ function TalentDetailModal({
         </div>
       </div>
 
+      <FieldLabel>岗位描述</FieldLabel>
+      <div className="talent-profile-note">{template.desc}</div>
+
       <FieldLabel>工作职责 Prompt</FieldLabel>
       <div className="prompt-box">{template.prompt}</div>
 
@@ -2761,8 +2774,8 @@ function TalentDetailModal({
 
       <FieldLabel>平台说明</FieldLabel>
       <div className="market-admin-note">
-        分类、模板内容、默认 Prompt、Skills 和 MCP
-        权限后续由官方后台维护；用户侧只负责查看能力是否匹配，并招募到自己的组织。
+        官方后台负责类目、模板内容、默认 Prompt、Skills、MCP
+        权限和发布版本；用户侧只负责查看这个人才是否匹配需求，并在招募时选择加入自己的部门。
       </div>
 
       <div className="modal-actions">
