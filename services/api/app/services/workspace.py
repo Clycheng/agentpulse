@@ -17,6 +17,44 @@ TASK_INTENT_PATTERNS = [
     r"(制定|生成|整理|写|做|分析|准备|规划|拆解)(.+)",
 ]
 
+RECRUIT_INTENT_PATTERNS = [
+    r"(?:帮我|给我|请你|麻烦)?(?:招|招聘|创建|新建|配置|生成)(?:一个|一名|个)?(?P<role>[^，。！？\n]{2,30}?)(?:员工|智能体|agent|Agent)?$",
+    r"(?:我想|我要|需要)(?:一个|一名|个)?(?P<role>[^，。！？\n]{2,30}?)(?:员工|智能体|agent|Agent)$",
+]
+
+ROLE_PRESETS = [
+    {
+        "keywords": ["市场", "竞品", "行业"],
+        "department": "市场部",
+        "skills": ["竞品分析", "数据报表"],
+        "prompt": "你是一名市场分析师。负责竞品监控、行业信息整理和市场机会分析，输出可执行的洞察和建议。",
+    },
+    {
+        "keywords": ["运营", "增长", "投放"],
+        "department": "运营部",
+        "skills": ["数据报表", "投放策略"],
+        "prompt": "你是一名运营增长专家。负责目标拆解、渠道策略、投放节奏和经营复盘，输出可直接执行的增长方案。",
+    },
+    {
+        "keywords": ["内容", "文案", "公众号", "短视频"],
+        "department": "内容部",
+        "skills": ["公众号文案", "SEO 优化"],
+        "prompt": "你是一名内容策划。负责选题、文案、脚本和内容分发计划，输出清晰的内容方案和可发布草稿。",
+    },
+    {
+        "keywords": ["销售", "客户", "客服", "线索"],
+        "department": "增长与客户",
+        "skills": ["客服话术", "数据报表"],
+        "prompt": "你是一名销售客户专员。负责线索跟进、客户问题整理、报价支持和成交卡点复盘，关键承诺必须请老板确认。",
+    },
+    {
+        "keywords": ["财务", "行政", "报表", "记账"],
+        "department": "财务行政",
+        "skills": ["数据报表"],
+        "prompt": "你是一名财务行政助理。负责记账、对账、报表整理和行政事项提醒，异常支出和风险事项要及时上报。",
+    },
+]
+
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -786,6 +824,69 @@ def extract_task_intent(content: str) -> dict | None:
         if re.search(pattern, text):
             return task_intent_payload(text, content)
     return None
+
+
+def extract_recruit_intent(content: str) -> dict | None:
+    text = content.strip()
+    action_words = ["招", "招聘", "创建", "新建", "配置", "生成", "需要", "想要"]
+    role_words = [
+        "员工",
+        "智能体",
+        "agent",
+        "Agent",
+        "专家",
+        "分析师",
+        "助理",
+        "顾问",
+        "策划",
+    ]
+    if not any(word in text for word in action_words):
+        return None
+    if not any(word in text for word in role_words):
+        return None
+
+    role = ""
+    for pattern in RECRUIT_INTENT_PATTERNS:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            role = match.group("role").strip(" ：:，,。")
+            break
+    if not role:
+        return None
+
+    role = re.sub(r"^(帮我|给我|请你|麻烦|招|招聘|创建|新建|配置|生成|需要|我想|我要)", "", role)
+    role = role.strip(" ：:，,。")
+    role = re.sub(r"(员工|智能体|agent|Agent)$", "", role).strip()
+    if len(role) < 2:
+        return None
+    if len(role) > 24:
+        role = role[:24]
+
+    preset = next(
+        (
+            item
+            for item in ROLE_PRESETS
+            if any(keyword in role for keyword in item["keywords"])
+        ),
+        None,
+    )
+    department = preset["department"] if preset else "新员工部"
+    skills = preset["skills"] if preset else []
+    prompt = (
+        preset["prompt"]
+        if preset
+        else f"你是一名{role}。负责围绕岗位目标拆解任务、输出可执行方案，并在需要老板确认时明确列出决策点。"
+    )
+    description = f"通过小秘对话创建的{role}"
+    return {
+        "name": role,
+        "role": role,
+        "description": description,
+        "department_name": department,
+        "prompt": prompt,
+        "skills": skills,
+        "mcps": [],
+    }
 
 
 def task_intent_payload(title: str, original_content: str) -> dict | None:

@@ -1032,6 +1032,7 @@ function App() {
         agent_message: ApiBootstrap['messages_by_conversation'][string][number];
         agent_messages?: ApiBootstrap['messages_by_conversation'][string][number][];
         created_task: ApiBootstrap['tasks'][number] | null;
+        created_agent: ApiBootstrap['agents'][number] | null;
       }>(`/conversations/${targetChat.id}/messages`, {
         method: 'POST',
         token,
@@ -1055,6 +1056,15 @@ function App() {
             text: `已自动创建任务：${response.created_task.title}`,
           }
         : null;
+      const systemAgentMessage: Message | null = response.created_agent
+        ? {
+            id: tempMessageId(),
+            from: 'system',
+            type: 'system',
+            time: '刚刚',
+            text: `已创建员工：${response.created_agent.name}`,
+          }
+        : null;
       setMessagesByChat((current) => ({
         ...current,
         [targetChat.id]: [
@@ -1063,6 +1073,7 @@ function App() {
           ),
           userMessage,
           ...(systemTaskMessage ? [systemTaskMessage] : []),
+          ...(systemAgentMessage ? [systemAgentMessage] : []),
           ...agentMessages,
         ],
       }));
@@ -1071,9 +1082,13 @@ function App() {
           chat.id === targetChat.id ? { ...chat, time: '刚刚' } : chat,
         ),
       );
-      if (response.created_task) {
+      if (response.created_task || response.created_agent) {
         await loadBootstrap(token);
-        showToast('已从聊天自动创建任务');
+        showToast(
+          response.created_agent
+            ? '已从聊天创建员工'
+            : '已从聊天自动创建任务',
+        );
       }
     } catch (error) {
       const errorMessage =

@@ -154,6 +154,54 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
     assert any(event["kind"] == "task_created_from_chat" for event in events)
 
 
+def test_secretary_chat_can_create_agent_from_recruit_intent(tmp_path, monkeypatch):
+    async def fake_complete(self, payload):
+        assert payload.agent.name == "小秘"
+        return LlmChatResponse(
+            reply="我已经先帮你把市场分析师建好，后续可以继续补充工具和资料库权限。",
+            provider="deepseek",
+            model="deepseek-v4-flash",
+            usage={"total_tokens": 66},
+        )
+
+    monkeypatch.setattr(
+        workspace_routes.DeepSeekChatClient,
+        "complete",
+        fake_complete,
+    )
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary_chat = bootstrap["conversations"][0]
+
+    send = client.post(
+        f"/api/conversations/{secretary_chat['id']}/messages",
+        headers=auth_header(token),
+        json={"content": "帮我招一个市场分析师"},
+    )
+
+    assert send.status_code == 200
+    payload = send.json()
+    assert payload["created_task"] is None
+    assert payload["created_agent"]["name"] == "市场分析师"
+    assert payload["created_agent"]["source"] == "chat_factory"
+
+    reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    agents = {agent["name"]: agent for agent in reloaded["agents"]}
+    assert "市场分析师" in agents
+    departments = {department["name"] for department in reloaded["departments"]}
+    assert "市场部" in departments
+    dm_chats = [
+        chat
+        for chat in reloaded["conversations"]
+        if chat["kind"] == "dm" and chat["agent_id"] == agents["市场分析师"]["id"]
+    ]
+    assert dm_chats
+    messages = reloaded["messages_by_conversation"][secretary_chat["id"]]
+    assert any("已创建员工：市场分析师" in message["content"] for message in messages)
+
+
 def test_agent_creation_recruitment_and_group_conversation(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
     auth = register_user(client)

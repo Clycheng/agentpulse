@@ -33,6 +33,7 @@ from app.services.workspace import (
     create_dm_conversation,
     create_task,
     ensure_department,
+    extract_recruit_intent,
     extract_task_intent,
     get_bootstrap,
     get_workspace_for_user,
@@ -359,7 +360,39 @@ async def send_message(
         content=payload.content,
     )
     created_task = None
-    task_intent = extract_task_intent(payload.content)
+    created_agent = None
+    recruit_intent = extract_recruit_intent(payload.content)
+    if recruit_intent is not None:
+        department = ensure_department(
+            conn, workspace["id"], recruit_intent["department_name"]
+        )
+        created_agent_id = create_agent(
+            conn,
+            workspace_id=workspace["id"],
+            department_id=department["id"],
+            name=recruit_intent["name"],
+            role=recruit_intent["role"],
+            description=recruit_intent["description"],
+            prompt=recruit_intent["prompt"],
+            skills=recruit_intent["skills"],
+            mcps=recruit_intent["mcps"],
+            source="chat_factory",
+        )
+        create_dm_conversation(conn, workspace["id"], created_agent_id)
+        created_agent = conn.execute(
+            "SELECT * FROM agents WHERE id = ?", (created_agent_id,)
+        ).fetchone()
+        add_message(
+            conn,
+            conversation_id=conversation_id,
+            sender_type="system",
+            sender_id="",
+            content=(
+                f"已创建员工：{created_agent['name']}，加入"
+                f"{recruit_intent['department_name']}。你可以在员工列表或私聊里继续配置他。"
+            ),
+        )
+    task_intent = None if recruit_intent is not None else extract_task_intent(payload.content)
     if task_intent is not None:
         created_task = create_task(
             conn,
@@ -408,6 +441,7 @@ async def send_message(
         "agent_message": serialized_agent_messages[0],
         "agent_messages": serialized_agent_messages,
         "created_task": serialize_task(created_task) if created_task else None,
+        "created_agent": serialize_agent(created_agent) if created_agent else None,
     }
 
 
