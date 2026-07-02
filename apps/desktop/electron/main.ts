@@ -7,12 +7,12 @@ const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
 
 async function createWindow() {
   const mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 760,
-    minWidth: 920,
+    width: 1280,
+    height: 820,
+    minWidth: 1040,
     minHeight: 640,
     title: 'AgentPulse',
-    backgroundColor: '#101614',
+    backgroundColor: '#f3f4f6',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
