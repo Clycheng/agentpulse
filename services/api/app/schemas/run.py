@@ -36,12 +36,22 @@ class LlmAgentExperience(BaseModel):
     lessons: str = Field(default="", max_length=1000)
 
 
+class LlmKnowledgeSource(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=160)
+    category: str = Field(default="", max_length=80)
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class LlmChatRequest(BaseModel):
     company_name: str = Field(default="一人公司", max_length=120)
     conversation_title: str = Field(default="", max_length=160)
     agent: LlmChatAgent
     messages: list[LlmChatMessage] = Field(min_length=1, max_length=24)
     related_tasks: list[LlmTaskContext] = Field(default_factory=list, max_length=12)
+    knowledge_sources: list[LlmKnowledgeSource] = Field(
+        default_factory=list, max_length=5
+    )
     agent_experiences: list[LlmAgentExperience] = Field(
         default_factory=list, max_length=8
     )

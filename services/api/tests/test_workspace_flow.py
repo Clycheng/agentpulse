@@ -162,6 +162,52 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
     assert any(event["kind"] == "task_created_from_chat" for event in events)
 
 
+def test_knowledge_source_is_injected_into_agent_context(tmp_path, monkeypatch):
+    async def fake_complete(self, payload):
+        assert payload.knowledge_sources
+        assert payload.knowledge_sources[0].title == "品牌定位"
+        assert "一人公司 AI 工作台" in payload.knowledge_sources[0].content
+        return LlmChatResponse(
+            reply="我会按品牌定位来写：突出一人公司 AI 工作台。",
+            provider="deepseek",
+            model="deepseek-v4-flash",
+            usage={"total_tokens": 72},
+        )
+
+    monkeypatch.setattr(
+        workspace_routes.DeepSeekChatClient,
+        "complete",
+        fake_complete,
+    )
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    created_source = client.post(
+        "/api/knowledge-sources",
+        headers=auth_header(token),
+        json={
+            "title": "品牌定位",
+            "category": "品牌资料",
+            "content": "AgentPulse 是一人公司 AI 工作台，帮助老板招聘 AI 员工、拉群协作和验收成果。",
+        },
+    )
+    assert created_source.status_code == 200
+    assert created_source.json()["category"] == "品牌资料"
+
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    assert bootstrap["knowledge_sources"][0]["title"] == "品牌定位"
+    secretary_chat = bootstrap["conversations"][0]
+
+    sent = client.post(
+        f"/api/conversations/{secretary_chat['id']}/messages",
+        headers=auth_header(token),
+        json={"content": "参考品牌定位，帮我写一句官网首屏文案"},
+    )
+    assert sent.status_code == 200
+    assert "一人公司 AI 工作台" in sent.json()["agent_message"]["content"]
+
+
 def test_secretary_chat_can_create_agent_from_recruit_intent(tmp_path, monkeypatch):
     async def fake_complete(self, payload):
         assert payload.agent.name == "小秘"

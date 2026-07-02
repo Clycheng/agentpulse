@@ -108,6 +108,16 @@ class AgentExperienceOut(BaseModel):
     created_at: str
 
 
+class KnowledgeSourceOut(BaseModel):
+    id: str
+    title: str
+    category: str
+    content: str
+    created_by: str
+    created_at: str
+    updated_at: str
+
+
 class AgentTemplateOut(BaseModel):
     id: str
     name: str
@@ -137,6 +147,7 @@ class BootstrapResponse(BaseModel):
     conversations: list[ConversationOut]
     messages_by_conversation: dict[str, list[MessageOut]]
     tasks: list[TaskOut]
+    knowledge_sources: list[KnowledgeSourceOut]
     task_events_by_task: dict[str, list[TaskEventOut]]
     task_outputs_by_task: dict[str, list[TaskOutputOut]]
     approvals_by_task: dict[str, list[ApprovalOut]]
@@ -168,6 +179,12 @@ class CreateAgentRequest(BaseModel):
 class RecruitAgentRequest(BaseModel):
     template_id: str
     department_name: str | None = Field(default=None, max_length=120)
+
+
+class CreateKnowledgeSourceRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    category: str = Field(default="通用资料", max_length=80)
+    content: str = Field(min_length=1, max_length=20000)
 
 
 class CreateGroupRequest(BaseModel):

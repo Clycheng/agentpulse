@@ -95,6 +95,7 @@ def build_system_prompt(request: LlmChatRequest) -> str:
     skills = "、".join(agent.skills) if agent.skills else "暂无绑定技能"
     conversation = request.conversation_title or "当前会话"
     related_tasks = format_related_tasks(request)
+    knowledge_sources = format_knowledge_sources(request)
     agent_experiences = format_agent_experiences(request)
 
     return f"""你是 AgentPulse 里的 AI 员工，需要像真实团队成员一样帮助老板推进一人公司的工作。
@@ -102,6 +103,7 @@ def build_system_prompt(request: LlmChatRequest) -> str:
 公司：{request.company_name}
 当前会话：{conversation}
 {related_tasks}
+{knowledge_sources}
 {agent_experiences}
 
 你的员工档案：
@@ -120,7 +122,8 @@ def build_system_prompt(request: LlmChatRequest) -> str:
 4. 如果需要老板确认，明确列出需要拍板的问题和可选方案。
 5. 如果需要其他员工协作，可以在回复里写出建议 @谁，但不要假装他们已经执行。
 6. 如果有个人经验记忆，优先复用成功经验，避开复盘教训里已经暴露的问题。
-7. 输出尽量结构化，优先给老板可直接推进的下一步。"""
+7. 如果有公司资料库上下文，优先结合资料里的品牌、业务、客户、流程等事实，不要编造资料中没有的公司事实。
+8. 输出尽量结构化，优先给老板可直接推进的下一步。"""
 
 
 def format_related_tasks(request: LlmChatRequest) -> str:
@@ -147,6 +150,19 @@ def format_agent_experiences(request: LlmChatRequest) -> str:
         label = "成功经验" if experience.outcome == "success" else "复盘教训"
         lessons = f"\n   经验/教训：{experience.lessons}" if experience.lessons else ""
         lines.append(f"{index}. {label}：{experience.summary}{lessons}")
+    return "\n".join(lines)
+
+
+def format_knowledge_sources(request: LlmChatRequest) -> str:
+    if not request.knowledge_sources:
+        return "\n公司资料库上下文：暂无"
+
+    lines = ["\n公司资料库上下文："]
+    for index, source in enumerate(request.knowledge_sources, start=1):
+        content = source.content[:900]
+        lines.append(
+            f"{index}. [{source.category or '通用资料'}] {source.title}\n   {content}"
+        )
     return "\n".join(lines)
 
 

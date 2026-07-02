@@ -336,6 +336,18 @@ def serialize_task(row: Row) -> dict:
     }
 
 
+def serialize_knowledge_source(row: Row) -> dict:
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "category": row["category"],
+        "content": row["content"],
+        "created_by": row["created_by"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def serialize_task_event(row: Row) -> dict:
     return {
         "id": row["id"],
@@ -496,6 +508,71 @@ def add_agent_experience(
     return conn.execute(
         "SELECT * FROM agent_experiences WHERE id = ?", (experience_id,)
     ).fetchone()
+
+
+def create_knowledge_source(
+    conn: Database,
+    *,
+    workspace_id: str,
+    title: str,
+    category: str,
+    content: str,
+    created_by: str,
+) -> Row:
+    source_id = new_id("ks")
+    created_at = now_iso()
+    normalized_category = category.strip() or "通用资料"
+    conn.execute(
+        """
+        INSERT INTO knowledge_sources (
+          id, workspace_id, title, category, content, created_by, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            source_id,
+            workspace_id,
+            title.strip(),
+            normalized_category,
+            content.strip(),
+            created_by,
+            created_at,
+            created_at,
+        ),
+    )
+    return conn.execute(
+        "SELECT * FROM knowledge_sources WHERE id = ?", (source_id,)
+    ).fetchone()
+
+
+def load_knowledge_context(
+    conn: Database,
+    *,
+    workspace_id: str,
+    query: str,
+    limit: int = 5,
+) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT * FROM knowledge_sources
+        WHERE workspace_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 24
+        """,
+        (workspace_id,),
+    ).fetchall()
+    if not rows:
+        return []
+
+    keywords = set(re.findall(r"[\w\u4e00-\u9fff]{2,}", query.lower()))
+
+    def score(row: Row) -> tuple[int, str]:
+        haystack = f"{row['title']} {row['category']} {row['content']}".lower()
+        matched = sum(1 for keyword in keywords if keyword in haystack)
+        return (matched, row["updated_at"])
+
+    ranked = sorted(rows, key=score, reverse=True)
+    return [serialize_knowledge_source(row) for row in ranked[:limit]]
 
 
 def add_approval(
@@ -976,6 +1053,14 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "SELECT * FROM tasks WHERE workspace_id = ? ORDER BY updated_at DESC",
         (workspace_id,),
     ).fetchall()
+    knowledge_sources = conn.execute(
+        """
+        SELECT * FROM knowledge_sources
+        WHERE workspace_id = ?
+        ORDER BY updated_at DESC
+        """,
+        (workspace_id,),
+    ).fetchall()
     agent_ids = [agent["id"] for agent in agents]
     agent_experiences_by_agent = {agent_id: [] for agent_id in agent_ids}
     if agent_ids:
@@ -1070,6 +1155,9 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "conversations": serialized_conversations,
         "messages_by_conversation": messages_by_conversation,
         "tasks": [serialize_task(task) for task in tasks],
+        "knowledge_sources": [
+            serialize_knowledge_source(source) for source in knowledge_sources
+        ],
         "task_events_by_task": task_events_by_task,
         "task_outputs_by_task": task_outputs_by_task,
         "approvals_by_task": approvals_by_task,

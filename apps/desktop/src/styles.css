@@ -2263,11 +2263,58 @@ textarea::placeholder {
   gap: 14px;
 }
 
+.library-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 16px;
+  gap: 12px;
+}
+
+.library-summary > div {
+  display: flex;
+  align-items: center;
+  min-height: 74px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  gap: 12px;
+}
+
+.library-summary .material-symbol {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 21px;
+}
+
+.library-summary span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library-summary strong {
+  color: var(--text-strong);
+  font-size: 19px;
+  line-height: 1;
+}
+
+.library-summary em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
 .doc-card,
 .upload-card {
   display: flex;
   align-items: flex-start;
-  min-height: 96px;
+  min-height: 132px;
   padding: 17px 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -2302,6 +2349,22 @@ textarea::placeholder {
   font-weight: 700;
 }
 
+.doc-card section {
+  min-width: 0;
+}
+
+.doc-card section > span {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 6px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .doc-card p,
 .library-row p {
   margin: 3px 0 0;
@@ -2323,14 +2386,41 @@ textarea::placeholder {
 .upload-card {
   align-items: center;
   justify-content: center;
+  flex-direction: column;
   border-style: dashed;
   border-width: 1.5px;
   color: var(--subtle);
   font-size: 13px;
+  gap: 7px;
 }
 
 .upload-card:hover {
   color: var(--primary);
+}
+
+.upload-card .material-symbol {
+  font-size: 24px;
+}
+
+.knowledge-empty {
+  margin-top: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.knowledge-empty strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.knowledge-empty p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.7;
 }
 
 .simple-list {

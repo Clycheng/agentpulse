@@ -139,6 +139,16 @@ type AgentExperience = {
   time: string;
 };
 
+type KnowledgeSource = {
+  id: string;
+  title: string;
+  category: string;
+  content: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type HireTemplate = {
   id: string;
   name: string;
@@ -216,6 +226,15 @@ type ApiBootstrap = {
     conversation_id: string | null;
     due_date?: string | null;
     parent_task_id?: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  knowledge_sources: Array<{
+    id: string;
+    title: string;
+    category: string;
+    content: string;
+    created_by: string;
     created_at: string;
     updated_at: string;
   }>;
@@ -551,8 +570,17 @@ function fieldLabel(field: string) {
       display_name: '你的称呼',
       workspace_name: '公司/工作室名称',
       content: '消息',
+      title: '标题',
+      category: '分类',
     }[field] ?? field
   );
+}
+
+function excerpt(value: string, maxLength = 120) {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength - 1)}...`
+    : normalized;
 }
 
 function mapBootstrap(data: ApiBootstrap) {
@@ -712,6 +740,17 @@ function mapBootstrap(data: ApiBootstrap) {
       sortOrder: category.sort_order,
     }))
     .sort((left, right) => left.sortOrder - right.sortOrder);
+  const knowledgeSources: KnowledgeSource[] = data.knowledge_sources.map(
+    (source) => ({
+      id: source.id,
+      title: source.title,
+      category: source.category,
+      content: source.content,
+      createdBy: source.created_by,
+      createdAt: formatTime(source.created_at),
+      updatedAt: formatTime(source.updated_at),
+    }),
+  );
 
   return {
     workspace: data.workspace,
@@ -720,6 +759,7 @@ function mapBootstrap(data: ApiBootstrap) {
     chats,
     messagesByChat,
     tasks,
+    knowledgeSources,
     templates,
     talentCategories,
   };
@@ -749,6 +789,9 @@ function App() {
     Record<string, Message[]>
   >({});
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSource[]>(
+    [],
+  );
   const [hireTemplates, setHireTemplates] = useState<HireTemplate[]>([]);
   const [talentCategories, setTalentCategories] = useState<TalentCategory[]>(
     [],
@@ -764,6 +807,7 @@ function App() {
   const [groupOpen, setGroupOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [taskDetailId, setTaskDetailId] = useState<string | null>(null);
   const [claimTaskId, setClaimTaskId] = useState<string | null>(null);
   const [claimAgentId, setClaimAgentId] = useState('');
@@ -790,6 +834,9 @@ function App() {
   const [taskPriority, setTaskPriority] = useState<Priority>('P2');
   const [taskOwnerId, setTaskOwnerId] = useState('');
   const [taskConversationId, setTaskConversationId] = useState('');
+  const [knowledgeTitle, setKnowledgeTitle] = useState('');
+  const [knowledgeCategory, setKnowledgeCategory] = useState('品牌资料');
+  const [knowledgeContent, setKnowledgeContent] = useState('');
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -812,6 +859,7 @@ function App() {
     setChats(mapped.chats);
     setMessagesByChat(mapped.messagesByChat);
     setTasks(mapped.tasks);
+    setKnowledgeSources(mapped.knowledgeSources);
     setHireTemplates(mapped.templates);
     setTalentCategories(mapped.talentCategories);
     setOnboardingOpen(!mapped.workspace.onboarding_completed);
@@ -895,6 +943,7 @@ function App() {
     setChats([]);
     setMessagesByChat({});
     setTasks([]);
+    setKnowledgeSources([]);
     setHireTemplates([]);
     setTalentCategories([]);
   };
@@ -1309,6 +1358,36 @@ function App() {
     }
   };
 
+  const submitKnowledgeSource = async () => {
+    if (!token) return;
+    const title = knowledgeTitle.trim();
+    const content = knowledgeContent.trim();
+    if (!title || !content) {
+      showToast('请填写资料标题和正文');
+      return;
+    }
+    try {
+      await apiRequest('/knowledge-sources', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          title,
+          category: knowledgeCategory.trim() || '通用资料',
+          content,
+        }),
+      });
+      await loadBootstrap(token);
+      setKnowledgeOpen(false);
+      setKnowledgeTitle('');
+      setKnowledgeCategory('品牌资料');
+      setKnowledgeContent('');
+      setLibraryTab('docs');
+      showToast('资料已写入公司资料库');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '保存资料失败');
+    }
+  };
+
   const resolveApproval = async (
     approval: Approval,
     status: 'approved' | 'rejected',
@@ -1543,8 +1622,10 @@ function App() {
             tabs={libraryTabs}
             activeTab={libraryTab}
             onPickTab={setLibraryTab}
+            knowledgeSources={knowledgeSources}
             skills={allSkills}
             mcps={allMcps}
+            onOpenKnowledge={() => setKnowledgeOpen(true)}
           />
         )}
       </section>
@@ -1686,6 +1767,19 @@ function App() {
             setClaimAgentId('');
           }}
           onSubmit={claimTask}
+        />
+      )}
+
+      {knowledgeOpen && (
+        <KnowledgeSourceModal
+          title={knowledgeTitle}
+          category={knowledgeCategory}
+          content={knowledgeContent}
+          onTitleChange={setKnowledgeTitle}
+          onCategoryChange={setKnowledgeCategory}
+          onContentChange={setKnowledgeContent}
+          onClose={() => setKnowledgeOpen(false)}
+          onSubmit={submitKnowledgeSource}
         />
       )}
 
@@ -3076,23 +3170,35 @@ function LibraryView({
   tabs,
   activeTab,
   onPickTab,
+  knowledgeSources,
   skills,
   mcps,
+  onOpenKnowledge,
 }: {
   tabs: Array<{ key: LibraryTab; label: string }>;
   activeTab: LibraryTab;
   onPickTab: (tab: LibraryTab) => void;
+  knowledgeSources: KnowledgeSource[];
   skills: string[];
   mcps: string[];
+  onOpenKnowledge: () => void;
 }) {
+  const categoryCount = new Set(knowledgeSources.map((source) => source.category))
+    .size;
+
   return (
     <div className="screen-scroll">
       <div className="screen-inner">
         <header className="page-header compact">
           <div>
             <h1>资料库与能力</h1>
-            <p>第一版先展示后端模板里的 Skills / MCP，资料上传后续接入</p>
+            <p>公司资料会进入员工回复上下文，让 AI 员工先理解你的业务再干活</p>
           </div>
+          {activeTab === 'docs' && (
+            <button className="button primary" type="button" onClick={onOpenKnowledge}>
+              {materialIcon('note_add')}新增资料
+            </button>
+          )}
         </header>
 
         <div className="tabs">
@@ -3109,15 +3215,63 @@ function LibraryView({
         </div>
 
         {activeTab === 'docs' && (
-          <article className="card simple-list">
-            <div className="library-row">
-              <div className="library-icon">{materialIcon('description')}</div>
+          <>
+            <section className="library-summary" aria-label="资料库概览">
               <div>
-                <strong>暂无资料</strong>
-                <p>资料上传后会从后端读取，这里先保持空状态。</p>
+                {materialIcon('folder_copy')}
+                <span>
+                  <strong>{knowledgeSources.length}</strong>
+                  <em>资料条目</em>
+                </span>
               </div>
+              <div>
+                {materialIcon('category')}
+                <span>
+                  <strong>{categoryCount}</strong>
+                  <em>资料分区</em>
+                </span>
+              </div>
+              <div>
+                {materialIcon('psychology')}
+                <span>
+                  <strong>LLM</strong>
+                  <em>自动注入上下文</em>
+                </span>
+              </div>
+            </section>
+
+            <div className="docs-grid">
+              {knowledgeSources.map((source) => (
+                <article className="doc-card" key={source.id}>
+                  <div>{materialIcon('description')}</div>
+                  <section>
+                    <span>{source.category}</span>
+                    <strong>{source.title}</strong>
+                    <p>{excerpt(source.content, 130)}</p>
+                    <em>
+                      {materialIcon('schedule')}
+                      更新于 {source.updatedAt}
+                    </em>
+                  </section>
+                </article>
+              ))}
+              <button
+                className="upload-card"
+                type="button"
+                onClick={onOpenKnowledge}
+              >
+                {materialIcon('note_add')}新增公司资料
+              </button>
             </div>
-          </article>
+            {!knowledgeSources.length && (
+              <div className="knowledge-empty">
+                <strong>先放一条品牌、产品或客户资料</strong>
+                <p>
+                  后续你和员工聊天时，系统会把相关资料放进员工上下文，而不是让员工凭空猜业务。
+                </p>
+              </div>
+            )}
+          </>
         )}
 
         {activeTab === 'skills' && (
@@ -3797,6 +3951,80 @@ function ClaimTaskModal({
         </button>
         <button className="button primary" type="button" onClick={onSubmit}>
           {materialIcon('assignment_ind')}确认认领
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function KnowledgeSourceModal({
+  title,
+  category,
+  content,
+  onTitleChange,
+  onCategoryChange,
+  onContentChange,
+  onClose,
+  onSubmit,
+}: {
+  title: string;
+  category: string;
+  content: string;
+  onTitleChange: (value: string) => void;
+  onCategoryChange: (value: string) => void;
+  onContentChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal
+      title="新增公司资料"
+      description="保存后会进入公司资料库，员工回复时会自动读取相关资料。"
+      width={640}
+      onClose={onClose}
+    >
+      <div className="form-grid even">
+        <label>
+          <FieldLabel>资料标题</FieldLabel>
+          <input
+            value={title}
+            placeholder="例如：品牌定位"
+            onChange={(event) => onTitleChange(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          <FieldLabel>资料分区</FieldLabel>
+          <select
+            value={category}
+            onChange={(event) => onCategoryChange(event.currentTarget.value)}
+          >
+            <option value="品牌资料">品牌资料</option>
+            <option value="产品资料">产品资料</option>
+            <option value="客户资料">客户资料</option>
+            <option value="运营记录">运营记录</option>
+            <option value="通用资料">通用资料</option>
+          </select>
+        </label>
+      </div>
+
+      <FieldLabel>正文内容</FieldLabel>
+      <textarea
+        rows={9}
+        value={content}
+        placeholder="写下公司的定位、产品、目标客户、常用话术、历史复盘或其他业务事实"
+        onChange={(event) => onContentChange(event.currentTarget.value)}
+      />
+
+      <div className="market-admin-note">
+        第一版使用文本资料检索和最近资料注入，后续可以升级为向量索引、资料权限和工具调用记录。
+      </div>
+
+      <div className="modal-actions">
+        <button className="button secondary" type="button" onClick={onClose}>
+          取消
+        </button>
+        <button className="button primary" type="button" onClick={onSubmit}>
+          {materialIcon('save')}保存资料
         </button>
       </div>
     </Modal>

@@ -10,6 +10,7 @@ from app.schemas.run import (
     LlmChatAgent,
     LlmChatMessage,
     LlmChatRequest,
+    LlmKnowledgeSource,
 )
 from app.schemas.workspace import (
     AddConversationMembersRequest,
@@ -17,6 +18,7 @@ from app.schemas.workspace import (
     ClaimTaskRequest,
     CreateAgentRequest,
     CreateGroupRequest,
+    CreateKnowledgeSourceRequest,
     CreateTaskRequest,
     RecruitAgentRequest,
     ResolveApprovalRequest,
@@ -33,17 +35,20 @@ from app.services.workspace import (
     claim_task,
     create_agent,
     create_dm_conversation,
+    create_knowledge_source,
     create_task,
     ensure_department,
     extract_recruit_intent,
     extract_task_intent,
     get_bootstrap,
     get_workspace_for_user,
+    load_knowledge_context,
     new_id,
     now_iso,
     recruit_from_template,
     serialize_agent,
     serialize_approval,
+    serialize_knowledge_source,
     serialize_message,
     serialize_task,
     update_task,
@@ -124,6 +129,26 @@ def recruit_agent(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return serialize_agent(agent)
+
+
+@router.post("/knowledge-sources")
+def create_workspace_knowledge_source(
+    payload: CreateKnowledgeSourceRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    source = create_knowledge_source(
+        conn,
+        workspace_id=workspace["id"],
+        title=payload.title,
+        category=payload.category,
+        content=payload.content,
+        created_by=current_user["id"],
+    )
+    return serialize_knowledge_source(source)
 
 
 @router.post("/conversations/group")
@@ -612,6 +637,23 @@ async def complete_agent_reply(
 ) -> Row:
     history = load_llm_history(conn, conversation_id)
     related_tasks = load_related_task_context(conn, conversation_id)
+    latest_user_content = next(
+        (message.content for message in reversed(history) if message.role == "user"),
+        "",
+    )
+    knowledge_sources = [
+        LlmKnowledgeSource(
+            id=source["id"],
+            title=source["title"],
+            category=source["category"],
+            content=source["content"][:2000],
+        )
+        for source in load_knowledge_context(
+            conn,
+            workspace_id=workspace["id"],
+            query=latest_user_content,
+        )
+    ]
     agent_experiences = load_agent_experience_context(conn, agent["id"])
     completion = await DeepSeekChatClient().complete(
         LlmChatRequest(
@@ -627,6 +669,7 @@ async def complete_agent_reply(
             ),
             messages=history,
             related_tasks=related_tasks,
+            knowledge_sources=knowledge_sources,
             agent_experiences=agent_experiences,
         )
     )

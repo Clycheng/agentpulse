@@ -248,6 +248,17 @@ def init_postgres(conn: Database) -> None:
           updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS knowledge_sources (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          category TEXT NOT NULL DEFAULT '通用资料',
+          content TEXT NOT NULL,
+          created_by TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS task_events (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -440,6 +451,17 @@ def init_sqlite(conn: Database) -> None:
           updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS knowledge_sources (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          category TEXT NOT NULL DEFAULT '通用资料',
+          content TEXT NOT NULL,
+          created_by TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS task_events (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -548,6 +570,7 @@ def reset_database_for_tests() -> None:
                 DROP TABLE IF EXISTS approvals CASCADE;
                 DROP TABLE IF EXISTS task_outputs CASCADE;
                 DROP TABLE IF EXISTS task_events CASCADE;
+                DROP TABLE IF EXISTS knowledge_sources CASCADE;
                 DROP TABLE IF EXISTS tasks CASCADE;
                 DROP TABLE IF EXISTS messages CASCADE;
                 DROP TABLE IF EXISTS conversation_members CASCADE;
@@ -568,6 +591,7 @@ def reset_database_for_tests() -> None:
                 DROP TABLE IF EXISTS approvals;
                 DROP TABLE IF EXISTS task_outputs;
                 DROP TABLE IF EXISTS task_events;
+                DROP TABLE IF EXISTS knowledge_sources;
                 DROP TABLE IF EXISTS tasks;
                 DROP TABLE IF EXISTS messages;
                 DROP TABLE IF EXISTS conversation_members;
