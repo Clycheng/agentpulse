@@ -1,118 +1,135 @@
 # AgentPulse
 
-AgentPulse 是一个面向普通人和一人公司的 AI 公司工作台。它的目标不是再做一个聊天机器人，而是让用户像搭建一支小团队一样，创建 AI 员工、分配任务、连接工具和资料库，让多个智能体协作完成内容、销售、客服、运营、财务和项目管理等日常工作。
+> An AI company workbench for solo founders, creators, and operators.
 
-当前仓库已经初始化为一个 monorepo，包含官网、桌面应用和 Python 后端三个脚手架。后续会在这个基础上继续演进出“多智能体协作 + 本地执行环境 + 实时任务流”的产品形态。
+AgentPulse 是一个面向普通人和一人公司的 **AI 公司工作台**。它不是又一个聊天机器人，而是试图把“一个人经营一家公司”这件事重新组织成：公司、AI 员工、任务、资料库、工具、审批和可追踪的协作流程。
 
-## 产品方向
-
-AgentPulse 希望解决的问题是：一个没有技术背景的用户，也能把自己的业务目标交给 AI 团队，并且看得懂、管得住、改得动。
-
-核心体验会围绕四件事展开：
-
-- **搭公司**：用户先描述自己的业务，例如自媒体工作室、跨境小店、咨询服务、知识付费项目。
-- **雇员工**：系统根据业务自动推荐 AI 角色，例如老板助理、内容策划、销售跟进、客服、财务整理、数据分析。
-- **派任务**：用户用自然语言说目标，系统拆解成任务流，由不同智能体接力完成。
-- **看进度**：每个智能体做了什么、用了什么资料、产出了什么结果、哪些动作需要用户确认，都用可视化方式呈现。
-
-## 设计参考
-
-本项目参考了 Multica 的核心思想，但会面向普通用户做更强的产品抽象。
-
-Multica 的关键模式可以概括为：
-
-- 用户创建 issue/task。
-- 后端把任务放进队列。
-- 本地 daemon 领取任务并创建隔离工作区。
-- agent runtime 调用 Codex、Claude 等 provider 执行任务。
-- 执行过程通过 WebSocket 回传给前端。
-- 前端把任务、消息、文件变更和结果统一展示出来。
-
-AgentPulse 会吸收这个“任务队列 + 本地运行时 + 多智能体协作 + 实时反馈”的架构，但不会把复杂概念直接暴露给普通用户。用户看到的是“公司、员工、任务、客户、内容、项目、文件、审批”，底层再映射到 agent、tool、memory、run、event 等技术对象。
-
-## 当前模块
+用户不需要理解 agent、workflow、tool schema、runtime、DAG 这些技术概念。用户只需要像老板一样描述目标、招聘 AI 员工、拉群讨论、查看进度，并在关键节点拍板。
 
 ```text
-agentpulse/
-  apps/
-    web/              # 官网，Vite + React + TypeScript
-    desktop/          # 桌面应用，Electron + Vite + React + TypeScript
-  services/
-    api/              # 后端 API，FastAPI
+创建公司 -> 招聘 AI 员工 -> 交代目标 -> 自动拆解任务
+-> 多员工协作执行 -> 展示进度和产出 -> 高风险动作等待用户确认
 ```
 
-### `apps/web`
+## Why AgentPulse
 
-官网项目，用于展示产品定位、使用场景、早期访问入口和后续的文档/案例页面。
+大模型让“一个人完成很多工作”变得可能，但现有产品通常卡在两个极端：
 
-技术栈：
+- **聊天机器人太轻**：用户反复和一个窗口对话，过程不可追踪，任务不能沉淀，协作感弱。
+- **自动化平台太重**：workflow、节点、触发器、工具权限、JSON 配置，对普通用户太复杂。
 
-- Vite
-- React
-- TypeScript
-- lucide-react
+AgentPulse 想探索中间那条路：
 
-### `apps/desktop`
+> 让普通人用“经营公司”的心智使用 AI，而不是用“配置系统”的心智使用 AI。
 
-桌面应用项目，未来会成为主工作台。桌面端适合承载本地文件访问、浏览器自动化、本地模型/CLI 调用、任务运行状态展示等能力。
+我们希望解决这些问题：
 
-技术栈：
+- 一个人同时做老板、策划、运营、销售、客服、财务，工作上下文容易碎。
+- AI 能给答案，但很难像团队一样接力执行、汇报进度、保留过程。
+- 普通用户不知道如何设计 prompt、拆任务、配置工具、控制权限。
+- AI 自动化一旦涉及发布、发送、覆盖文件、外部账号，很容易失控。
+- 业务资料、历史产出、品牌语气和任务结果没有形成长期记忆。
 
-- Electron
-- Vite
-- React
-- TypeScript
-- lucide-react
+AgentPulse 的答案是：把 AI 能力包装成一家公司，而不是一堆模型参数。
 
-### `services/api`
+## What It Is
 
-Python 后端服务，当前提供基础健康检查。后续会承载工作区、智能体、任务、消息、工具、记忆和运行记录等核心 API。
+AgentPulse 的第一阶段聚焦 **一人自媒体公司**。这是一个足够具体、足够高频、也足够容易验证的场景。
 
-技术栈：
+第一版用户应该可以：
 
-- FastAPI
-- Pydantic Settings
-- Uvicorn
-- Pytest
+- 创建或进入一个内容工作室。
+- 获得默认 AI 员工，例如老板秘书、内容主笔、运营负责人、销售顾问、客服专员、财务助理。
+- 像在公司群里一样交代目标。
+- 让秘书或负责人拆解任务、拉群、分配员工。
+- 在首页看到“待我拍板”“员工动态”“任务进展”。
+- 在消息里看到执行结果、确认请求和任务创建事件。
+- 在任务中心看到负责人、状态、进度和操作。
+- 在资料库里管理公司资料、Skills 技能和 MCP 工具连接。
+- 在高风险动作前手动确认，例如发布、发送、覆盖文件、连接外部账号。
 
-## 目标架构
+## Product Principles
+
+AgentPulse 的设计原则很简单，也很硬：
+
+- **用户是老板，不是系统管理员**：不把 prompt、schema、workflow DAG 直接丢给普通用户。
+
+- **AI 是员工，不是神谕**：每个 AI 员工有角色、边界、职责、可用工具和当前任务。
+
+- **任务是一等公民**：对话只是入口，真正沉淀的是任务、状态、过程、产出和确认记录。
+
+- **过程必须可见**：用户要知道谁在做、做到哪、用了什么资料、产出了什么。
+
+- **高风险动作必须等待确认**：发布、发送、删除、覆盖、授权、计费、外部写入，都不能绕过用户。
+
+- **先垂直闭环，再平台化**：先把“一人自媒体公司”跑通，再扩展销售、客服、财务、跨境电商等场景。
+
+## Current Status
+
+当前项目已经是一个可运行的 monorepo，并完成了第一版桌面端原型。
+
+| Area           | Status          | Notes                                         |
+| -------------- | --------------- | --------------------------------------------- |
+| Web 官网       | Scaffolded      | Vite + React + TypeScript                     |
+| Desktop 工作台 | Prototype ready | Electron + React，已实现 AI 员工协作工作台 UI |
+| Backend API    | Scaffolded      | FastAPI，当前有 health check                  |
+| Product docs   | In progress     | PRD、workflow、backlog、Dust 调研已沉淀       |
+| Agent runtime  | Planned         | 后续实现本地任务运行、工具调用、事件流        |
+
+桌面端已包含：
+
+- 首页总览
+- 消息会话
+- AI 员工和部门
+- 任务中心
+- 资料库与能力
+- 员工详情抽屉
+- 招聘员工弹窗
+- 拉群讨论弹窗
+- 新手引导
+- 待拍板确认流
+- 模拟员工回复
+
+## Architecture
+
+AgentPulse 会采用“产品界面 + 后端 API + 本地 Runtime”的架构。桌面端不是简单壳子，而是未来本地执行能力的入口。
 
 ```mermaid
 flowchart LR
-  User["普通用户"] --> Desktop["桌面工作台"]
-  User --> Web["官网 / 文档 / 登录入口"]
+  User["User / Boss"] --> Desktop["Desktop Workbench"]
+  User --> Web["Website / Docs"]
 
-  Desktop --> API["FastAPI 后端"]
+  Desktop --> API["FastAPI Backend"]
   Web --> API
 
   API --> DB["PostgreSQL / SQLite"]
-  API --> Queue["任务队列"]
-  API --> Realtime["WebSocket 事件流"]
+  API --> Queue["Task Queue"]
+  API --> Realtime["WebSocket Event Stream"]
 
-  Queue --> Runtime["本地 Agent Runtime"]
-  Runtime --> Agents["多智能体"]
-  Runtime --> Tools["工具系统"]
-  Runtime --> Files["本地文件 / 工作区"]
-  Runtime --> Providers["LLM Provider / CLI"]
+  Queue --> Runtime["Local Agent Runtime"]
+  Runtime --> Agents["AI Employees"]
+  Runtime --> Tools["Tool Broker"]
+  Runtime --> Files["Local Workspace"]
+  Runtime --> Providers["LLM Providers / CLI"]
 
-  Agents --> Memory["公司记忆库"]
-  Tools --> Integrations["浏览器 / 邮件 / 表格 / 文档 / 第三方系统"]
+  Agents --> Memory["Company Memory"]
+  Tools --> Integrations["Browser / Email / Docs / Sheets / MCP"]
 ```
 
-建议的后端领域模块：
+核心对象会围绕这些概念建模：
 
-- `workspaces`：一人公司/业务空间。
-- `agents`：AI 员工角色、能力、提示词、可用工具。
-- `tasks`：任务、子任务、状态机、优先级、负责人。
-- `runs`：一次 agent 执行记录、步骤、日志、产出。
-- `messages`：用户、系统、agent 之间的对话和事件。
-- `tools`：文件、浏览器、搜索、表格、邮件等工具定义和授权。
-- `memory`：长期业务资料、品牌语气、客户信息、项目背景。
-- `templates`：行业模板、智能体模板、任务模板、工作流模板。
+| Domain      | Meaning                                       |
+| ----------- | --------------------------------------------- |
+| `workspace` | 一家公司或一个业务空间                        |
+| `agent`     | AI 员工，包含角色、职责、技能、工具权限       |
+| `task`      | 可追踪工作项，包含负责人、状态、优先级、产出  |
+| `run`       | 一次 agent 执行过程，包含步骤、日志、工具调用 |
+| `message`   | 用户、系统、员工之间的消息和事件              |
+| `tool`      | 文件、搜索、浏览器、邮件、表格、MCP 等能力    |
+| `memory`    | 公司长期资料、品牌语气、客户信息、历史结果    |
+| `approval`  | 用户确认节点，用于控制高风险动作              |
 
-## 任务生命周期
-
-第一版可以采用较简单的状态机：
+任务状态第一阶段采用简单状态机：
 
 ```text
 queued -> assigned -> running -> waiting_user -> completed
@@ -121,47 +138,57 @@ queued -> assigned -> running -> waiting_user -> completed
                        failed        cancelled
 ```
 
-典型流程：
+## Repository Layout
 
-1. 用户输入目标，例如“帮我做一个小红书账号的一周内容计划”。
-2. Boss Agent 把目标拆成多个子任务。
-3. Planner Agent 负责调研和规划。
-4. Writer Agent 负责生成内容。
-5. Reviewer Agent 检查质量、风险和风格一致性。
-6. 用户在关键节点确认，例如是否发布、是否发送邮件、是否修改文件。
-7. 系统沉淀结果到任务记录和公司记忆库。
+```text
+agentpulse/
+  apps/
+    web/              # 官网，Vite + React + TypeScript
+    desktop/          # 桌面工作台，Electron + Vite + React + TypeScript
+  services/
+    api/              # 后端 API，FastAPI
+  docs/
+    prd.md            # 一人自媒体公司 MVP PRD
+    workflow.md       # 第一阶段研发闭环
+    backlog.md        # 第一阶段 backlog
+    research/
+      dust.md         # Dust 调研与架构启发
+```
 
-## MVP 范围
+## Tech Stack
 
-建议先做一个垂直闭环，而不是一开始做全行业通用平台。
+| Layer    | Stack                                                      |
+| -------- | ---------------------------------------------------------- |
+| Monorepo | npm workspaces                                             |
+| Web      | Vite, React, TypeScript                                    |
+| Desktop  | Electron, Vite, React, TypeScript                          |
+| API      | FastAPI, Pydantic Settings, Uvicorn                        |
+| Tests    | Pytest, TypeScript checks                                  |
+| UI Icons | Material Symbols in desktop prototype, lucide-react in web |
 
-第一阶段可以选择“一人自媒体公司”作为 MVP 场景：
+## Quick Start
 
-- 创建一个公司工作区。
-- 自动生成 3 个 AI 员工：老板助理、内容策划、运营执行。
-- 用户输入一个业务目标。
-- 系统自动拆解任务并分配给智能体。
-- 前端实时显示每个智能体的执行过程。
-- 支持生成 Markdown、表格和本地文件。
-- 对外部动作设置人工确认，例如发布内容、发送邮件、修改重要文件。
-
-## 本地开发
-
-### 环境要求
+### Requirements
 
 - Node.js 20+
 - npm 10+
 - Python 3.12+
 
-仓库内包含 `.npmrc`，已配置 npm 镜像和 Electron binary 镜像，方便在国内网络环境安装依赖。
+The repository includes `.npmrc` with npm and Electron mirrors for faster installs in China.
 
-### 安装 Node 依赖
+### Install Node Dependencies
 
 ```bash
 npm install
 ```
 
-### 安装 Python 依赖
+If Electron binary is missing after install, rebuild it:
+
+```bash
+npm rebuild electron --workspace @agentpulse/desktop
+```
+
+### Install Python Dependencies
 
 ```bash
 cd services/api
@@ -170,95 +197,141 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 启动官网
-
-```bash
-npm run dev:web
-```
-
-默认访问地址：
-
-```text
-http://localhost:5173
-```
-
-### 启动桌面应用
+### Run The Desktop Workbench
 
 ```bash
 npm run dev:desktop
 ```
 
-桌面端会打开一个 Electron 窗口，底层 Vite dev server 默认运行在：
+The desktop app opens an Electron window. The renderer dev server runs at:
 
 ```text
 http://localhost:5174
 ```
 
-### 启动后端 API
+### Run The Website
+
+```bash
+npm run dev:web
+```
+
+```text
+http://localhost:5173
+```
+
+### Run The API
 
 ```bash
 npm run dev:api
 ```
 
-默认访问地址：
-
 ```text
 http://localhost:8000
-```
-
-健康检查：
-
-```text
 http://localhost:8000/api/health
 ```
 
-## 常用命令
+## Useful Commands
 
 ```bash
-npm run build       # 构建 web 和 desktop
-npm run lint        # TypeScript 类型检查
-npm run format      # Prettier 格式化
-npm run test:api    # 运行 FastAPI 测试
+npm run lint        # TypeScript checks for web and desktop
+npm run build       # Build web and desktop
+npm run test:api    # Run FastAPI tests
+npm run format      # Format the repository with Prettier
 ```
 
-## 开发路线图
+## Roadmap
 
-### Phase 1：基础产品骨架
+### Phase 0: Foundation
 
-- 完成官网首屏和产品介绍。
-- 完成桌面端工作台基础布局。
-- 完成 FastAPI 基础模块拆分。
-- 建立 workspace、agent、task、message 的数据模型。
-- 建立任务详情页和执行日志流。
+- Monorepo scaffold
+- Web scaffold
+- Desktop scaffold
+- FastAPI scaffold
+- Product docs and MVP PRD
+- Desktop collaboration workbench prototype
 
-### Phase 2：多智能体任务闭环
+### Phase 1: MVP Workbench
 
-- 实现 Boss Agent 的任务拆解。
-- 实现任务队列和任务状态机。
-- 实现 agent run 记录。
-- 实现 WebSocket 实时进度推送。
-- 加入用户确认节点。
+- Workspace model
+- Default AI employees for one-person media company
+- Task board and task detail
+- Message-driven collaboration
+- Approval requests
+- Mock agent orchestration
+- Local draft outputs
 
-### Phase 3：本地运行时
+### Phase 2: Real Agent Loop
 
-- 在桌面端管理本地 agent runtime。
-- 支持隔离任务工作目录。
-- 支持本地文件读写工具。
-- 支持网页搜索、Markdown 导出和表格导出。
-- 支持接入不同 LLM provider。
+- Backend models for workspace, agent, task, run, message, approval
+- WebSocket event stream
+- Task queue
+- Agent run lifecycle
+- Tool call records
+- Persisted task history
 
-### Phase 4：普通用户可用
+### Phase 3: Local Runtime
 
-- 行业模板和智能体模板。
-- 可视化智能体配置。
-- 公司记忆库。
-- 权限和风险控制。
-- 工作结果归档、复用和复盘。
+- Local isolated run directories
+- File read/write tools
+- Markdown and table export
+- Browser/search tools
+- LLM provider adapters
+- Human confirmation gates for external actions
 
-## 核心原则
+### Phase 4: Templates And Scale
 
-- 面向普通人，不把 prompt、JSON schema、workflow DAG 直接丢给用户。
-- 桌面端优先，因为本地文件、浏览器和个人工作环境是关键生产力入口。
-- 所有高风险动作都要可见、可追踪、可确认。
-- 先做垂直场景闭环，再扩展成通用平台。
-- 多智能体不是卖点本身，真正的卖点是让一个人能稳定完成一家小公司的工作。
+- Industry templates
+- Agent templates
+- Workflow templates
+- Company memory
+- Permission model
+- Connector marketplace
+- Multi-scenario expansion
+
+## Design Reference
+
+AgentPulse is inspired by systems like Multica and Dust, especially these ideas:
+
+- Task-first collaboration, not chat-only interaction.
+- Local daemon/runtime for work that needs files, browsers, and user environment.
+- Real-time event streams so users can see progress.
+- Agents with explicit tools, permissions, and handoff boundaries.
+- Human confirmation for risky external actions.
+
+But AgentPulse deliberately hides technical machinery from normal users. The product language is:
+
+```text
+company, employee, department, task, group chat, file, skill, tool, approval
+```
+
+not:
+
+```text
+agent graph, workflow DAG, tool schema, run trace, vector index, provider config
+```
+
+## Documentation
+
+- [MVP PRD](docs/prd.md)
+- [Workflow](docs/workflow.md)
+- [Backlog](docs/backlog.md)
+- [Dust Research](docs/research/dust.md)
+
+## Project Goal
+
+AgentPulse 的长期目标是成为普通人的 AI 公司操作系统：
+
+- 一个创作者可以拥有内容团队。
+- 一个个体户可以拥有销售、客服和财务助理。
+- 一个咨询顾问可以拥有研究员、文案、项目经理。
+- 一个普通人可以把业务目标交给一支可控、可追踪、可协作的 AI 团队。
+
+最终，我们想回答一个问题：
+
+> 当一个人可以指挥一支 AI 团队时，一人公司会变成什么样？
+
+AgentPulse 就是这个问题的实验场。
+
+## License
+
+License has not been selected yet.
