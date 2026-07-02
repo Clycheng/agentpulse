@@ -992,6 +992,7 @@ function App() {
       const response = await apiRequest<{
         user_message: ApiBootstrap['messages_by_conversation'][string][number];
         agent_message: ApiBootstrap['messages_by_conversation'][string][number];
+        created_task: ApiBootstrap['tasks'][number] | null;
       }>(`/conversations/${targetChat.id}/messages`, {
         method: 'POST',
         token,
@@ -1002,6 +1003,15 @@ function App() {
       });
       const userMessage = mapApiMessage(response.user_message);
       const agentMessage = mapApiMessage(response.agent_message);
+      const systemTaskMessage: Message | null = response.created_task
+        ? {
+            id: tempMessageId(),
+            from: 'system',
+            type: 'system',
+            time: '刚刚',
+            text: `已自动创建任务：${response.created_task.title}`,
+          }
+        : null;
       setMessagesByChat((current) => ({
         ...current,
         [targetChat.id]: [
@@ -1009,6 +1019,7 @@ function App() {
             (message) => message.id !== optimisticId,
           ),
           userMessage,
+          ...(systemTaskMessage ? [systemTaskMessage] : []),
           agentMessage,
         ],
       }));
@@ -1017,6 +1028,10 @@ function App() {
           chat.id === targetChat.id ? { ...chat, time: '刚刚' } : chat,
         ),
       );
+      if (response.created_task) {
+        await loadBootstrap(token);
+        showToast('已从聊天自动创建任务');
+      }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'LLM 调用失败，请稍后重试';

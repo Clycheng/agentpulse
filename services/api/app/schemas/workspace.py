@@ -142,6 +142,7 @@ class SendMessageRequest(BaseModel):
 class SendMessageResponse(BaseModel):
     user_message: MessageOut
     agent_message: MessageOut
+    created_task: TaskOut | None = None
 
 
 class CreateAgentRequest(BaseModel):

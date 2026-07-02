@@ -96,7 +96,8 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
     async def fake_complete(self, payload):
         assert payload.agent.name == "小秘"
         assert payload.messages[-1].content == "帮我拆一下今天的推进计划"
-        assert payload.related_tasks == []
+        assert payload.related_tasks
+        assert payload.related_tasks[0].title == "拆一下今天的推进计划"
         return LlmChatResponse(
             reply="先做三件事：确认目标、拆任务、安排负责人。",
             provider="deepseek",
@@ -133,16 +134,24 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
     assert payload["agent_message"]["content"] == "先做三件事：确认目标、拆任务、安排负责人。"
     assert payload["agent_message"]["provider"] == "deepseek"
     assert payload["agent_message"]["model"] == "deepseek-v4-flash"
+    assert payload["created_task"]["title"] == "拆一下今天的推进计划"
 
     reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
     messages = reloaded["messages_by_conversation"][secretary_chat["id"]]
     assert [message["sender_type"] for message in messages] == [
         "agent",
         "user",
+        "system",
         "agent",
     ]
+    assert "已创建任务：拆一下今天的推进计划" in messages[2]["content"]
     assert messages[-1]["provider"] == "deepseek"
     assert messages[-1]["model"] == "deepseek-v4-flash"
+    task = reloaded["tasks"][0]
+    assert task["title"] == "拆一下今天的推进计划"
+    assert task["conversation_id"] == secretary_chat["id"]
+    events = reloaded["task_events_by_task"][task["id"]]
+    assert any(event["kind"] == "task_created_from_chat" for event in events)
 
 
 def test_agent_creation_recruitment_and_group_conversation(tmp_path, monkeypatch):

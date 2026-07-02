@@ -27,6 +27,7 @@ from app.services.workspace import (
     create_dm_conversation,
     create_task,
     ensure_department,
+    extract_task_intent,
     get_bootstrap,
     get_workspace_for_user,
     new_id,
@@ -350,6 +351,30 @@ async def send_message(
         sender_id=current_user["id"],
         content=payload.content,
     )
+    created_task = None
+    task_intent = extract_task_intent(payload.content)
+    if task_intent is not None:
+        created_task = create_task(
+            conn,
+            workspace_id=workspace["id"],
+            title=task_intent["title"],
+            description=task_intent["description"],
+            priority=task_intent["priority"],
+            owner_agent_id=agent["id"],
+            conversation_id=conversation_id,
+            status="进行中",
+            progress=10,
+        )
+        add_task_event(
+            conn,
+            workspace_id=workspace["id"],
+            task_id=created_task["id"],
+            kind="task_created_from_chat",
+            title="由聊天自动生成",
+            content=payload.content,
+            conversation_id=conversation_id,
+            agent_id=agent["id"],
+        )
     history = load_llm_history(conn, conversation_id)
     related_tasks = load_related_task_context(conn, conversation_id)
     try:
@@ -439,6 +464,7 @@ async def send_message(
     return {
         "user_message": serialize_message(user_message),
         "agent_message": serialize_message(agent_message),
+        "created_task": serialize_task(created_task) if created_task else None,
     }
 
 

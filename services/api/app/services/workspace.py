@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+import re
 from uuid import uuid4
 
 from app.core.database import Database, Row
@@ -11,6 +12,10 @@ from app.services.templates import AGENT_TEMPLATES, TALENT_CATEGORIES, get_templ
 DEFAULT_DEPARTMENTS = ["老板办公室"]
 HUES = [262, 230, 300, 140, 55, 20, 330]
 GLYPHS = ["✦", "▲", "◆", "◗", "✱", "◍", "◉"]
+TASK_INTENT_PATTERNS = [
+    r"^(帮我|请你|麻烦|安排|创建任务|新建任务|给我)(.+)",
+    r"(制定|生成|整理|写|做|分析|准备|规划|拆解)(.+)",
+]
 
 
 def now_iso() -> str:
@@ -694,6 +699,59 @@ def progress_for_status(status: str, progress: int) -> int:
     if status == "进行中" and bounded == 0:
         return 10
     return bounded
+
+
+def extract_task_intent(content: str) -> dict | None:
+    text = " ".join(content.strip().split())
+    if len(text) < 6:
+        return None
+    if text.startswith("/task "):
+        title = text.removeprefix("/task ").strip()
+        return task_intent_payload(title, content)
+    if text.startswith("创建任务：") or text.startswith("创建任务:"):
+        title = re.sub(r"^创建任务[：:]\s*", "", text).strip()
+        return task_intent_payload(title, content)
+
+    has_task_word = any(
+        keyword in text
+        for keyword in [
+            "帮我",
+            "请你",
+            "安排",
+            "创建任务",
+            "新建任务",
+            "制定",
+            "生成",
+            "整理",
+            "分析",
+            "准备",
+            "规划",
+            "拆解",
+        ]
+    )
+    if not has_task_word:
+        return None
+    if text.endswith("吗") or text.endswith("？") or text.endswith("?"):
+        return None
+
+    for pattern in TASK_INTENT_PATTERNS:
+        if re.search(pattern, text):
+            return task_intent_payload(text, content)
+    return None
+
+
+def task_intent_payload(title: str, original_content: str) -> dict | None:
+    normalized = re.sub(r"^(帮我|请你|麻烦|给我|安排一下|安排|创建任务|新建任务)[，,\s]*", "", title)
+    normalized = normalized.strip(" ：:，,。")
+    if len(normalized) < 4:
+        return None
+    if len(normalized) > 80:
+        normalized = f"{normalized[:77]}..."
+    return {
+        "title": normalized,
+        "description": original_content.strip(),
+        "priority": "P1" if any(word in original_content for word in ["紧急", "马上", "今天", "尽快"]) else "P2",
+    }
 
 
 def get_bootstrap(conn: Database, workspace_id: str) -> dict:
