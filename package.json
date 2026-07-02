@@ -1,0 +1,26 @@
+{
+  "name": "intentpulse",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/web",
+    "apps/desktop"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace @intentpulse/web",
+    "dev:desktop": "npm run dev --workspace @intentpulse/desktop",
+    "dev:api": "cd services/api && uvicorn app.main:app --reload --port 8000",
+    "build": "npm run build --workspaces",
+    "build:web": "npm run build --workspace @intentpulse/web",
+    "build:desktop": "npm run build --workspace @intentpulse/desktop",
+    "lint": "npm run lint --workspaces",
+    "format": "prettier --write .",
+    "test:api": "cd services/api && pytest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2"
+  }
+}

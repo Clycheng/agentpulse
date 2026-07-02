@@ -1,0 +1,30 @@
+{
+  "name": "@intentpulse/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 0.0.0.0 --port 5174\" \"wait-on http://127.0.0.1:5174 && npm run build:electron && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5174 electron .\"",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
+    "start": "electron .",
+    "lint": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.5",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "lucide-react": "^0.468.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "typescript": "^5.7.2",
+    "wait-on": "^8.0.1"
+  }
+}

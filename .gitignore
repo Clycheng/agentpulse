@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+.venv/
+__pycache__/
+.pytest_cache/
+
+# builds
+dist/
+dist-electron/
+build/
+release/
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+
+# editor and OS
+.DS_Store
+.idea/
+.vscode/
+
+# logs
+*.log
+npm-debug.log*
