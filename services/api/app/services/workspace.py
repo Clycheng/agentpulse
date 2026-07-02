@@ -319,13 +319,15 @@ def serialize_message(row: Row) -> dict:
     }
 
 
-def serialize_task(row: Row) -> dict:
-    return {
+def serialize_task(row: Row, suggestion: dict | None = None) -> dict:
+    payload = {
         "id": row["id"],
         "title": row["title"],
         "description": row["description"],
         "priority": row["priority"],
         "owner_agent_id": row["owner_agent_id"],
+        "suggested_agent_id": None,
+        "suggested_agent_reason": "",
         "status": row["status"],
         "progress": row["progress"],
         "conversation_id": row["conversation_id"],
@@ -334,6 +336,10 @@ def serialize_task(row: Row) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+    if suggestion:
+        payload["suggested_agent_id"] = suggestion["agent_id"]
+        payload["suggested_agent_reason"] = suggestion["reason"]
+    return payload
 
 
 def serialize_knowledge_source(row: Row) -> dict:
@@ -573,6 +579,17 @@ def load_knowledge_context(
 
     ranked = sorted(rows, key=score, reverse=True)
     return [serialize_knowledge_source(row) for row in ranked[:limit]]
+
+
+def match_tokens(value: str) -> set[str]:
+    tokens = set(re.findall(r"[a-zA-Z0-9_]{2,}", value.lower()))
+    for chunk in re.findall(r"[\u4e00-\u9fff]{2,}", value):
+        for size in (2, 3, 4):
+            for index in range(0, len(chunk) - size + 1):
+                token = chunk[index : index + size]
+                if token not in {"负责", "输出", "一个", "一版", "任务"}:
+                    tokens.add(token)
+    return tokens
 
 
 def add_approval(
@@ -866,6 +883,62 @@ def claim_task(
     return conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
 
 
+def suggest_task_agent(task: Row, agents: list[Row], departments_by_id: dict[str, Row]) -> dict | None:
+    if task["owner_agent_id"] or task["status"] != "待认领":
+        return None
+    task_text = f"{task['title']} {task['description']}".lower()
+    task_tokens = match_tokens(task_text)
+    candidates: list[tuple[int, Row, list[str]]] = []
+    for agent in agents:
+        if agent["source"] == "system_secretary":
+            continue
+        skills = json.loads(agent["skills_json"])
+        department = departments_by_id.get(agent["department_id"])
+        fields = [
+            agent["name"],
+            agent["role"],
+            agent["description"],
+            agent["prompt"],
+            department["name"] if department else "",
+            " ".join(skills),
+        ]
+        profile_text = " ".join(fields).lower()
+        profile_tokens = match_tokens(profile_text)
+        score = 0
+        reasons: list[str] = []
+        for skill in skills:
+            if skill and skill.lower() in task_text:
+                score += 8
+                reasons.append(f"技能匹配「{skill}」")
+        for field in [agent["role"], agent["description"], agent["name"]]:
+            if field and field.lower() in task_text:
+                score += 6
+        for keyword in re.findall(r"[\w\u4e00-\u9fff]{2,}", task_text):
+            if keyword in profile_text:
+                score += 1
+        common_tokens = sorted(task_tokens & profile_tokens, key=len, reverse=True)
+        if common_tokens:
+            score += min(10, len(common_tokens) * 2)
+            reasons.append(f"关键词匹配「{'、'.join(common_tokens[:3])}」")
+        if department and department["name"] and department["name"].lower() in task_text:
+            score += 4
+            reasons.append(f"部门匹配「{department['name']}」")
+        if score > 0:
+            if not reasons:
+                reasons.append("岗位说明与任务关键词匹配")
+            candidates.append((score, agent, reasons[:2]))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1]["created_at"]), reverse=True)
+    score, agent, reasons = candidates[0]
+    reason = "，".join(reasons)
+    return {
+        "agent_id": agent["id"],
+        "reason": f"{reason}，匹配度 {score}",
+    }
+
+
 def validate_task_links(
     conn: Database,
     *,
@@ -1042,6 +1115,7 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "SELECT * FROM departments WHERE workspace_id = ? ORDER BY sort_order, created_at",
         (workspace_id,),
     ).fetchall()
+    departments_by_id = {department["id"]: department for department in departments}
     agents = conn.execute(
         "SELECT * FROM agents WHERE workspace_id = ? ORDER BY created_at", (workspace_id,)
     ).fetchall()
@@ -1154,7 +1228,10 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "agents": [serialize_agent(agent) for agent in agents],
         "conversations": serialized_conversations,
         "messages_by_conversation": messages_by_conversation,
-        "tasks": [serialize_task(task) for task in tasks],
+        "tasks": [
+            serialize_task(task, suggest_task_agent(task, agents, departments_by_id))
+            for task in tasks
+        ],
         "knowledge_sources": [
             serialize_knowledge_source(source) for source in knowledge_sources
         ],

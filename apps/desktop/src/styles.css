@@ -683,8 +683,10 @@ button {
   position: relative;
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex: 1;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .screen-scroll {
@@ -856,6 +858,7 @@ button {
   display: flex;
   align-items: center;
   min-width: 0;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -864,6 +867,20 @@ button {
   color: var(--muted);
   font-size: 12.5px;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.owner-suggestion {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -1578,7 +1595,7 @@ textarea::placeholder {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 28px 36px 0;
+  padding: 28px 36px 20px;
 }
 
 .market-screen > .page-header,
@@ -1593,7 +1610,7 @@ textarea::placeholder {
   display: grid;
   flex-shrink: 0;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   gap: 12px;
 }
 
@@ -1601,7 +1618,7 @@ textarea::placeholder {
   display: flex;
   align-items: center;
   min-height: 76px;
-  padding: 15px 18px;
+  padding: 15px 17px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -1641,7 +1658,7 @@ textarea::placeholder {
   overflow: hidden;
   flex: 1;
   align-items: stretch;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 232px minmax(0, 1fr);
   min-height: 0;
   gap: 16px;
 }
@@ -1651,7 +1668,7 @@ textarea::placeholder {
   align-self: stretch;
   flex-direction: column;
   min-height: 0;
-  padding: 16px;
+  padding: 17px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -1734,6 +1751,7 @@ textarea::placeholder {
   flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
+  min-height: 46px;
   margin-bottom: 12px;
   gap: 12px;
 }
@@ -1772,7 +1790,7 @@ textarea::placeholder {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  padding: 0 4px 28px 0;
+  padding: 0 4px 4px 0;
   gap: 10px;
 }
 
@@ -1780,6 +1798,7 @@ textarea::placeholder {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  width: 100%;
   padding: 16px 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1795,6 +1814,10 @@ textarea::placeholder {
   border-color: var(--primary);
   background: var(--surface-muted);
   outline: none;
+}
+
+.market-card:active {
+  transform: translateY(1px);
 }
 
 .market-card-main {
@@ -1818,8 +1841,28 @@ textarea::placeholder {
   white-space: nowrap;
 }
 
-.market-card-actions .button {
-  min-width: 84px;
+.market-card-actions small {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.market-card:hover .market-card-actions small,
+.market-card:focus-visible .market-card-actions small {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.market-card-actions small .material-symbol {
+  font-size: 15px;
 }
 
 .market-role-icon {
@@ -1828,7 +1871,7 @@ textarea::placeholder {
   flex-shrink: 0;
   width: 44px;
   height: 44px;
-  border-radius: var(--radius);
+  border-radius: 50%;
   color: #ffffff;
   font-size: 17px;
   font-weight: 700;
@@ -1931,6 +1974,7 @@ textarea::placeholder {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 13px;
+  line-height: 1.6;
 }
 
 .talent-detail-head span {
@@ -1945,7 +1989,7 @@ textarea::placeholder {
 
 .talent-detail-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -3046,6 +3090,34 @@ textarea::placeholder {
   justify-content: flex-end;
   margin-top: 24px;
   gap: 10px;
+}
+
+.claim-suggestion {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  gap: 10px;
+}
+
+.claim-suggestion span {
+  min-width: 0;
+}
+
+.claim-suggestion strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.claim-suggestion p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .hire-summary {

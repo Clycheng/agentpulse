@@ -80,6 +80,8 @@ type Task = {
   description: string;
   pr: Priority;
   owner: string;
+  suggestedAgentId?: string | null;
+  suggestedAgentReason?: string;
   status: TaskStatus;
   progress: number;
   src: string;
@@ -221,6 +223,8 @@ type ApiBootstrap = {
     description: string;
     priority: string;
     owner_agent_id: string | null;
+    suggested_agent_id?: string | null;
+    suggested_agent_reason?: string;
     status: string;
     progress: number;
     conversation_id: string | null;
@@ -669,6 +673,8 @@ function mapBootstrap(data: ApiBootstrap) {
       description: task.description,
       pr: normalizePriority(task.priority),
       owner: task.owner_agent_id ?? '',
+      suggestedAgentId: task.suggested_agent_id ?? null,
+      suggestedAgentReason: task.suggested_agent_reason ?? '',
       status: normalizeTaskStatus(task.status),
       progress: task.progress,
       src: task.conversation_id ?? '',
@@ -1608,8 +1614,9 @@ function App() {
             onOpenCreateTask={openCreateTask}
             onAdvanceTask={advanceTask}
             onOpenClaimTask={(taskId) => {
+              const task = tasks.find((item) => item.id === taskId);
               setClaimTaskId(taskId);
-              setClaimAgentId('');
+              setClaimAgentId(task?.suggestedAgentId ?? '');
             }}
             onOpenTask={(taskId) => setTaskDetailId(taskId)}
             onOpenChat={openChat}
@@ -2697,7 +2704,7 @@ function TalentMarketView({
     {
       id: '全部',
       name: '全部',
-      description: '查看官方人才库里的全部可招募员工模板',
+      description: '查看官方人才市场里的全部可招募员工模板',
     },
     ...categories,
   ];
@@ -2736,8 +2743,7 @@ function TalentMarketView({
           <div>
             <h1>人才市场中心</h1>
             <p>
-              官方提供可招募 AI 员工模板；类目、Prompt、Skills、MCP
-              和版本由官方后台统一维护
+              浏览官方发布的 AI 员工档案，确认 Prompt、Skills、MCP 后再招募入职
             </p>
           </div>
         </header>
@@ -2775,9 +2781,9 @@ function TalentMarketView({
 
         <section className="market-layout">
           <aside className="market-filter" aria-label="岗位筛选">
-            <strong>官方人才类目</strong>
+            <strong>官方岗位类目</strong>
             <p>
-              这里不是你的公司部门。分类来自官方后台，用户侧只负责筛选、查看和招募。
+              类目来自 AgentPulse Admin，不等同于你的公司部门。
             </p>
             <div>
               {categoryOptions.map((category) => {
@@ -2802,8 +2808,7 @@ function TalentMarketView({
               })}
             </div>
             <footer>
-              分类、模板、默认能力和发布版本后续都在 AgentPulse Admin
-              维护；招募时再选择加入你的部门。
+              分类、员工模板、默认能力和发布版本由官方后台维护；招募时再选择加入你的部门。
             </footer>
           </aside>
 
@@ -2813,7 +2818,7 @@ function TalentMarketView({
                 {materialIcon('search')}
                 <input
                   value={keyword}
-                  placeholder="搜索人才、能力、工具或官方类目"
+                  placeholder="搜索人才、Prompt、Skills 或 MCP"
                   onChange={(event) => setKeyword(event.target.value)}
                 />
               </label>
@@ -2824,18 +2829,11 @@ function TalentMarketView({
 
             <div className="market-list">
               {visibleTemplates.map((template, index) => (
-                <article
+                <button
                   className="market-card"
                   key={template.id}
-                  role="button"
-                  tabIndex={0}
+                  type="button"
                   onClick={() => setDetailTemplateId(template.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setDetailTemplateId(template.id);
-                    }
-                  }}
                 >
                   <div className="market-card-main">
                     <div
@@ -2874,18 +2872,9 @@ function TalentMarketView({
                   </div>
                   <div className="market-card-actions">
                     <span>{template.version}</span>
-                    <button
-                      className="button secondary"
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setDetailTemplateId(template.id);
-                      }}
-                    >
-                      {materialIcon('visibility')}详情
-                    </button>
+                    <small>{materialIcon('badge')}人才档案</small>
                   </div>
-                </article>
+                </button>
               ))}
               {visibleTemplates.length === 0 && (
                 <div className="market-empty">没有匹配的人才模板</div>
@@ -2920,7 +2909,7 @@ function TalentDetailModal({
   return (
     <Modal
       title={template.name}
-      description={`${template.category} · 建议入职 ${template.dept}`}
+      description={`官方人才档案 · ${template.category} · ${template.version}`}
       width={760}
       onClose={onClose}
     >
@@ -2935,7 +2924,7 @@ function TalentDetailModal({
           <strong>{template.name}</strong>
           <p>{template.desc}</p>
           <span>
-            {template.publisher} · {template.version} · 官方已发布
+            {template.publisher} · {template.status === 'published' ? '已发布' : template.status}
           </span>
         </div>
       </div>
@@ -2943,7 +2932,7 @@ function TalentDetailModal({
       <FieldLabel>基础信息</FieldLabel>
       <div className="talent-detail-grid">
         <div>
-          <span>官方类目</span>
+          <span>官方岗位类目</span>
           <strong>{template.category}</strong>
         </div>
         <div>
@@ -2951,26 +2940,24 @@ function TalentDetailModal({
           <strong>{template.dept}</strong>
         </div>
         <div>
-          <span>模板 ID</span>
-          <strong>{template.id}</strong>
+          <span>发布版本</span>
+          <strong>{template.version}</strong>
         </div>
         <div>
-          <span>类目 ID</span>
-          <strong>{template.categoryId}</strong>
+          <span>模板 ID</span>
+          <strong>{template.id}</strong>
         </div>
         <div>
           <span>模板来源</span>
           <strong>{template.publisher}</strong>
         </div>
         <div>
-          <span>模板状态</span>
-          <strong>
-            {template.status === 'published' ? '已发布' : template.status}
-          </strong>
+          <span>类目 ID</span>
+          <strong>{template.categoryId}</strong>
         </div>
       </div>
 
-      <FieldLabel>岗位描述</FieldLabel>
+      <FieldLabel>人才说明</FieldLabel>
       <div className="talent-profile-note">{template.desc}</div>
 
       <FieldLabel>工作职责 Prompt</FieldLabel>
@@ -2984,8 +2971,8 @@ function TalentDetailModal({
 
       <FieldLabel>平台说明</FieldLabel>
       <div className="market-admin-note">
-        官方后台负责创建人才分类、维护模板内容、审核默认 Prompt、Skills、MCP
-        权限和发布版本。用户侧不创建市场分类，只查看这个人才是否匹配需求，并在招募时选择加入自己的部门。
+        官方后台负责创建岗位类目、维护员工模板、审核默认 Prompt、Skills、MCP
+        权限和发布版本。用户侧只浏览人才档案并招募到自己的组织，不在这里维护市场分类。
       </div>
 
       <div className="modal-actions">
@@ -3095,6 +3082,9 @@ function TasksView({
           )}
           {tasks.map((task) => {
             const owner = agents.find((agent) => agent.id === task.owner);
+            const suggestedAgent = task.suggestedAgentId
+              ? agents.find((agent) => agent.id === task.suggestedAgentId)
+              : null;
             const priority = priorityStyle(task.pr);
             const status = statusStyle(task.status);
             return (
@@ -3122,6 +3112,11 @@ function TasksView({
                     </button>
                   )}
                   <span>{owner?.name ?? '未分配'}</span>
+                  {!owner && suggestedAgent && (
+                    <em className="owner-suggestion">
+                      推荐 {suggestedAgent.name}
+                    </em>
+                  )}
                 </div>
                 <div className="task-progress">
                   <div className="progress-track">
@@ -3923,6 +3918,10 @@ function ClaimTaskModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const suggestedAgent = task?.suggestedAgentId
+    ? agents.find((agent) => agent.id === task.suggestedAgentId)
+    : null;
+
   return (
     <Modal
       title="认领任务"
@@ -3931,6 +3930,20 @@ function ClaimTaskModal({
       onClose={onClose}
     >
       <FieldLabel>执行员工</FieldLabel>
+      {suggestedAgent && (
+        <div className="claim-suggestion">
+          <div
+            className="tiny-avatar"
+            style={{ background: avatarColor(suggestedAgent) }}
+          >
+            {avatarText(suggestedAgent.name)}
+          </div>
+          <span>
+            <strong>推荐 {suggestedAgent.name}</strong>
+            <p>{task?.suggestedAgentReason || '岗位说明与任务内容匹配'}</p>
+          </span>
+        </div>
+      )}
       <select
         value={selectedAgentId}
         onChange={(event) => onAgentChange(event.currentTarget.value)}

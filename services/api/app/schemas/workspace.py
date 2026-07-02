@@ -53,6 +53,8 @@ class TaskOut(BaseModel):
     description: str
     priority: str
     owner_agent_id: str | None
+    suggested_agent_id: str | None = None
+    suggested_agent_reason: str = ""
     status: str
     progress: int
     conversation_id: str | None

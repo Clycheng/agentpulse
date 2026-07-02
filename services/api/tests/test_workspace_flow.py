@@ -735,3 +735,46 @@ def test_unassigned_task_enters_pool_and_can_be_claimed(tmp_path, monkeypatch):
     reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
     events = reloaded["task_events_by_task"][task_payload["id"]]
     assert any(event["kind"] == "task_claimed" for event in events)
+
+
+def test_task_pool_suggests_matching_agent_for_unassigned_task(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    writer = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "内容策划",
+            "description": "负责公众号文案和官网内容",
+            "department_name": "内容部",
+            "prompt": "你负责选题、文案和官网内容产出。",
+        },
+    ).json()
+    client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "财务助理",
+            "description": "负责记账和对账",
+            "department_name": "财务行政",
+            "prompt": "你负责财务报表和费用对账。",
+        },
+    )
+
+    task = client.post(
+        "/api/tasks",
+        headers=auth_header(token),
+        json={
+            "title": "写官网首页文案",
+            "description": "输出一版官网首屏内容和价值主张。",
+            "priority": "P1",
+        },
+    ).json()
+    reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    matched_task = next(item for item in reloaded["tasks"] if item["id"] == task["id"])
+
+    assert matched_task["status"] == "待认领"
+    assert matched_task["suggested_agent_id"] == writer["id"]
+    assert matched_task["suggested_agent_reason"]
