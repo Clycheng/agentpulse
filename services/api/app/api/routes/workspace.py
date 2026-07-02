@@ -5,7 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import get_current_user
 from app.core.database import Database, Row, get_db
 from app.runtime.deepseek import DeepSeekAPIError, DeepSeekChatClient, DeepSeekNotConfigured
-from app.schemas.run import LlmChatAgent, LlmChatMessage, LlmChatRequest
+from app.schemas.run import (
+    LlmAgentExperience,
+    LlmChatAgent,
+    LlmChatMessage,
+    LlmChatRequest,
+)
 from app.schemas.workspace import (
     AddConversationMembersRequest,
     BootstrapResponse,
@@ -548,6 +553,7 @@ async def complete_agent_reply(
 ) -> Row:
     history = load_llm_history(conn, conversation_id)
     related_tasks = load_related_task_context(conn, conversation_id)
+    agent_experiences = load_agent_experience_context(conn, agent["id"])
     completion = await DeepSeekChatClient().complete(
         LlmChatRequest(
             company_name=workspace["name"],
@@ -562,6 +568,7 @@ async def complete_agent_reply(
             ),
             messages=history,
             related_tasks=related_tasks,
+            agent_experiences=agent_experiences,
         )
     )
 
@@ -741,6 +748,31 @@ def load_related_task_context(conn: Database, conversation_id: str) -> list[dict
             "progress": row["progress"],
             "owner_name": row["owner_name"],
         }
+        for row in rows
+    ]
+
+
+def load_agent_experience_context(
+    conn: Database, agent_id: str
+) -> list[LlmAgentExperience]:
+    rows = conn.execute(
+        """
+        SELECT id, task_id, outcome, summary, lessons
+        FROM agent_experiences
+        WHERE agent_id = ?
+        ORDER BY created_at DESC
+        LIMIT 6
+        """,
+        (agent_id,),
+    ).fetchall()
+    return [
+        LlmAgentExperience(
+            id=row["id"],
+            task_id=row["task_id"],
+            outcome=row["outcome"],
+            summary=row["summary"],
+            lessons=row["lessons"],
+        )
         for row in rows
     ]
 

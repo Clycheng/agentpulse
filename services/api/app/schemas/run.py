@@ -28,12 +28,23 @@ class LlmTaskContext(BaseModel):
     description: str = Field(default="", max_length=2000)
 
 
+class LlmAgentExperience(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    task_id: str | None = Field(default=None, max_length=80)
+    outcome: str = Field(default="", max_length=40)
+    summary: str = Field(default="", max_length=400)
+    lessons: str = Field(default="", max_length=1000)
+
+
 class LlmChatRequest(BaseModel):
     company_name: str = Field(default="一人公司", max_length=120)
     conversation_title: str = Field(default="", max_length=160)
     agent: LlmChatAgent
     messages: list[LlmChatMessage] = Field(min_length=1, max_length=24)
     related_tasks: list[LlmTaskContext] = Field(default_factory=list, max_length=12)
+    agent_experiences: list[LlmAgentExperience] = Field(
+        default_factory=list, max_length=8
+    )
 
 
 class LlmChatResponse(BaseModel):

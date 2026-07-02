@@ -95,12 +95,14 @@ def build_system_prompt(request: LlmChatRequest) -> str:
     skills = "、".join(agent.skills) if agent.skills else "暂无绑定技能"
     conversation = request.conversation_title or "当前会话"
     related_tasks = format_related_tasks(request)
+    agent_experiences = format_agent_experiences(request)
 
     return f"""你是 AgentPulse 里的 AI 员工，需要像真实团队成员一样帮助老板推进一人公司的工作。
 
 公司：{request.company_name}
 当前会话：{conversation}
 {related_tasks}
+{agent_experiences}
 
 你的员工档案：
 - 姓名：{agent.name}
@@ -117,7 +119,8 @@ def build_system_prompt(request: LlmChatRequest) -> str:
 3. 不要声称已经发送邮件、创建外部文档、发布内容或操作第三方系统；第一版你只能回复消息和提出计划。
 4. 如果需要老板确认，明确列出需要拍板的问题和可选方案。
 5. 如果需要其他员工协作，可以在回复里写出建议 @谁，但不要假装他们已经执行。
-6. 输出尽量结构化，优先给老板可直接推进的下一步。"""
+6. 如果有个人经验记忆，优先复用成功经验，避开复盘教训里已经暴露的问题。
+7. 输出尽量结构化，优先给老板可直接推进的下一步。"""
 
 
 def format_related_tasks(request: LlmChatRequest) -> str:
@@ -132,6 +135,18 @@ def format_related_tasks(request: LlmChatRequest) -> str:
             f"{index}. [{task.priority}] {task.title} "
             f"({task.status}，进度 {task.progress}%{owner}){description}"
         )
+    return "\n".join(lines)
+
+
+def format_agent_experiences(request: LlmChatRequest) -> str:
+    if not request.agent_experiences:
+        return "\n个人经验记忆：暂无"
+
+    lines = ["\n个人经验记忆："]
+    for index, experience in enumerate(request.agent_experiences, start=1):
+        label = "成功经验" if experience.outcome == "success" else "复盘教训"
+        lessons = f"\n   经验/教训：{experience.lessons}" if experience.lessons else ""
+        lines.append(f"{index}. {label}：{experience.summary}{lessons}")
     return "\n".join(lines)
 
 

@@ -507,6 +507,17 @@ def test_task_api_updates_and_injects_related_context(tmp_path, monkeypatch):
     assert experiences[0]["outcome"] == "success"
     assert "老板已确认通过" in experiences[0]["summary"]
 
+    follow_up = client.post(
+        f"/api/conversations/{dm_chat['id']}/messages",
+        headers=auth_header(token),
+        json={"content": "参考之前的经验，再给我一个下一步建议"},
+    )
+    assert follow_up.status_code == 200
+    experience_payload = captured_payloads[-1]
+    assert experience_payload.agent_experiences
+    assert experience_payload.agent_experiences[0].outcome == "success"
+    assert "官网首屏文案" in experience_payload.agent_experiences[0].summary
+
 
 def test_rejected_approval_creates_agent_lesson_experience(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
