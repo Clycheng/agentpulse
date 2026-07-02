@@ -293,6 +293,156 @@ def serialize_task(row: Row) -> dict:
     }
 
 
+def serialize_task_event(row: Row) -> dict:
+    return {
+        "id": row["id"],
+        "task_id": row["task_id"],
+        "conversation_id": row["conversation_id"],
+        "agent_id": row["agent_id"],
+        "kind": row["kind"],
+        "title": row["title"],
+        "content": row["content"],
+        "created_at": row["created_at"],
+    }
+
+
+def serialize_task_output(row: Row) -> dict:
+    return {
+        "id": row["id"],
+        "task_id": row["task_id"],
+        "conversation_id": row["conversation_id"],
+        "agent_id": row["agent_id"],
+        "title": row["title"],
+        "output_type": row["output_type"],
+        "content": row["content"],
+        "created_at": row["created_at"],
+    }
+
+
+def serialize_approval(row: Row) -> dict:
+    return {
+        "id": row["id"],
+        "task_id": row["task_id"],
+        "conversation_id": row["conversation_id"],
+        "agent_id": row["agent_id"],
+        "title": row["title"],
+        "description": row["description"],
+        "status": row["status"],
+        "risk_level": row["risk_level"],
+        "resolved_by": row["resolved_by"],
+        "resolved_at": row["resolved_at"],
+        "created_at": row["created_at"],
+    }
+
+
+def add_task_event(
+    conn: Database,
+    *,
+    workspace_id: str,
+    task_id: str,
+    kind: str,
+    title: str,
+    content: str = "",
+    conversation_id: str | None = None,
+    agent_id: str | None = None,
+) -> Row:
+    event_id = new_id("event")
+    created_at = now_iso()
+    conn.execute(
+        """
+        INSERT INTO task_events (
+          id, workspace_id, task_id, conversation_id, agent_id,
+          kind, title, content, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event_id,
+            workspace_id,
+            task_id,
+            conversation_id,
+            agent_id,
+            kind,
+            title,
+            content,
+            created_at,
+        ),
+    )
+    return conn.execute("SELECT * FROM task_events WHERE id = ?", (event_id,)).fetchone()
+
+
+def add_task_output(
+    conn: Database,
+    *,
+    workspace_id: str,
+    task_id: str,
+    title: str,
+    content: str,
+    conversation_id: str | None = None,
+    agent_id: str | None = None,
+    output_type: str = "markdown",
+) -> Row:
+    output_id = new_id("output")
+    created_at = now_iso()
+    conn.execute(
+        """
+        INSERT INTO task_outputs (
+          id, workspace_id, task_id, conversation_id, agent_id,
+          title, output_type, content, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            output_id,
+            workspace_id,
+            task_id,
+            conversation_id,
+            agent_id,
+            title,
+            output_type,
+            content,
+            created_at,
+        ),
+    )
+    return conn.execute("SELECT * FROM task_outputs WHERE id = ?", (output_id,)).fetchone()
+
+
+def add_approval(
+    conn: Database,
+    *,
+    workspace_id: str,
+    title: str,
+    description: str,
+    task_id: str | None = None,
+    conversation_id: str | None = None,
+    agent_id: str | None = None,
+    risk_level: str = "medium",
+) -> Row:
+    approval_id = new_id("approval")
+    created_at = now_iso()
+    conn.execute(
+        """
+        INSERT INTO approvals (
+          id, workspace_id, task_id, conversation_id, agent_id,
+          title, description, status, risk_level, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        """,
+        (
+            approval_id,
+            workspace_id,
+            task_id,
+            conversation_id,
+            agent_id,
+            title,
+            description,
+            risk_level,
+            created_at,
+        ),
+    )
+    return conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+
+
 def create_task(
     conn: Database,
     *,
@@ -341,6 +491,27 @@ def create_task(
             created_at,
         ),
     )
+    add_task_event(
+        conn,
+        workspace_id=workspace_id,
+        task_id=task_id,
+        kind="task_created",
+        title="任务已创建",
+        content=description or "任务已进入执行队列。",
+        conversation_id=conversation_id,
+        agent_id=owner_agent_id,
+    )
+    if owner_agent_id:
+        add_task_event(
+            conn,
+            workspace_id=workspace_id,
+            task_id=task_id,
+            kind="task_assigned",
+            title="已分配负责人",
+            content="任务已分配给员工处理。",
+            conversation_id=conversation_id,
+            agent_id=owner_agent_id,
+        )
     if conversation_id:
         add_message(
             conn,
@@ -421,6 +592,55 @@ def update_task(
             sender_id="",
             content=f"任务更新：{next_values['title']} · {next_values['status']}",
         )
+    event_kind = (
+        "task_status_changed"
+        if next_values["status"] != existing["status"]
+        else "task_updated"
+    )
+    add_task_event(
+        conn,
+        workspace_id=workspace_id,
+        task_id=task_id,
+        kind=event_kind,
+        title=(
+            f"状态更新为 {next_values['status']}"
+            if event_kind == "task_status_changed"
+            else "任务信息已更新"
+        ),
+        content=f"当前进度 {next_values['progress']}%。",
+        conversation_id=next_values["conversation_id"],
+        agent_id=next_values["owner_agent_id"],
+    )
+    if next_values["status"] == "待确认":
+        existing_pending = conn.execute(
+            """
+            SELECT id FROM approvals
+            WHERE workspace_id = ? AND task_id = ? AND status = 'pending'
+            LIMIT 1
+            """,
+            (workspace_id, task_id),
+        ).fetchone()
+        if existing_pending is None:
+            add_approval(
+                conn,
+                workspace_id=workspace_id,
+                task_id=task_id,
+                conversation_id=next_values["conversation_id"],
+                agent_id=next_values["owner_agent_id"],
+                title=f"确认任务产出：{next_values['title']}",
+                description="任务已进入待确认状态，请老板确认结果是否可以归档完成。",
+                risk_level="low",
+            )
+            add_task_event(
+                conn,
+                workspace_id=workspace_id,
+                task_id=task_id,
+                kind="approval_requested",
+                title="等待老板确认",
+                content="员工已提交阶段性结果，需要老板拍板。",
+                conversation_id=next_values["conversation_id"],
+                agent_id=next_values["owner_agent_id"],
+            )
     return conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
 
 
@@ -493,6 +713,50 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "SELECT * FROM tasks WHERE workspace_id = ? ORDER BY updated_at DESC",
         (workspace_id,),
     ).fetchall()
+    task_ids = [task["id"] for task in tasks]
+    task_events_by_task = {task_id: [] for task_id in task_ids}
+    task_outputs_by_task = {task_id: [] for task_id in task_ids}
+    approvals_by_task = {task_id: [] for task_id in task_ids}
+    if task_ids:
+        placeholders = ",".join("?" for _ in task_ids)
+        events = conn.execute(
+            f"""
+            SELECT * FROM task_events
+            WHERE workspace_id = ? AND task_id IN ({placeholders})
+            ORDER BY created_at ASC
+            """,
+            (workspace_id, *task_ids),
+        ).fetchall()
+        for event in events:
+            task_events_by_task.setdefault(event["task_id"], []).append(
+                serialize_task_event(event)
+            )
+
+        outputs = conn.execute(
+            f"""
+            SELECT * FROM task_outputs
+            WHERE workspace_id = ? AND task_id IN ({placeholders})
+            ORDER BY created_at DESC
+            """,
+            (workspace_id, *task_ids),
+        ).fetchall()
+        for output in outputs:
+            task_outputs_by_task.setdefault(output["task_id"], []).append(
+                serialize_task_output(output)
+            )
+
+        approvals = conn.execute(
+            f"""
+            SELECT * FROM approvals
+            WHERE workspace_id = ? AND task_id IN ({placeholders})
+            ORDER BY created_at DESC
+            """,
+            (workspace_id, *task_ids),
+        ).fetchall()
+        for approval in approvals:
+            approvals_by_task.setdefault(approval["task_id"], []).append(
+                serialize_approval(approval)
+            )
     messages_by_conversation = {}
     serialized_conversations = []
     for conversation in conversations:
@@ -527,6 +791,9 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "conversations": serialized_conversations,
         "messages_by_conversation": messages_by_conversation,
         "tasks": [serialize_task(task) for task in tasks],
+        "task_events_by_task": task_events_by_task,
+        "task_outputs_by_task": task_outputs_by_task,
+        "approvals_by_task": approvals_by_task,
         "agent_template_categories": TALENT_CATEGORIES,
         "agent_templates": AGENT_TEMPLATES,
     }

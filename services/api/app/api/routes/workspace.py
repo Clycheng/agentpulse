@@ -13,6 +13,7 @@ from app.schemas.workspace import (
     CreateGroupRequest,
     CreateTaskRequest,
     RecruitAgentRequest,
+    ResolveApprovalRequest,
     SendMessageRequest,
     SendMessageResponse,
     TaskOut,
@@ -20,6 +21,8 @@ from app.schemas.workspace import (
 )
 from app.services.workspace import (
     add_message,
+    add_task_event,
+    add_task_output,
     create_agent,
     create_dm_conversation,
     create_task,
@@ -30,6 +33,7 @@ from app.services.workspace import (
     now_iso,
     recruit_from_template,
     serialize_agent,
+    serialize_approval,
     serialize_message,
     serialize_task,
     update_task,
@@ -176,6 +180,15 @@ def create_group(
                 WHERE id = ?
                 """,
                 (conversation_id, now_iso(), task["id"]),
+            )
+            add_task_event(
+                conn,
+                workspace_id=workspace["id"],
+                task_id=task["id"],
+                kind="conversation_linked",
+                title="任务已关联群聊",
+                content=f"已关联到 #{payload.name}，群聊内员工回复会沉淀为任务产出。",
+                conversation_id=conversation_id,
             )
         task_names = "、".join(task["title"] for task in tasks)
         add_message(
@@ -394,10 +407,109 @@ async def send_message(
             now,
         ),
     )
+    related_task_rows = conn.execute(
+        """
+        SELECT id, title FROM tasks
+        WHERE workspace_id = ? AND conversation_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 12
+        """,
+        (workspace["id"], conversation_id),
+    ).fetchall()
+    for task in related_task_rows:
+        add_task_event(
+            conn,
+            workspace_id=workspace["id"],
+            task_id=task["id"],
+            kind="agent_output_generated",
+            title=f"{agent['name']} 生成了产出",
+            content=completion.reply[:600],
+            conversation_id=conversation_id,
+            agent_id=agent["id"],
+        )
+        add_task_output(
+            conn,
+            workspace_id=workspace["id"],
+            task_id=task["id"],
+            title=f"{agent['name']} 的回复",
+            content=completion.reply,
+            conversation_id=conversation_id,
+            agent_id=agent["id"],
+        )
     return {
         "user_message": serialize_message(user_message),
         "agent_message": serialize_message(agent_message),
     }
+
+
+@router.post("/approvals/{approval_id}/resolve")
+def resolve_approval(
+    approval_id: str,
+    payload: ResolveApprovalRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    approval = conn.execute(
+        """
+        SELECT * FROM approvals
+        WHERE id = ? AND workspace_id = ?
+        """,
+        (approval_id, workspace["id"]),
+    ).fetchone()
+    if approval is None:
+        raise HTTPException(status_code=404, detail="确认请求不存在")
+    if approval["status"] != "pending":
+        raise HTTPException(status_code=409, detail="确认请求已处理")
+
+    resolved_at = now_iso()
+    conn.execute(
+        """
+        UPDATE approvals
+        SET status = ?, resolved_by = ?, resolved_at = ?
+        WHERE id = ? AND workspace_id = ?
+        """,
+        (
+            payload.status,
+            current_user["id"],
+            resolved_at,
+            approval_id,
+            workspace["id"],
+        ),
+    )
+    task_id = approval["task_id"]
+    if task_id:
+        add_task_event(
+            conn,
+            workspace_id=workspace["id"],
+            task_id=task_id,
+            kind="approval_resolved",
+            title="老板已确认" if payload.status == "approved" else "老板已驳回",
+            content=approval["title"],
+            conversation_id=approval["conversation_id"],
+            agent_id=approval["agent_id"],
+        )
+        if payload.status == "approved":
+            update_task(
+                conn,
+                workspace_id=workspace["id"],
+                task_id=task_id,
+                changes={"status": "已完成", "progress": 100},
+            )
+        else:
+            update_task(
+                conn,
+                workspace_id=workspace["id"],
+                task_id=task_id,
+                changes={"status": "阻塞", "progress": 80},
+            )
+
+    updated = conn.execute(
+        "SELECT * FROM approvals WHERE id = ?", (approval_id,)
+    ).fetchone()
+    return serialize_approval(updated)
 
 
 def resolve_reply_agent(

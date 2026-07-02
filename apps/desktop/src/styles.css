@@ -2400,6 +2400,10 @@ textarea::placeholder {
   animation: fadeUp 0.2s ease;
 }
 
+.task-detail-drawer {
+  width: 460px;
+}
+
 .agent-drawer header {
   padding: 22px 24px 18px;
   border-bottom: 1px solid var(--border-soft);
@@ -2516,6 +2520,190 @@ textarea::placeholder {
 .drawer-task em {
   font-size: 11.5px;
   font-style: normal;
+}
+
+.task-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.task-detail-grid > div {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.task-detail-grid span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--subtle);
+  font-size: 11.5px;
+}
+
+.task-detail-grid strong,
+.task-detail-grid button {
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  background: transparent;
+  color: var(--text-strong);
+  cursor: default;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-detail-grid button {
+  cursor: pointer;
+}
+
+.task-detail-grid button:hover {
+  color: var(--primary);
+}
+
+.task-detail-progress {
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+  gap: 10px;
+}
+
+.task-detail-progress .progress-track {
+  flex: 1;
+}
+
+.task-detail-progress span {
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.approval-request {
+  overflow: hidden;
+  border: 1px solid #f2d9ae;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.approval-request > div {
+  display: flex;
+  align-items: flex-start;
+  padding: 13px 14px;
+  gap: 9px;
+}
+
+.approval-request .material-symbol {
+  color: var(--warning);
+  font-variation-settings: 'FILL' 1;
+}
+
+.approval-request span {
+  min-width: 0;
+}
+
+.approval-request strong,
+.task-output-card strong,
+.timeline-event strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.approval-request em {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.6;
+}
+
+.approval-request footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 14px 13px;
+  gap: 8px;
+}
+
+.task-output-card {
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.task-output-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface-muted);
+  gap: 10px;
+}
+
+.task-output-card header span {
+  color: var(--subtle);
+  font-size: 11.5px;
+}
+
+.task-output-card pre {
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 13px 14px;
+  color: var(--text);
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.task-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timeline-event {
+  position: relative;
+  display: flex;
+  gap: 10px;
+}
+
+.timeline-event > i {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.timeline-event > div {
+  min-width: 0;
+  flex: 1;
+  padding-bottom: 5px;
+}
+
+.timeline-event span {
+  display: block;
+  margin-top: 2px;
+  color: var(--subtle);
+  font-size: 11.5px;
+}
+
+.timeline-event p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .drawer-progress {

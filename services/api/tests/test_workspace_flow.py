@@ -331,6 +331,11 @@ def test_task_api_updates_and_injects_related_context(tmp_path, monkeypatch):
     assert task_payload["description"] == "输出三版首屏标题、副标题和 CTA。"
     assert task_payload["conversation_id"] == dm_chat["id"]
 
+    after_create = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    created_events = after_create["task_events_by_task"][task_payload["id"]]
+    assert created_events[0]["kind"] == "task_created"
+    assert any(event["kind"] == "task_assigned" for event in created_events)
+
     patched = client.patch(
         f"/api/tasks/{task_payload['id']}",
         headers=auth_header(token),
@@ -356,3 +361,26 @@ def test_task_api_updates_and_injects_related_context(tmp_path, monkeypatch):
     messages = reloaded["messages_by_conversation"][dm_chat["id"]]
     assert any("已创建任务：官网首屏文案" in message["content"] for message in messages)
     assert any("任务更新：官网首屏文案 · 待确认" in message["content"] for message in messages)
+    events = reloaded["task_events_by_task"][task_payload["id"]]
+    assert any(event["kind"] == "approval_requested" for event in events)
+    assert any(event["kind"] == "agent_output_generated" for event in events)
+    outputs = reloaded["task_outputs_by_task"][task_payload["id"]]
+    assert outputs[0]["content"] == "我会基于关联任务推进：先确认文案目标，再产出首屏草案。"
+    approvals = reloaded["approvals_by_task"][task_payload["id"]]
+    assert approvals[0]["status"] == "pending"
+
+    resolved = client.post(
+        f"/api/approvals/{approvals[0]['id']}/resolve",
+        headers=auth_header(token),
+        json={"status": "approved"},
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "approved"
+
+    completed = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    completed_task = next(
+        task for task in completed["tasks"] if task["id"] == task_payload["id"]
+    )
+    assert completed_task["status"] == "已完成"
+    completed_events = completed["task_events_by_task"][task_payload["id"]]
+    assert any(event["kind"] == "approval_resolved" for event in completed_events)

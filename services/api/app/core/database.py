@@ -220,6 +220,45 @@ def init_postgres(conn: Database) -> None:
           updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS task_events (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          kind TEXT NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS task_outputs (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          output_type TEXT NOT NULL DEFAULT 'markdown',
+          content TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS approvals (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'pending',
+          risk_level TEXT NOT NULL DEFAULT 'medium',
+          resolved_by TEXT NOT NULL DEFAULT '',
+          resolved_at TEXT,
+          created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS runs (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -336,6 +375,45 @@ def init_sqlite(conn: Database) -> None:
           updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS task_events (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          kind TEXT NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS task_outputs (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          output_type TEXT NOT NULL DEFAULT 'markdown',
+          content TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS approvals (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'pending',
+          risk_level TEXT NOT NULL DEFAULT 'medium',
+          resolved_by TEXT NOT NULL DEFAULT '',
+          resolved_at TEXT,
+          created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS runs (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -390,6 +468,9 @@ def reset_database_for_tests() -> None:
             conn.executescript(
                 """
                 DROP TABLE IF EXISTS runs CASCADE;
+                DROP TABLE IF EXISTS approvals CASCADE;
+                DROP TABLE IF EXISTS task_outputs CASCADE;
+                DROP TABLE IF EXISTS task_events CASCADE;
                 DROP TABLE IF EXISTS tasks CASCADE;
                 DROP TABLE IF EXISTS messages CASCADE;
                 DROP TABLE IF EXISTS conversation_members CASCADE;
@@ -404,6 +485,9 @@ def reset_database_for_tests() -> None:
             conn.executescript(
                 """
                 DROP TABLE IF EXISTS runs;
+                DROP TABLE IF EXISTS approvals;
+                DROP TABLE IF EXISTS task_outputs;
+                DROP TABLE IF EXISTS task_events;
                 DROP TABLE IF EXISTS tasks;
                 DROP TABLE IF EXISTS messages;
                 DROP TABLE IF EXISTS conversation_members;

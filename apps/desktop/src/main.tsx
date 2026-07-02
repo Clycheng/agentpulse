@@ -85,6 +85,47 @@ type Task = {
   srcLabel: string;
   dueDate?: string | null;
   parentTaskId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  events: TaskEvent[];
+  outputs: TaskOutput[];
+  approvals: Approval[];
+};
+
+type TaskEvent = {
+  id: string;
+  taskId: string;
+  conversationId: string | null;
+  agentId: string | null;
+  kind: string;
+  title: string;
+  content: string;
+  time: string;
+};
+
+type TaskOutput = {
+  id: string;
+  taskId: string;
+  conversationId: string | null;
+  agentId: string | null;
+  title: string;
+  outputType: string;
+  content: string;
+  time: string;
+};
+
+type Approval = {
+  id: string;
+  taskId: string | null;
+  conversationId: string | null;
+  agentId: string | null;
+  title: string;
+  description: string;
+  status: 'pending' | 'approved' | 'rejected' | string;
+  riskLevel: string;
+  resolvedBy: string;
+  resolvedAt: string | null;
+  time: string;
 };
 
 type HireTemplate = {
@@ -167,6 +208,48 @@ type ApiBootstrap = {
     created_at: string;
     updated_at: string;
   }>;
+  task_events_by_task: Record<
+    string,
+    Array<{
+      id: string;
+      task_id: string;
+      conversation_id: string | null;
+      agent_id: string | null;
+      kind: string;
+      title: string;
+      content: string;
+      created_at: string;
+    }>
+  >;
+  task_outputs_by_task: Record<
+    string,
+    Array<{
+      id: string;
+      task_id: string;
+      conversation_id: string | null;
+      agent_id: string | null;
+      title: string;
+      output_type: string;
+      content: string;
+      created_at: string;
+    }>
+  >;
+  approvals_by_task: Record<
+    string,
+    Array<{
+      id: string;
+      task_id: string | null;
+      conversation_id: string | null;
+      agent_id: string | null;
+      title: string;
+      description: string;
+      status: string;
+      risk_level: string;
+      resolved_by: string;
+      resolved_at: string | null;
+      created_at: string;
+    }>
+  >;
   agent_templates: Array<{
     id: string;
     name: string;
@@ -529,6 +612,43 @@ function mapBootstrap(data: ApiBootstrap) {
         : '未关联会话',
       dueDate: task.due_date ?? null,
       parentTaskId: task.parent_task_id ?? null,
+      createdAt: formatTime(task.created_at),
+      updatedAt: formatTime(task.updated_at),
+      events: (data.task_events_by_task[task.id] ?? []).map((event) => ({
+        id: event.id,
+        taskId: event.task_id,
+        conversationId: event.conversation_id,
+        agentId: event.agent_id,
+        kind: event.kind,
+        title: event.title,
+        content: event.content,
+        time: formatTime(event.created_at),
+      })),
+      outputs: (data.task_outputs_by_task[task.id] ?? []).map((output) => ({
+        id: output.id,
+        taskId: output.task_id,
+        conversationId: output.conversation_id,
+        agentId: output.agent_id,
+        title: output.title,
+        outputType: output.output_type,
+        content: output.content,
+        time: formatTime(output.created_at),
+      })),
+      approvals: (data.approvals_by_task[task.id] ?? []).map((approval) => ({
+        id: approval.id,
+        taskId: approval.task_id,
+        conversationId: approval.conversation_id,
+        agentId: approval.agent_id,
+        title: approval.title,
+        description: approval.description,
+        status: approval.status,
+        riskLevel: approval.risk_level,
+        resolvedBy: approval.resolved_by,
+        resolvedAt: approval.resolved_at
+          ? formatTime(approval.resolved_at)
+          : null,
+        time: formatTime(approval.created_at),
+      })),
     };
   });
   const templates: HireTemplate[] = data.agent_templates.map((template) => ({
@@ -605,6 +725,7 @@ function App() {
   const [groupOpen, setGroupOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [taskDetailId, setTaskDetailId] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState<TaskStatus | '全部'>('全部');
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('docs');
   const [typingName, setTypingName] = useState<string | null>(null);
@@ -773,6 +894,7 @@ function App() {
     setChatId(id);
     setDraft('');
     setDetailId(null);
+    setTaskDetailId(null);
     setChats((current) =>
       current.map((chat) => (chat.id === id ? { ...chat, unread: 0 } : chat)),
     );
@@ -805,6 +927,7 @@ function App() {
     setTaskScopeChatId(null);
     setView('tasks');
     setDetailId(null);
+    setTaskDetailId(null);
   };
 
   const openRelatedTasks = () => {
@@ -813,6 +936,7 @@ function App() {
     setTaskFilter('全部');
     setView('tasks');
     setDetailId(null);
+    setTaskDetailId(null);
   };
 
   const openCreateTask = () => {
@@ -1081,6 +1205,26 @@ function App() {
     }
   };
 
+  const resolveApproval = async (
+    approval: Approval,
+    status: 'approved' | 'rejected',
+  ) => {
+    if (!token) return;
+    try {
+      await apiRequest(`/approvals/${approval.id}/resolve`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ status }),
+      });
+      await loadBootstrap(token);
+      showToast(
+        status === 'approved' ? '已确认，任务归档完成' : '已驳回，任务进入阻塞',
+      );
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '处理确认请求失败');
+    }
+  };
+
   const finishOnboarding = async () => {
     if (token) {
       await apiRequest('/me/onboarding/complete', {
@@ -1158,6 +1302,9 @@ function App() {
         ? [activeChat.agentId]
         : [];
   const detailAgent = detailId ? agentById(detailId) : null;
+  const detailTask = taskDetailId
+    ? tasks.find((task) => task.id === taskDetailId)
+    : null;
 
   if (!token || !user || !workspace) {
     return (
@@ -1194,6 +1341,7 @@ function App() {
           if (nextView === 'tasks') setTaskScopeChatId(null);
           setView(nextView);
           setDetailId(null);
+          setTaskDetailId(null);
         }}
       />
 
@@ -1276,6 +1424,7 @@ function App() {
             onClearScope={openAllTasks}
             onOpenCreateTask={openCreateTask}
             onAdvanceTask={advanceTask}
+            onOpenTask={(taskId) => setTaskDetailId(taskId)}
             onOpenChat={openChat}
             onOpenAgent={(id) => setDetailId(id)}
           />
@@ -1303,6 +1452,18 @@ function App() {
             );
             if (chat) openChat(chat.id);
           }}
+        />
+      )}
+
+      {detailTask && (
+        <TaskDetail
+          task={detailTask}
+          agent={detailTask.owner ? agentById(detailTask.owner) : undefined}
+          onClose={() => setTaskDetailId(null)}
+          onOpenChat={openChat}
+          onOpenAgent={(id) => setDetailId(id)}
+          onAdvanceTask={advanceTask}
+          onResolveApproval={resolveApproval}
         />
       )}
 
@@ -2611,6 +2772,7 @@ function TasksView({
   onClearScope,
   onOpenCreateTask,
   onAdvanceTask,
+  onOpenTask,
   onOpenChat,
   onOpenAgent,
 }: {
@@ -2623,6 +2785,7 @@ function TasksView({
   onClearScope: () => void;
   onOpenCreateTask: () => void;
   onAdvanceTask: (task: Task) => void;
+  onOpenTask: (taskId: string) => void;
   onOpenChat: (id: string) => void;
   onOpenAgent: (id: string) => void;
 }) {
@@ -2738,6 +2901,9 @@ function TasksView({
                   {task.status}
                 </span>
                 <div className="task-actions">
+                  <button type="button" onClick={() => onOpenTask(task.id)}>
+                    详情
+                  </button>
                   <button type="button" onClick={() => onAdvanceTask(task)}>
                     {task.status === '已完成' ? '已完成' : '推进'}
                   </button>
@@ -2930,6 +3096,186 @@ function AgentDetail({
                 </article>
               );
             })}
+          </section>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function TaskDetail({
+  task,
+  agent,
+  onClose,
+  onOpenChat,
+  onOpenAgent,
+  onAdvanceTask,
+  onResolveApproval,
+}: {
+  task: Task;
+  agent?: Agent;
+  onClose: () => void;
+  onOpenChat: (id: string) => void;
+  onOpenAgent: (id: string) => void;
+  onAdvanceTask: (task: Task) => void;
+  onResolveApproval: (
+    approval: Approval,
+    status: 'approved' | 'rejected',
+  ) => void;
+}) {
+  const status = statusStyle(task.status);
+  const priority = priorityStyle(task.pr);
+  const pendingApprovals = task.approvals.filter(
+    (approval) => approval.status === 'pending',
+  );
+  const latestOutput = task.outputs[0];
+
+  return (
+    <>
+      <div className="overlay" onClick={onClose} />
+      <aside className="agent-drawer task-detail-drawer" aria-label="任务详情">
+        <header>
+          <div className="drawer-topline">
+            <span className="priority-pill" style={priority}>
+              {task.pr}
+            </span>
+            <button type="button" title="关闭" onClick={onClose}>
+              {materialIcon('close')}
+            </button>
+          </div>
+          <h2>
+            {task.title}
+            <span style={{ color: status.color }}>
+              <i style={{ background: status.bar }} />
+              {task.status}
+            </span>
+          </h2>
+          <p>{task.description || '暂无任务说明'}</p>
+          <div className="drawer-actions">
+            {task.src && (
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => onOpenChat(task.src)}
+              >
+                {materialIcon('forum')}关联会话
+              </button>
+            )}
+            <button
+              className="button primary"
+              type="button"
+              onClick={() => onAdvanceTask(task)}
+            >
+              {task.status === '已完成' ? '已完成' : '推进任务'}
+            </button>
+          </div>
+        </header>
+
+        <div className="drawer-scroll">
+          <section className="drawer-section">
+            <h3>任务概览</h3>
+            <div className="task-detail-grid">
+              <div>
+                <span>负责人</span>
+                {agent ? (
+                  <button type="button" onClick={() => onOpenAgent(agent.id)}>
+                    {avatarText(agent.name)} · {agent.name}
+                  </button>
+                ) : (
+                  <strong>未分配</strong>
+                )}
+              </div>
+              <div>
+                <span>关联会话</span>
+                <strong>{task.srcLabel}</strong>
+              </div>
+              <div>
+                <span>创建时间</span>
+                <strong>{task.createdAt}</strong>
+              </div>
+              <div>
+                <span>更新时间</span>
+                <strong>{task.updatedAt}</strong>
+              </div>
+            </div>
+            <div className="task-detail-progress">
+              <div className="progress-track">
+                <i
+                  style={{
+                    width: `${task.progress}%`,
+                    background: status.bar,
+                  }}
+                />
+              </div>
+              <span>{task.progress}%</span>
+            </div>
+          </section>
+
+          {pendingApprovals.length > 0 && (
+            <section className="drawer-section">
+              <h3>待老板确认</h3>
+              {pendingApprovals.map((approval) => (
+                <article className="approval-request" key={approval.id}>
+                  <div>
+                    {materialIcon('approval', 'warning')}
+                    <span>
+                      <strong>{approval.title}</strong>
+                      <em>{approval.description}</em>
+                    </span>
+                  </div>
+                  <footer>
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={() => onResolveApproval(approval, 'rejected')}
+                    >
+                      驳回
+                    </button>
+                    <button
+                      className="button primary"
+                      type="button"
+                      onClick={() => onResolveApproval(approval, 'approved')}
+                    >
+                      确认通过
+                    </button>
+                  </footer>
+                </article>
+              ))}
+            </section>
+          )}
+
+          <section className="drawer-section">
+            <h3>最新产出</h3>
+            {latestOutput ? (
+              <article className="task-output-card">
+                <header>
+                  <strong>{latestOutput.title}</strong>
+                  <span>{latestOutput.time}</span>
+                </header>
+                <pre>{latestOutput.content}</pre>
+              </article>
+            ) : (
+              <EmptyState>暂无产出，员工回复后会自动沉淀到这里。</EmptyState>
+            )}
+          </section>
+
+          <section className="drawer-section">
+            <h3>执行记录</h3>
+            <div className="task-timeline">
+              {task.events.length === 0 && (
+                <EmptyState>暂无执行记录</EmptyState>
+              )}
+              {task.events.map((event) => (
+                <article className="timeline-event" key={event.id}>
+                  <i />
+                  <div>
+                    <strong>{event.title}</strong>
+                    <span>{event.time}</span>
+                    {event.content && <p>{event.content}</p>}
+                  </div>
+                </article>
+              ))}
+            </div>
           </section>
         </div>
       </aside>

@@ -62,6 +62,42 @@ class TaskOut(BaseModel):
     updated_at: str
 
 
+class TaskEventOut(BaseModel):
+    id: str
+    task_id: str
+    conversation_id: str | None
+    agent_id: str | None
+    kind: str
+    title: str
+    content: str
+    created_at: str
+
+
+class TaskOutputOut(BaseModel):
+    id: str
+    task_id: str
+    conversation_id: str | None
+    agent_id: str | None
+    title: str
+    output_type: str
+    content: str
+    created_at: str
+
+
+class ApprovalOut(BaseModel):
+    id: str
+    task_id: str | None
+    conversation_id: str | None
+    agent_id: str | None
+    title: str
+    description: str
+    status: str
+    risk_level: str
+    resolved_by: str
+    resolved_at: str | None = None
+    created_at: str
+
+
 class AgentTemplateOut(BaseModel):
     id: str
     name: str
@@ -91,6 +127,9 @@ class BootstrapResponse(BaseModel):
     conversations: list[ConversationOut]
     messages_by_conversation: dict[str, list[MessageOut]]
     tasks: list[TaskOut]
+    task_events_by_task: dict[str, list[TaskEventOut]]
+    task_outputs_by_task: dict[str, list[TaskOutputOut]]
+    approvals_by_task: dict[str, list[ApprovalOut]]
     agent_template_categories: list[AgentTemplateCategoryOut]
     agent_templates: list[AgentTemplateOut]
 
@@ -149,3 +188,7 @@ class UpdateTaskRequest(BaseModel):
     conversation_id: str | None = None
     due_date: str | None = Field(default=None, max_length=40)
     parent_task_id: str | None = None
+
+
+class ResolveApprovalRequest(BaseModel):
+    status: Literal["approved", "rejected"]
