@@ -90,6 +90,14 @@ def test_admin_talent_market_catalog_exposes_official_templates(tmp_path, monkey
     assert payload["categories"][0]["id"] == "business-ops"
     assert payload["templates"][0]["publisher"] == "AgentPulse 官方"
     assert payload["templates"][0]["status"] == "published"
+    conn = connect()
+    try:
+        table_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM official_agent_templates"
+        ).fetchone()
+        assert table_count["count"] == len(payload["templates"])
+    finally:
+        conn.close()
 
 
 def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
@@ -632,3 +640,52 @@ def test_rejected_approval_creates_agent_lesson_experience(tmp_path, monkeypatch
     experiences = reloaded["agent_experiences_by_agent"][agent["id"]]
     assert experiences[0]["outcome"] == "lesson"
     assert "被老板驳回" in experiences[0]["summary"]
+
+
+def test_unassigned_task_enters_pool_and_can_be_claimed(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    agent = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "运营助理",
+            "description": "负责运营执行",
+            "department_name": "运营部",
+            "prompt": "你负责把运营任务拆成可执行动作。",
+        },
+    ).json()
+
+    task = client.post(
+        "/api/tasks",
+        headers=auth_header(token),
+        json={
+            "title": "整理本周运营事项",
+            "description": "从任务池认领后推进。",
+            "priority": "P2",
+            "status": "进行中",
+            "progress": 10,
+        },
+    )
+    assert task.status_code == 200
+    task_payload = task.json()
+    assert task_payload["owner_agent_id"] is None
+    assert task_payload["status"] == "待认领"
+    assert task_payload["progress"] == 0
+
+    claimed = client.post(
+        f"/api/tasks/{task_payload['id']}/claim",
+        headers=auth_header(token),
+        json={"agent_id": agent["id"]},
+    )
+    assert claimed.status_code == 200
+    claimed_payload = claimed.json()
+    assert claimed_payload["owner_agent_id"] == agent["id"]
+    assert claimed_payload["status"] == "进行中"
+    assert claimed_payload["progress"] == 20
+
+    reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    events = reloaded["task_events_by_task"][task_payload["id"]]
+    assert any(event["kind"] == "task_claimed" for event in events)

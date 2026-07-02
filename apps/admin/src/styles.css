@@ -158,7 +158,7 @@ nav svg {
   flex-shrink: 0;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .metrics article {
@@ -206,6 +206,37 @@ nav svg {
   width: 18px;
   height: 18px;
   color: #16803c;
+}
+
+.admin-pipeline {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid #dde1e7;
+  border-radius: 8px;
+  background: #ffffff;
+  gap: 8px;
+}
+
+.admin-pipeline span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 6px;
+  background: #f7f8fa;
+  color: #4b5563;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-pipeline svg {
+  width: 15px;
+  height: 15px;
+  color: #3155c8;
 }
 
 .manager {

@@ -1,3 +1,11 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any
+import json
+
+
 TALENT_CATEGORIES = [
     {
         "id": "business-ops",
@@ -114,8 +122,184 @@ AGENT_TEMPLATES = [
 ]
 
 
-def get_template(template_id: str) -> dict | None:
-    return next(
-        (template for template in AGENT_TEMPLATES if template["id"] == template_id),
-        None,
-    )
+def seed_official_talent_market(conn: Any) -> None:
+    now = datetime.now(UTC).isoformat()
+    for category in TALENT_CATEGORIES:
+        existing = conn.execute(
+            "SELECT id FROM official_talent_categories WHERE id = ?",
+            (category["id"],),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO official_talent_categories (
+                  id, name, description, sort_order, status, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, 'published', ?, ?)
+                """,
+                (
+                    category["id"],
+                    category["name"],
+                    category["description"],
+                    category["sort_order"],
+                    now,
+                    now,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE official_talent_categories
+                SET name = ?, description = ?, sort_order = ?, status = 'published',
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    category["name"],
+                    category["description"],
+                    category["sort_order"],
+                    now,
+                    category["id"],
+                ),
+            )
+
+    for template in AGENT_TEMPLATES:
+        existing = conn.execute(
+            "SELECT id FROM official_agent_templates WHERE id = ?",
+            (template["id"],),
+        ).fetchone()
+        values = (
+            template["category_id"],
+            template["name"],
+            template["department"],
+            template["description"],
+            template["prompt"],
+            json.dumps(template["skills"], ensure_ascii=False),
+            json.dumps(template["mcps"], ensure_ascii=False),
+            template["publisher"],
+            template["version"],
+            template["status"],
+            now,
+            template["id"],
+        )
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO official_agent_templates (
+                  id, category_id, name, department, description, prompt,
+                  skills_json, mcps_json, publisher, version, status,
+                  created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    template["id"],
+                    template["category_id"],
+                    template["name"],
+                    template["department"],
+                    template["description"],
+                    template["prompt"],
+                    json.dumps(template["skills"], ensure_ascii=False),
+                    json.dumps(template["mcps"], ensure_ascii=False),
+                    template["publisher"],
+                    template["version"],
+                    template["status"],
+                    now,
+                    now,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE official_agent_templates
+                SET category_id = ?, name = ?, department = ?, description = ?,
+                    prompt = ?, skills_json = ?, mcps_json = ?, publisher = ?,
+                    version = ?, status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                values,
+            )
+
+
+def list_talent_categories(conn: Any) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT id, name, description, sort_order
+        FROM official_talent_categories
+        WHERE status = 'published'
+        ORDER BY sort_order, name
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_agent_templates(conn: Any) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT
+          templates.id,
+          templates.category_id,
+          categories.name AS category,
+          templates.name,
+          templates.department,
+          templates.description,
+          templates.prompt,
+          templates.skills_json,
+          templates.mcps_json,
+          templates.publisher,
+          templates.version,
+          templates.status
+        FROM official_agent_templates AS templates
+        JOIN official_talent_categories AS categories
+          ON categories.id = templates.category_id
+        WHERE templates.status = 'published'
+          AND categories.status = 'published'
+        ORDER BY categories.sort_order, templates.updated_at DESC, templates.name
+        """
+    ).fetchall()
+    return [serialize_template(row) for row in rows]
+
+
+def get_template(conn: Any, template_id: str) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT
+          templates.id,
+          templates.category_id,
+          categories.name AS category,
+          templates.name,
+          templates.department,
+          templates.description,
+          templates.prompt,
+          templates.skills_json,
+          templates.mcps_json,
+          templates.publisher,
+          templates.version,
+          templates.status
+        FROM official_agent_templates AS templates
+        JOIN official_talent_categories AS categories
+          ON categories.id = templates.category_id
+        WHERE templates.id = ?
+          AND templates.status = 'published'
+          AND categories.status = 'published'
+        """,
+        (template_id,),
+    ).fetchone()
+    return serialize_template(row) if row is not None else None
+
+
+def serialize_template(row: Sequence[Any] | dict) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "category_id": row["category_id"],
+        "category": row["category"],
+        "department": row["department"],
+        "description": row["description"],
+        "prompt": row["prompt"],
+        "skills": json.loads(row["skills_json"]),
+        "mcps": json.loads(row["mcps_json"]),
+        "publisher": row["publisher"],
+        "version": row["version"],
+        "status": row["status"],
+    }

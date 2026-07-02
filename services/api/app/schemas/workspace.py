@@ -204,5 +204,9 @@ class UpdateTaskRequest(BaseModel):
     parent_task_id: str | None = None
 
 
+class ClaimTaskRequest(BaseModel):
+    agent_id: str
+
+
 class ResolveApprovalRequest(BaseModel):
     status: Literal["approved", "rejected"]

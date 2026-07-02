@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Database,
   Layers3,
+  ListChecks,
   Search,
   ShieldCheck,
   Sparkles,
@@ -65,6 +66,12 @@ const fallbackCatalog: CatalogResponse = {
       description: '线索跟进、客户响应、报价、FAQ、成交支持与客户成功类官方人才',
       sort_order: 30,
     },
+    {
+      id: 'finance-office',
+      name: '财务行政',
+      description: '记账、对账、报表、行政支持、合规检查与异常提醒类官方人才',
+      sort_order: 40,
+    },
   ],
   templates: [
     {
@@ -93,6 +100,66 @@ const fallbackCatalog: CatalogResponse = {
         '你是一名内容主笔。擅长品牌叙事与转化型文案，为官网、公众号与销售物料产出高质量内容。',
       skills: ['公众号文案', 'SEO 优化'],
       mcps: ['飞书文档', '微信公众号'],
+      publisher: 'AgentPulse 官方',
+      version: 'v0.1.0',
+      status: 'published',
+    },
+    {
+      id: 'video-planner',
+      name: '短视频策划',
+      category_id: 'content-growth',
+      category: '内容增长',
+      department: '内容部',
+      description: '选题、脚本、分发',
+      prompt:
+        '你是一名短视频策划。负责选题、脚本与分发节奏，选题要能挂钩获客目标。',
+      skills: ['公众号文案'],
+      mcps: ['飞书文档'],
+      publisher: 'AgentPulse 官方',
+      version: 'v0.1.0',
+      status: 'published',
+    },
+    {
+      id: 'sales-consultant',
+      name: '销售顾问',
+      category_id: 'sales-success',
+      category: '销售客户',
+      department: '增长与客户',
+      description: '线索、报价、周报',
+      prompt:
+        '你是一名销售顾问。负责线索跟进、报价与周报，成交卡点要及时上报老板拍板。',
+      skills: ['客服话术', '数据报表'],
+      mcps: ['企业邮箱', 'Notion'],
+      publisher: 'AgentPulse 官方',
+      version: 'v0.1.0',
+      status: 'published',
+    },
+    {
+      id: 'support-agent',
+      name: '客服专员',
+      category_id: 'sales-success',
+      category: '销售客户',
+      department: '增长与客户',
+      description: 'FAQ、话术、响应',
+      prompt:
+        '你是一名客服专员。基于公司 FAQ 与话术库回复客户，超出权限的承诺必须请老板拍板。',
+      skills: ['客服话术'],
+      mcps: ['企业邮箱'],
+      publisher: 'AgentPulse 官方',
+      version: 'v0.1.0',
+      status: 'published',
+    },
+    {
+      id: 'finance-assistant',
+      name: '财务助理',
+      category_id: 'finance-office',
+      category: '财务行政',
+      department: '财务行政',
+      description: '记账、对账、报表',
+      prompt:
+        '你是一名财务助理。负责记账、对账与月度报表，任何异常支出立即标红上报。',
+      skills: ['数据报表'],
+      mcps: ['Stripe', '飞书文档'],
       publisher: 'AgentPulse 官方',
       version: 'v0.1.0',
       status: 'published',
@@ -219,6 +286,21 @@ function App() {
           />
         </section>
 
+        <section className="admin-pipeline" aria-label="官方发布流">
+          <span>
+            <Database aria-hidden="true" />
+            official_talent_categories
+          </span>
+          <span>
+            <Boxes aria-hidden="true" />
+            official_agent_templates
+          </span>
+          <span>
+            <ListChecks aria-hidden="true" />
+            草稿 → 审核 → 发布
+          </span>
+        </section>
+
         <section className="manager">
           <aside className="category-panel">
             <div className="panel-title">
@@ -262,7 +344,7 @@ function App() {
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </label>
-              <button type="button">新建官方模板</button>
+              <button type="button">新建模板草稿</button>
             </div>
 
             <div className="template-table">
@@ -292,7 +374,9 @@ function App() {
                   <span>{template.department}</span>
                   <span>
                     <i />
-                    已上架
+                    {template.status === 'published'
+                      ? '已发布'
+                      : template.status}
                   </span>
                   <span>{template.version}</span>
                 </button>

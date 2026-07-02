@@ -11,6 +11,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from app.core.config import settings
+from app.services.templates import seed_official_talent_market
 
 
 Params = Sequence[Any]
@@ -120,6 +121,7 @@ def init_db() -> None:
             init_postgres(conn)
         else:
             init_sqlite(conn)
+        seed_official_talent_market(conn)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -137,6 +139,32 @@ def init_postgres(conn: Database) -> None:
           password_hash TEXT NOT NULL,
           display_name TEXT NOT NULL,
           created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS official_talent_categories (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'published',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS official_agent_templates (
+          id TEXT PRIMARY KEY,
+          category_id TEXT NOT NULL REFERENCES official_talent_categories(id) ON DELETE RESTRICT,
+          name TEXT NOT NULL,
+          department TEXT NOT NULL DEFAULT '',
+          description TEXT NOT NULL DEFAULT '',
+          prompt TEXT NOT NULL,
+          skills_json TEXT NOT NULL DEFAULT '[]',
+          mcps_json TEXT NOT NULL DEFAULT '[]',
+          publisher TEXT NOT NULL DEFAULT 'AgentPulse 官方',
+          version TEXT NOT NULL DEFAULT 'v0.1.0',
+          status TEXT NOT NULL DEFAULT 'published',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS workspaces (
@@ -303,6 +331,32 @@ def init_sqlite(conn: Database) -> None:
           password_hash TEXT NOT NULL,
           display_name TEXT NOT NULL,
           created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS official_talent_categories (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'published',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS official_agent_templates (
+          id TEXT PRIMARY KEY,
+          category_id TEXT NOT NULL REFERENCES official_talent_categories(id) ON DELETE RESTRICT,
+          name TEXT NOT NULL,
+          department TEXT NOT NULL DEFAULT '',
+          description TEXT NOT NULL DEFAULT '',
+          prompt TEXT NOT NULL,
+          skills_json TEXT NOT NULL DEFAULT '[]',
+          mcps_json TEXT NOT NULL DEFAULT '[]',
+          publisher TEXT NOT NULL DEFAULT 'AgentPulse 官方',
+          version TEXT NOT NULL DEFAULT 'v0.1.0',
+          status TEXT NOT NULL DEFAULT 'published',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS workspaces (
@@ -502,6 +556,8 @@ def reset_database_for_tests() -> None:
                 DROP TABLE IF EXISTS departments CASCADE;
                 DROP TABLE IF EXISTS workspaces CASCADE;
                 DROP TABLE IF EXISTS users CASCADE;
+                DROP TABLE IF EXISTS official_agent_templates CASCADE;
+                DROP TABLE IF EXISTS official_talent_categories CASCADE;
                 """
             )
         else:
@@ -520,6 +576,8 @@ def reset_database_for_tests() -> None:
                 DROP TABLE IF EXISTS departments;
                 DROP TABLE IF EXISTS workspaces;
                 DROP TABLE IF EXISTS users;
+                DROP TABLE IF EXISTS official_agent_templates;
+                DROP TABLE IF EXISTS official_talent_categories;
                 """
             )
         conn.commit()

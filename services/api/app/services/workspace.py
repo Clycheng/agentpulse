@@ -6,7 +6,7 @@ import re
 from uuid import uuid4
 
 from app.core.database import Database, Row
-from app.services.templates import AGENT_TEMPLATES, TALENT_CATEGORIES, get_template
+from app.services.templates import get_template, list_agent_templates, list_talent_categories
 
 
 DEFAULT_DEPARTMENTS = ["老板办公室"]
@@ -548,6 +548,9 @@ def create_task(
     due_date: str | None = None,
     parent_task_id: str | None = None,
 ) -> Row:
+    normalized_status = normalize_task_status(status)
+    if not owner_agent_id and status == "进行中":
+        normalized_status = "待认领"
     validate_task_links(
         conn,
         workspace_id=workspace_id,
@@ -573,8 +576,8 @@ def create_task(
             description,
             normalize_priority(priority),
             owner_agent_id,
-            normalize_task_status(status),
-            progress_for_status(normalize_task_status(status), progress),
+            normalized_status,
+            progress_for_status(normalized_status, progress),
             conversation_id,
             due_date,
             parent_task_id,
@@ -735,6 +738,57 @@ def update_task(
     return conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
 
 
+def claim_task(
+    conn: Database,
+    *,
+    workspace_id: str,
+    task_id: str,
+    agent_id: str,
+) -> Row:
+    task = conn.execute(
+        "SELECT * FROM tasks WHERE id = ? AND workspace_id = ?",
+        (task_id, workspace_id),
+    ).fetchone()
+    if task is None:
+        raise ValueError("task not found")
+    validate_task_links(
+        conn,
+        workspace_id=workspace_id,
+        owner_agent_id=agent_id,
+        conversation_id=task["conversation_id"],
+        parent_task_id=task["parent_task_id"],
+    )
+    updated_at = now_iso()
+    next_progress = max(int(task["progress"]), 20)
+    conn.execute(
+        """
+        UPDATE tasks
+        SET owner_agent_id = ?, status = '进行中', progress = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ?
+        """,
+        (agent_id, next_progress, updated_at, task_id, workspace_id),
+    )
+    add_task_event(
+        conn,
+        workspace_id=workspace_id,
+        task_id=task_id,
+        kind="task_claimed",
+        title="员工已认领任务",
+        content="任务已从任务池进入执行状态。",
+        conversation_id=task["conversation_id"],
+        agent_id=agent_id,
+    )
+    if task["conversation_id"]:
+        add_message(
+            conn,
+            conversation_id=task["conversation_id"],
+            sender_type="system",
+            sender_id="",
+            content=f"任务已被认领：{task['title']}",
+        )
+    return conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+
+
 def validate_task_links(
     conn: Database,
     *,
@@ -775,13 +829,15 @@ def normalize_priority(value: str) -> str:
 def normalize_task_status(value: str) -> str:
     if value == "卡住":
         return "阻塞"
-    return value if value in {"进行中", "待确认", "阻塞", "已完成"} else "进行中"
+    return value if value in {"待认领", "进行中", "待确认", "阻塞", "已完成"} else "进行中"
 
 
 def progress_for_status(status: str, progress: int) -> int:
     bounded = max(0, min(100, progress))
     if status == "已完成":
         return 100
+    if status == "待认领":
+        return 0
     if status == "进行中" and bounded == 0:
         return 10
     return bounded
@@ -1018,8 +1074,8 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "task_outputs_by_task": task_outputs_by_task,
         "approvals_by_task": approvals_by_task,
         "agent_experiences_by_agent": agent_experiences_by_agent,
-        "agent_template_categories": TALENT_CATEGORIES,
-        "agent_templates": AGENT_TEMPLATES,
+        "agent_template_categories": list_talent_categories(conn),
+        "agent_templates": list_agent_templates(conn),
     }
 
 
@@ -1030,7 +1086,7 @@ def recruit_from_template(
     template_id: str,
     department_name: str | None,
 ) -> Row:
-    template = get_template(template_id)
+    template = get_template(conn, template_id)
     if template is None:
         raise ValueError("template not found")
 

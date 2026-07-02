@@ -7,7 +7,7 @@ type View = 'chat' | 'staff' | 'market' | 'tasks' | 'lib';
 type ThemeMode = 'system' | 'light' | 'dark';
 type EffectiveTheme = 'light' | 'dark';
 type AgentStatus = 'busy' | 'wait' | 'stuck' | 'idle';
-type TaskStatus = '进行中' | '待确认' | '阻塞' | '已完成';
+type TaskStatus = '待认领' | '进行中' | '待确认' | '阻塞' | '已完成';
 type Priority = 'P0' | 'P1' | 'P2';
 type LibraryTab = 'docs' | 'skills' | 'mcp';
 
@@ -422,6 +422,8 @@ function priorityStyle(priority: Priority) {
 }
 
 function statusStyle(status: TaskStatus) {
+  if (status === '待认领')
+    return { background: '#F2F4F7', color: '#475467', bar: '#98A2B3' };
   if (status === '进行中')
     return { background: '#EEF1FB', color: '#3B5BDB', bar: '#3B5BDB' };
   if (status === '待确认')
@@ -456,6 +458,7 @@ function normalizePriority(value: string): Priority {
 
 function normalizeTaskStatus(value: string): TaskStatus {
   return value === '进行中' ||
+    value === '待认领' ||
     value === '待确认' ||
     value === '阻塞' ||
     value === '已完成'
@@ -466,6 +469,7 @@ function normalizeTaskStatus(value: string): TaskStatus {
 }
 
 function nextTaskStatus(status: TaskStatus): TaskStatus {
+  if (status === '待认领') return '进行中';
   if (status === '进行中') return '待确认';
   if (status === '待确认') return '已完成';
   if (status === '阻塞') return '进行中';
@@ -474,6 +478,7 @@ function nextTaskStatus(status: TaskStatus): TaskStatus {
 
 function progressForNextStatus(status: TaskStatus, current: number) {
   if (status === '已完成') return 100;
+  if (status === '待认领') return 0;
   if (status === '待确认') return Math.max(current, 80);
   if (status === '进行中') return Math.max(current, 20);
   return current;
@@ -760,6 +765,8 @@ function App() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskDetailId, setTaskDetailId] = useState<string | null>(null);
+  const [claimTaskId, setClaimTaskId] = useState<string | null>(null);
+  const [claimAgentId, setClaimAgentId] = useState('');
   const [taskFilter, setTaskFilter] = useState<TaskStatus | '全部'>('全部');
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('docs');
   const [typingName, setTypingName] = useState<string | null>(null);
@@ -1246,8 +1253,8 @@ function App() {
           priority: taskPriority,
           owner_agent_id: taskOwnerId || null,
           conversation_id: taskConversationId || null,
-          status: '进行中',
-          progress: 10,
+          status: taskOwnerId ? '进行中' : '待认领',
+          progress: taskOwnerId ? 10 : 0,
         }),
       });
       await loadBootstrap(token);
@@ -1261,6 +1268,10 @@ function App() {
 
   const advanceTask = async (task: Task) => {
     if (!token) return;
+    if (task.status === '待认领' && !task.owner) {
+      showToast('请先让员工认领这个任务');
+      return;
+    }
     const nextStatus = nextTaskStatus(task.status);
     try {
       await apiRequest(`/tasks/${task.id}`, {
@@ -1275,6 +1286,26 @@ function App() {
       showToast(`任务已更新为「${nextStatus}」`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : '更新任务失败');
+    }
+  };
+
+  const claimTask = async () => {
+    if (!token || !claimTaskId || !claimAgentId) {
+      showToast('请选择认领员工');
+      return;
+    }
+    try {
+      await apiRequest(`/tasks/${claimTaskId}/claim`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ agent_id: claimAgentId }),
+      });
+      await loadBootstrap(token);
+      setClaimTaskId(null);
+      setClaimAgentId('');
+      showToast('任务已进入执行中');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '认领任务失败');
     }
   };
 
@@ -1320,7 +1351,7 @@ function App() {
     (task) => taskFilter === '全部' || task.status === taskFilter,
   );
   const taskTabs = (
-    ['全部', '进行中', '待确认', '阻塞', '已完成'] as const
+    ['全部', '待认领', '进行中', '待确认', '阻塞', '已完成'] as const
   ).map((status) => ({
     status,
     count:
@@ -1497,6 +1528,10 @@ function App() {
             onClearScope={openAllTasks}
             onOpenCreateTask={openCreateTask}
             onAdvanceTask={advanceTask}
+            onOpenClaimTask={(taskId) => {
+              setClaimTaskId(taskId);
+              setClaimAgentId('');
+            }}
             onOpenTask={(taskId) => setTaskDetailId(taskId)}
             onOpenChat={openChat}
             onOpenAgent={(id) => setDetailId(id)}
@@ -1637,6 +1672,20 @@ function App() {
           onConversationChange={setTaskConversationId}
           onClose={() => setTaskOpen(false)}
           onSubmit={submitCreateTask}
+        />
+      )}
+
+      {claimTaskId && (
+        <ClaimTaskModal
+          task={tasks.find((task) => task.id === claimTaskId)}
+          agents={agents}
+          selectedAgentId={claimAgentId}
+          onAgentChange={setClaimAgentId}
+          onClose={() => {
+            setClaimTaskId(null);
+            setClaimAgentId('');
+          }}
+          onSubmit={claimTask}
         />
       )}
 
@@ -2582,6 +2631,9 @@ function TalentMarketView({
   const detailTemplate = detailTemplateId
     ? templates.find((template) => template.id === detailTemplateId)
     : null;
+  const activeCategoryName =
+    categoryOptions.find((category) => category.id === activeCategory)?.name ??
+    '全部';
 
   return (
     <>
@@ -2590,7 +2642,8 @@ function TalentMarketView({
           <div>
             <h1>人才市场中心</h1>
             <p>
-              从官方岗位模板招募 AI 员工，类目、上架和版本由 AgentPulse 官方后台统一维护
+              官方提供可招募 AI 员工模板；类目、Prompt、Skills、MCP
+              和版本由官方后台统一维护
             </p>
           </div>
         </header>
@@ -2600,7 +2653,7 @@ function TalentMarketView({
             {materialIcon('badge')}
             <span>
               <strong>{templates.length}</strong>
-              <em>上架岗位</em>
+              <em>官方人才</em>
             </span>
           </div>
           <div>
@@ -2628,8 +2681,10 @@ function TalentMarketView({
 
         <section className="market-layout">
           <aside className="market-filter" aria-label="岗位筛选">
-            <strong>官方岗位类目</strong>
-            <p>这里不是你的公司部门，而是官方后台配置、审核和发布的人才市场类目。</p>
+            <strong>官方人才类目</strong>
+            <p>
+              这里不是你的公司部门。分类来自官方后台，用户侧只负责筛选、查看和招募。
+            </p>
             <div>
               {categoryOptions.map((category) => {
                 const count =
@@ -2653,7 +2708,8 @@ function TalentMarketView({
               })}
             </div>
             <footer>
-              类目和模板只由官方后台新增、审核、发布；招募时再选择加入你的哪个部门。
+              分类、模板、默认能力和发布版本后续都在 AgentPulse Admin
+              维护；招募时再选择加入你的部门。
             </footer>
           </aside>
 
@@ -2663,11 +2719,13 @@ function TalentMarketView({
                 {materialIcon('search')}
                 <input
                   value={keyword}
-                  placeholder="搜索岗位、能力、工具或官方类目"
+                  placeholder="搜索人才、能力、工具或官方类目"
                   onChange={(event) => setKeyword(event.target.value)}
                 />
               </label>
-              <span>{visibleTemplates.length} 个可招募角色</span>
+              <span>
+                {activeCategoryName} · {visibleTemplates.length} 个官方人才
+              </span>
             </div>
 
             <div className="market-list">
@@ -2697,7 +2755,7 @@ function TalentMarketView({
                     <div className="market-copy">
                       <div>
                         <strong>{template.name}</strong>
-                        <span>官方模板</span>
+                        <span>官方发布</span>
                       </div>
                       <p>
                         {template.category} · 建议入职 {template.dept} ·{' '}
@@ -2721,16 +2779,16 @@ function TalentMarketView({
                     </div>
                   </div>
                   <div className="market-card-actions">
-                    <span>{template.publisher}</span>
+                    <span>{template.version}</span>
                     <button
                       className="button secondary"
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
-                        onRecruit(template.id);
+                        setDetailTemplateId(template.id);
                       }}
                     >
-                      {materialIcon('person_add')}招募
+                      {materialIcon('visibility')}详情
                     </button>
                   </div>
                 </article>
@@ -2783,7 +2841,7 @@ function TalentDetailModal({
           <strong>{template.name}</strong>
           <p>{template.desc}</p>
           <span>
-            {template.publisher} · {template.version} · 官方已上架
+            {template.publisher} · {template.version} · 官方已发布
           </span>
         </div>
       </div>
@@ -2813,7 +2871,7 @@ function TalentDetailModal({
         <div>
           <span>模板状态</span>
           <strong>
-            {template.status === 'published' ? '已上架' : template.status}
+            {template.status === 'published' ? '已发布' : template.status}
           </strong>
         </div>
       </div>
@@ -2832,8 +2890,8 @@ function TalentDetailModal({
 
       <FieldLabel>平台说明</FieldLabel>
       <div className="market-admin-note">
-        官方后台负责类目、模板内容、默认 Prompt、Skills、MCP
-        权限和发布版本；用户侧只负责查看这个人才是否匹配需求，并在招募时选择加入自己的部门。
+        官方后台负责创建人才分类、维护模板内容、审核默认 Prompt、Skills、MCP
+        权限和发布版本。用户侧不创建市场分类，只查看这个人才是否匹配需求，并在招募时选择加入自己的部门。
       </div>
 
       <div className="modal-actions">
@@ -2858,6 +2916,7 @@ function TasksView({
   onClearScope,
   onOpenCreateTask,
   onAdvanceTask,
+  onOpenClaimTask,
   onOpenTask,
   onOpenChat,
   onOpenAgent,
@@ -2871,6 +2930,7 @@ function TasksView({
   onClearScope: () => void;
   onOpenCreateTask: () => void;
   onAdvanceTask: (task: Task) => void;
+  onOpenClaimTask: (taskId: string) => void;
   onOpenTask: (taskId: string) => void;
   onOpenChat: (id: string) => void;
   onOpenAgent: (id: string) => void;
@@ -2990,9 +3050,18 @@ function TasksView({
                   <button type="button" onClick={() => onOpenTask(task.id)}>
                     详情
                   </button>
-                  <button type="button" onClick={() => onAdvanceTask(task)}>
-                    {task.status === '已完成' ? '已完成' : '推进'}
-                  </button>
+                  {task.status === '待认领' ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenClaimTask(task.id)}
+                    >
+                      认领
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => onAdvanceTask(task)}>
+                      {task.status === '已完成' ? '已完成' : '推进'}
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -3679,6 +3748,55 @@ function CreateAgentModal({
         </button>
         <button className="button primary" type="button" onClick={onSubmit}>
           {materialIcon('add_circle')}创建
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function ClaimTaskModal({
+  task,
+  agents,
+  selectedAgentId,
+  onAgentChange,
+  onClose,
+  onSubmit,
+}: {
+  task?: Task;
+  agents: Agent[];
+  selectedAgentId: string;
+  onAgentChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal
+      title="认领任务"
+      description={task ? `从任务池认领「${task.title}」` : '从任务池认领任务'}
+      width={520}
+      onClose={onClose}
+    >
+      <FieldLabel>执行员工</FieldLabel>
+      <select
+        value={selectedAgentId}
+        onChange={(event) => onAgentChange(event.currentTarget.value)}
+      >
+        <option value="">选择员工</option>
+        {agents.map((agent) => (
+          <option key={agent.id} value={agent.id}>
+            {agent.name} · {agent.role}
+          </option>
+        ))}
+      </select>
+      <div className="market-admin-note">
+        认领后任务会进入进行中，并写入任务时间线。后续可以让员工在相关会话里继续执行。
+      </div>
+      <div className="modal-actions">
+        <button className="button secondary" type="button" onClick={onClose}>
+          取消
+        </button>
+        <button className="button primary" type="button" onClick={onSubmit}>
+          {materialIcon('assignment_ind')}确认认领
         </button>
       </div>
     </Modal>

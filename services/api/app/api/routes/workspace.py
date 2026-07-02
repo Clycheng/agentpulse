@@ -14,6 +14,7 @@ from app.schemas.run import (
 from app.schemas.workspace import (
     AddConversationMembersRequest,
     BootstrapResponse,
+    ClaimTaskRequest,
     CreateAgentRequest,
     CreateGroupRequest,
     CreateTaskRequest,
@@ -29,6 +30,7 @@ from app.services.workspace import (
     add_message,
     add_task_event,
     add_task_output,
+    claim_task,
     create_agent,
     create_dm_conversation,
     create_task,
@@ -317,6 +319,29 @@ def update_workspace_task(
             workspace_id=workspace["id"],
             task_id=task_id,
             changes=payload.model_dump(exclude_unset=True),
+        )
+    except ValueError as exc:
+        status_code = 404 if str(exc) == "task not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return serialize_task(task)
+
+
+@router.post("/tasks/{task_id}/claim", response_model=TaskOut)
+def claim_workspace_task(
+    task_id: str,
+    payload: ClaimTaskRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    try:
+        task = claim_task(
+            conn,
+            workspace_id=workspace["id"],
+            task_id=task_id,
+            agent_id=payload.agent_id,
         )
     except ValueError as exc:
         status_code = 404 if str(exc) == "task not found" else 400
