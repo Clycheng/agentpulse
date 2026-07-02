@@ -1577,7 +1577,7 @@ textarea::placeholder {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  padding: 32px 36px;
+  padding: 28px 36px 0;
 }
 
 .market-screen > .page-header,
@@ -1646,6 +1646,8 @@ textarea::placeholder {
 }
 
 .market-filter {
+  position: sticky;
+  top: 0;
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1654,8 +1656,15 @@ textarea::placeholder {
 
 .market-filter > strong {
   display: block;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
   font-size: 14px;
+}
+
+.market-filter > p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .market-filter > div {
@@ -1695,6 +1704,15 @@ textarea::placeholder {
   color: var(--subtle);
   font-size: 12px;
   font-style: normal;
+}
+
+.market-filter footer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--subtle);
+  font-size: 11.5px;
+  line-height: 1.6;
 }
 
 .market-main {
@@ -1746,7 +1764,7 @@ textarea::placeholder {
   overflow-y: auto;
   flex-direction: column;
   min-height: 0;
-  padding-right: 4px;
+  padding: 0 4px 28px 0;
   gap: 10px;
 }
 
@@ -1780,8 +1798,16 @@ textarea::placeholder {
 
 .market-card-actions {
   display: flex;
+  align-items: flex-end;
   flex-shrink: 0;
+  flex-direction: column;
   gap: 8px;
+}
+
+.market-card-actions > span {
+  color: var(--subtle);
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 
 .market-role-icon {
@@ -1903,6 +1929,36 @@ textarea::placeholder {
   background: #eef4ee;
   color: #16803c;
   font-size: 11.5px;
+}
+
+.talent-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.talent-detail-grid > div {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+
+.talent-detail-grid span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--subtle);
+  font-size: 11.5px;
+}
+
+.talent-detail-grid strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .market-admin-note {

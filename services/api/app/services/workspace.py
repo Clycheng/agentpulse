@@ -5,7 +5,7 @@ import json
 from uuid import uuid4
 
 from app.core.database import Database, Row
-from app.services.templates import AGENT_TEMPLATES, get_template
+from app.services.templates import AGENT_TEMPLATES, TALENT_CATEGORIES, get_template
 
 
 DEFAULT_DEPARTMENTS = ["老板办公室"]
@@ -527,6 +527,7 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "conversations": serialized_conversations,
         "messages_by_conversation": messages_by_conversation,
         "tasks": [serialize_task(task) for task in tasks],
+        "agent_template_categories": TALENT_CATEGORIES,
         "agent_templates": AGENT_TEMPLATES,
     }
 

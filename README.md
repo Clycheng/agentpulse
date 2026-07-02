@@ -68,13 +68,14 @@ AgentPulse 的设计原则很简单，也很硬：
 
 当前项目已经是一个可运行的 monorepo，并完成了第一版桌面端原型。
 
-| Area           | Status          | Notes                                         |
-| -------------- | --------------- | --------------------------------------------- |
-| Web 官网       | Scaffolded      | Vite + React + TypeScript                     |
-| Desktop 工作台 | MVP workbench   | Electron + React，已实现消息、员工、人才市场、群聊、任务闭环 |
-| Backend API    | MVP API ready   | FastAPI + PostgreSQL，已接入登录、员工、群聊、任务、DeepSeek 调用 |
-| Product docs   | In progress     | PRD、workflow、backlog、Dust 调研已沉淀       |
-| Agent runtime  | Planned         | 后续实现本地任务运行、工具调用、事件流        |
+| Area           | Status        | Notes                                                             |
+| -------------- | ------------- | ----------------------------------------------------------------- |
+| Web 官网       | Scaffolded    | Vite + React + TypeScript                                         |
+| Desktop 工作台 | MVP workbench | Electron + React，已实现消息、员工、人才市场、群聊、任务闭环      |
+| Admin 后台     | Scaffolded    | 官方人才分类、员工模板、Prompt、Skills、MCP 权限管理入口          |
+| Backend API    | MVP API ready | FastAPI + PostgreSQL，已接入登录、员工、群聊、任务、DeepSeek 调用 |
+| Product docs   | In progress   | PRD、workflow、backlog、Dust 调研已沉淀                           |
+| Agent runtime  | Planned       | 后续实现本地任务运行、工具调用、事件流                            |
 
 桌面端已包含：
 
@@ -145,6 +146,7 @@ agentpulse/
   apps/
     web/              # 官网，Vite + React + TypeScript
     desktop/          # 桌面工作台，Electron + Vite + React + TypeScript
+    admin/            # 官方后台，维护人才市场分类、模板、Prompt、Skills、MCP
   services/
     api/              # 后端 API，FastAPI
   docs/
@@ -162,8 +164,9 @@ agentpulse/
 | Monorepo | npm workspaces                                             |
 | Web      | Vite, React, TypeScript                                    |
 | Desktop  | Electron, Vite, React, TypeScript                          |
-| API      | FastAPI, Pydantic Settings, Uvicorn, psycopg                |
-| Database | PostgreSQL for app data, SQLite only for isolated tests     |
+| Admin    | Vite, React, TypeScript                                    |
+| API      | FastAPI, Pydantic Settings, Uvicorn, psycopg               |
+| Database | PostgreSQL for app data, SQLite only for isolated tests    |
 | Tests    | Pytest, TypeScript checks                                  |
 | UI Icons | Material Symbols in desktop prototype, lucide-react in web |
 
@@ -242,6 +245,18 @@ npm run dev:web
 ```text
 http://localhost:5173
 ```
+
+### Run The Admin Console
+
+```bash
+npm run dev:admin
+```
+
+```text
+http://localhost:5175
+```
+
+当前后台第一版用于维护官方人才市场的产品边界：岗位分类、员工模板、默认 Prompt、Skills、MCP 权限、发布状态和版本。MVP 先读取种子模板，后续会接管理员登录、PostgreSQL 持久化和模板审核发布流程。
 
 ### Run The API
 

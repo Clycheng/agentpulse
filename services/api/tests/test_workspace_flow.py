@@ -62,7 +62,10 @@ def test_register_bootstrap_creates_real_workspace_foundation(tmp_path, monkeypa
     assert len(welcome_messages) == 1
     assert welcome_messages[0]["sender_type"] == "agent"
     assert "我是小秘" in welcome_messages[0]["content"]
+    assert data["agent_template_categories"]
+    assert data["agent_template_categories"][0]["id"] == "ops-growth"
     assert data["agent_templates"]
+    assert data["agent_templates"][0]["category_id"] == "ops-growth"
 
     completed = client.post(
         "/api/me/onboarding/complete",
@@ -75,6 +78,18 @@ def test_register_bootstrap_creates_real_workspace_foundation(tmp_path, monkeypa
         headers=auth_header(auth["access_token"]),
     ).json()
     assert reloaded["workspace"]["onboarding_completed"] is True
+
+
+def test_admin_talent_market_catalog_exposes_official_templates(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+
+    response = client.get("/api/admin/talent-market")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["categories"][0]["id"] == "ops-growth"
+    assert payload["templates"][0]["publisher"] == "AgentPulse 官方"
+    assert payload["templates"][0]["status"] == "published"
 
 
 def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):

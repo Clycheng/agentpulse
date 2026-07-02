@@ -65,12 +65,23 @@ class TaskOut(BaseModel):
 class AgentTemplateOut(BaseModel):
     id: str
     name: str
+    category_id: str
     category: str
     department: str
     description: str
     prompt: str
     skills: list[str]
     mcps: list[str]
+    publisher: str = "AgentPulse 官方"
+    version: str = "v0.1.0"
+    status: str = "published"
+
+
+class AgentTemplateCategoryOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    sort_order: int
 
 
 class BootstrapResponse(BaseModel):
@@ -80,6 +91,7 @@ class BootstrapResponse(BaseModel):
     conversations: list[ConversationOut]
     messages_by_conversation: dict[str, list[MessageOut]]
     tasks: list[TaskOut]
+    agent_template_categories: list[AgentTemplateCategoryOut]
     agent_templates: list[AgentTemplateOut]
 
 

@@ -90,12 +90,23 @@ type Task = {
 type HireTemplate = {
   id: string;
   name: string;
+  categoryId: string;
   category: string;
   dept: string;
   desc: string;
   prompt: string;
   skills: string[];
   mcps: string[];
+  publisher: string;
+  version: string;
+  status: string;
+};
+
+type TalentCategory = {
+  id: string;
+  name: string;
+  description: string;
+  sortOrder: number;
 };
 
 type ToastState = {
@@ -159,12 +170,22 @@ type ApiBootstrap = {
   agent_templates: Array<{
     id: string;
     name: string;
+    category_id: string;
     category: string;
     department: string;
     description: string;
     prompt: string;
     skills: string[];
     mcps: string[];
+    publisher?: string;
+    version?: string;
+    status?: string;
+  }>;
+  agent_template_categories: Array<{
+    id: string;
+    name: string;
+    description: string;
+    sort_order: number;
   }>;
 };
 
@@ -335,7 +356,7 @@ function normalizeTaskStatus(value: string): TaskStatus {
     ? value
     : value === '卡住'
       ? '阻塞'
-    : '进行中';
+      : '进行中';
 }
 
 function nextTaskStatus(status: TaskStatus): TaskStatus {
@@ -464,28 +485,34 @@ function mapBootstrap(data: ApiBootstrap) {
     };
   });
   const messagesByChat: Record<string, Message[]> = Object.fromEntries(
-    Object.entries(data.messages_by_conversation).map(([conversationId, rows]) => [
-      conversationId,
-      rows.map((message) => ({
-        id: message.id,
-        from:
-          message.sender_type === 'user'
-            ? 'boss'
-            : message.sender_type === 'system'
-              ? 'system'
-              : message.sender_id,
-        type: message.sender_type === 'system' ? 'system' : 'text',
-        time: formatTime(message.created_at),
-        text: message.content,
-        provider: message.provider ?? undefined,
-        model: message.model ?? undefined,
-      })),
-    ]),
+    Object.entries(data.messages_by_conversation).map(
+      ([conversationId, rows]) => [
+        conversationId,
+        rows.map((message) => ({
+          id: message.id,
+          from:
+            message.sender_type === 'user'
+              ? 'boss'
+              : message.sender_type === 'system'
+                ? 'system'
+                : message.sender_id,
+          type: message.sender_type === 'system' ? 'system' : 'text',
+          time: formatTime(message.created_at),
+          text: message.content,
+          provider: message.provider ?? undefined,
+          model: message.model ?? undefined,
+        })),
+      ],
+    ),
   );
   const chatById = new Map(chats.map((chat) => [chat.id, chat]));
   const tasks: Task[] = data.tasks.map((task) => {
-    const chat = task.conversation_id ? chatById.get(task.conversation_id) : null;
-    const owner = task.owner_agent_id ? agentById.get(task.owner_agent_id) : null;
+    const chat = task.conversation_id
+      ? chatById.get(task.conversation_id)
+      : null;
+    const owner = task.owner_agent_id
+      ? agentById.get(task.owner_agent_id)
+      : null;
     return {
       id: task.id,
       title: task.title,
@@ -507,13 +534,25 @@ function mapBootstrap(data: ApiBootstrap) {
   const templates: HireTemplate[] = data.agent_templates.map((template) => ({
     id: template.id,
     name: template.name,
+    categoryId: template.category_id,
     category: template.category,
     dept: template.department,
     desc: template.description,
     prompt: template.prompt,
     skills: template.skills,
     mcps: template.mcps,
+    publisher: template.publisher ?? 'AgentPulse 官方',
+    version: template.version ?? 'v0.1.0',
+    status: template.status ?? 'published',
   }));
+  const talentCategories: TalentCategory[] = data.agent_template_categories
+    .map((category) => ({
+      id: category.id,
+      name: category.name,
+      description: category.description,
+      sortOrder: category.sort_order,
+    }))
+    .sort((left, right) => left.sortOrder - right.sortOrder);
 
   return {
     workspace: data.workspace,
@@ -523,6 +562,7 @@ function mapBootstrap(data: ApiBootstrap) {
     messagesByChat,
     tasks,
     templates,
+    talentCategories,
   };
 }
 
@@ -546,11 +586,14 @@ function App() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [chats, setChats] = useState<Chat[]>([]);
-  const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>(
-    {},
-  );
+  const [messagesByChat, setMessagesByChat] = useState<
+    Record<string, Message[]>
+  >({});
   const [tasks, setTasks] = useState<Task[]>([]);
   const [hireTemplates, setHireTemplates] = useState<HireTemplate[]>([]);
+  const [talentCategories, setTalentCategories] = useState<TalentCategory[]>(
+    [],
+  );
   const [bootLoading, setBootLoading] = useState(Boolean(token));
   const [authError, setAuthError] = useState('');
   const [view, setView] = useState<View>('chat');
@@ -608,6 +651,7 @@ function App() {
     setMessagesByChat(mapped.messagesByChat);
     setTasks(mapped.tasks);
     setHireTemplates(mapped.templates);
+    setTalentCategories(mapped.talentCategories);
     setOnboardingOpen(!mapped.workspace.onboarding_completed);
 
     const preferredChat =
@@ -690,6 +734,7 @@ function App() {
     setMessagesByChat({});
     setTasks([]);
     setHireTemplates([]);
+    setTalentCategories([]);
   };
 
   const agentById = (id: string) => agents.find((agent) => agent.id === id);
@@ -933,15 +978,18 @@ function App() {
       return;
     }
     try {
-      const response = await apiRequest<{ id: string }>('/conversations/group', {
-        method: 'POST',
-        token,
-        body: JSON.stringify({
-          name: groupName.trim() || '新的讨论',
-          member_ids: groupMembers,
-          related_task_ids: groupTaskIds,
-        }),
-      });
+      const response = await apiRequest<{ id: string }>(
+        '/conversations/group',
+        {
+          method: 'POST',
+          token,
+          body: JSON.stringify({
+            name: groupName.trim() || '新的讨论',
+            member_ids: groupMembers,
+            related_task_ids: groupTaskIds,
+          }),
+        },
+      );
       await loadBootstrap(token);
       setGroupOpen(false);
       setGroupName('');
@@ -1088,8 +1136,9 @@ function App() {
   const relatedTasks = activeChat
     ? tasks.filter((task) => task.src === activeChat.id)
     : [];
-  const scopedChat =
-    taskScopeChatId ? chats.find((chat) => chat.id === taskScopeChatId) : null;
+  const scopedChat = taskScopeChatId
+    ? chats.find((chat) => chat.id === taskScopeChatId)
+    : null;
   const taskScopeLabel =
     scopedChat?.kind === 'group'
       ? `# ${scopedChat.name}`
@@ -1187,7 +1236,10 @@ function App() {
         )}
 
         {view === 'chat' && !activeChat && (
-          <EmptyWorkbenchState title="暂无会话" text="注册后系统会自动创建小秘私聊。" />
+          <EmptyWorkbenchState
+            title="暂无会话"
+            text="注册后系统会自动创建小秘私聊。"
+          />
         )}
 
         {view === 'staff' && (
@@ -1206,6 +1258,7 @@ function App() {
           <TalentMarketView
             agents={agents}
             templates={hireTemplates}
+            categories={talentCategories}
             skillCount={allSkills.length}
             mcpCount={allMcps.length}
             onRecruit={openHire}
@@ -1482,7 +1535,8 @@ function AuthScreen({
         </div>
         <h1>把一人公司，搭成一支 AI 团队。</h1>
         <p>
-          创建工作区后，小秘、组织架构、人才市场和会话数据都会写入本地 SQLite。第一版先跑通真实 DeepSeek 对话闭环。
+          创建工作区后，小秘、组织架构、人才市场和会话数据都会写入
+          PostgreSQL。第一版先跑通真实 DeepSeek 对话闭环。
         </p>
         <div className="auth-feature-list">
           <div>
@@ -1695,11 +1749,13 @@ function ConversationList({
 }) {
   const agentById = (id: string) => agents.find((agent) => agent.id === id);
   const pinnedChats = chats.filter(
-    (chat) => chat.kind === 'dm' && agentById(chat.agentId)?.role === '老板秘书',
+    (chat) =>
+      chat.kind === 'dm' && agentById(chat.agentId)?.role === '老板秘书',
   );
   const groupChats = chats.filter((chat) => chat.kind === 'group');
   const dmChats = chats.filter(
-    (chat) => chat.kind === 'dm' && agentById(chat.agentId)?.role !== '老板秘书',
+    (chat) =>
+      chat.kind === 'dm' && agentById(chat.agentId)?.role !== '老板秘书',
   );
 
   const renderChat = (chat: Chat) => {
@@ -1760,9 +1816,17 @@ function ConversationList({
         <SectionLabel label="秘书" />
         {pinnedChats.map(renderChat)}
         <SectionLabel label="群组" />
-        {groupChats.length ? groupChats.map(renderChat) : <EmptyState>暂无群聊</EmptyState>}
+        {groupChats.length ? (
+          groupChats.map(renderChat)
+        ) : (
+          <EmptyState>暂无群聊</EmptyState>
+        )}
         <SectionLabel label="私聊" />
-        {dmChats.length ? dmChats.map(renderChat) : <EmptyState>暂无其他私聊</EmptyState>}
+        {dmChats.length ? (
+          dmChats.map(renderChat)
+        ) : (
+          <EmptyState>暂无其他私聊</EmptyState>
+        )}
       </div>
     </aside>
   );
@@ -2087,7 +2151,9 @@ function MessageItem({
             </em>
           )}
         </div>
-        <p className="message-text">{renderMentionText(message.text, agents)}</p>
+        <p className="message-text">
+          {renderMentionText(message.text, agents)}
+        </p>
       </div>
     </div>
   );
@@ -2235,12 +2301,14 @@ function StaffView({
 function TalentMarketView({
   agents,
   templates,
+  categories,
   skillCount,
   mcpCount,
   onRecruit,
 }: {
   agents: Agent[];
   templates: HireTemplate[];
+  categories: TalentCategory[];
   skillCount: number;
   mcpCount: number;
   onRecruit: (templateId: string) => void;
@@ -2248,13 +2316,18 @@ function TalentMarketView({
   const [activeCategory, setActiveCategory] = useState('全部');
   const [keyword, setKeyword] = useState('');
   const [detailTemplateId, setDetailTemplateId] = useState<string | null>(null);
-  const categoryOptions = ['全部'].concat(
-    Array.from(new Set(templates.map((template) => template.category))),
-  );
+  const categoryOptions = [
+    {
+      id: '全部',
+      name: '全部',
+      description: '查看官方人才库里的全部可招募员工',
+    },
+    ...categories,
+  ];
   const visibleTemplates = templates.filter((template) => {
     const matchCategory =
-      activeCategory === '全部' || template.category === activeCategory;
-    const query = keyword.trim();
+      activeCategory === '全部' || template.categoryId === activeCategory;
+    const query = keyword.trim().toLowerCase();
     if (!query) return matchCategory;
     return (
       matchCategory &&
@@ -2268,6 +2341,7 @@ function TalentMarketView({
         ...template.mcps,
       ]
         .join(' ')
+        .toLowerCase()
         .includes(query)
     );
   });
@@ -2281,7 +2355,9 @@ function TalentMarketView({
         <header className="page-header compact">
           <div>
             <h1>人才市场中心</h1>
-            <p>官方员工模板库，分类、上架和版本后续由平台后台统一维护</p>
+            <p>
+              官方 AI 员工模板库，分类、上架和版本由 AgentPulse 后台统一维护
+            </p>
           </div>
         </header>
 
@@ -2319,27 +2395,30 @@ function TalentMarketView({
         <section className="market-layout">
           <aside className="market-filter" aria-label="岗位筛选">
             <strong>岗位分类</strong>
+            <p>这里不是你的部门结构，而是官方后台配置的人才类目。</p>
             <div>
               {categoryOptions.map((category) => {
                 const count =
-                  category === '全部'
+                  category.id === '全部'
                     ? templates.length
                     : templates.filter(
-                        (template) => template.category === category,
+                        (template) => template.categoryId === category.id,
                       ).length;
                 return (
                   <button
-                    className={activeCategory === category ? 'active' : ''}
-                    key={category}
+                    className={activeCategory === category.id ? 'active' : ''}
+                    key={category.id}
                     type="button"
-                    onClick={() => setActiveCategory(category)}
+                    title={category.description}
+                    onClick={() => setActiveCategory(category.id)}
                   >
-                    <span>{category}</span>
+                    <span>{category.name}</span>
                     <em>{count}</em>
                   </button>
                 );
               })}
             </div>
+            <footer>分类和岗位模板后续只在官方后台新增、审核、发布。</footer>
           </aside>
 
           <div className="market-main">
@@ -2406,6 +2485,7 @@ function TalentMarketView({
                     </div>
                   </div>
                   <div className="market-card-actions">
+                    <span>{template.publisher}</span>
                     <button
                       className="button secondary"
                       type="button"
@@ -2466,11 +2546,35 @@ function TalentDetailModal({
         <div>
           <strong>{template.name}</strong>
           <p>{template.desc}</p>
-          <span>官方模板 · 可招募</span>
+          <span>
+            {template.publisher} · {template.version} · 可招募
+          </span>
         </div>
       </div>
 
-      <FieldLabel>岗位 Prompt</FieldLabel>
+      <FieldLabel>基础信息</FieldLabel>
+      <div className="talent-detail-grid">
+        <div>
+          <span>岗位分类</span>
+          <strong>{template.category}</strong>
+        </div>
+        <div>
+          <span>默认部门</span>
+          <strong>{template.dept}</strong>
+        </div>
+        <div>
+          <span>模板来源</span>
+          <strong>{template.publisher}</strong>
+        </div>
+        <div>
+          <span>模板状态</span>
+          <strong>
+            {template.status === 'published' ? '已上架' : template.status}
+          </strong>
+        </div>
+      </div>
+
+      <FieldLabel>工作职责 Prompt</FieldLabel>
       <div className="prompt-box">{template.prompt}</div>
 
       <FieldLabel>Skills</FieldLabel>
@@ -2481,7 +2585,8 @@ function TalentDetailModal({
 
       <FieldLabel>平台说明</FieldLabel>
       <div className="market-admin-note">
-        分类、模板内容、默认 Prompt、Skills 和 MCP 权限后续由官方后台维护；用户侧只负责查看能力是否匹配，并招募到自己的组织。
+        分类、模板内容、默认 Prompt、Skills 和 MCP
+        权限后续由官方后台维护；用户侧只负责查看能力是否匹配，并招募到自己的组织。
       </div>
 
       <div className="modal-actions">
@@ -2530,7 +2635,11 @@ function TasksView({
             <p>任务数据来自后端；后续会由小秘自动拆解生成</p>
           </div>
           <div className="header-actions">
-            <button className="button primary" type="button" onClick={onOpenCreateTask}>
+            <button
+              className="button primary"
+              type="button"
+              onClick={onOpenCreateTask}
+            >
               {materialIcon('add_task')}创建任务
             </button>
           </div>
@@ -2538,7 +2647,9 @@ function TasksView({
 
         {scopeLabel && (
           <div className="task-scope-bar">
-            <span>{materialIcon('forum')}正在查看 {scopeLabel} 的关联任务</span>
+            <span>
+              {materialIcon('forum')}正在查看 {scopeLabel} 的关联任务
+            </span>
             <button type="button" onClick={onClearScope}>
               查看全部任务
             </button>
@@ -2878,7 +2989,9 @@ function HireModal({
             {departments.map((department) => (
               <button
                 className={
-                  hireDept === department ? 'selector-chip active' : 'selector-chip'
+                  hireDept === department
+                    ? 'selector-chip active'
+                    : 'selector-chip'
                 }
                 key={department}
                 type="button"
@@ -2983,7 +3096,9 @@ function CreateTaskModal({
           <FieldLabel>关联会话</FieldLabel>
           <select
             value={taskConversationId}
-            onChange={(event) => onConversationChange(event.currentTarget.value)}
+            onChange={(event) =>
+              onConversationChange(event.currentTarget.value)
+            }
           >
             <option value="">不关联</option>
             {chats.map((chat) => (
@@ -3002,7 +3117,9 @@ function CreateTaskModal({
         {(['P0', 'P1', 'P2'] as const).map((priority) => (
           <button
             className={
-              taskPriority === priority ? 'selector-chip active' : 'selector-chip'
+              taskPriority === priority
+                ? 'selector-chip active'
+                : 'selector-chip'
             }
             key={priority}
             type="button"
@@ -3237,7 +3354,12 @@ function GroupMembersModal({
   onSubmit: () => void;
 }) {
   return (
-    <Modal title={title} description={description} width={620} onClose={onClose}>
+    <Modal
+      title={title}
+      description={description}
+      width={620}
+      onClose={onClose}
+    >
       <FieldLabel>选择成员</FieldLabel>
       <MemberPicker
         agents={agents}
@@ -3327,7 +3449,8 @@ function OnboardingModal({
             <div className="onboarding-logo big">✦</div>
             <h2>欢迎来到 AgentPulse</h2>
             <p>
-              这里不是聊天 Demo，而是你的 AI 公司工作台。第一版已经接入账号、组织、员工和真实 LLM 调用链。
+              这里不是聊天 Demo，而是你的 AI
+              公司工作台。第一版已经接入账号、组织、员工和真实 LLM 调用链。
             </p>
             <div className="onboarding-feature-grid">
               <OnboardingFeature
@@ -3353,11 +3476,17 @@ function OnboardingModal({
           <div className="onboarding-content">
             <div className="onboarding-logo">✦</div>
             <h2>先认识你的第一批员工</h2>
-            <p>小秘已经就位。你可以继续从人才市场招募这些角色，让一人公司开始分工。</p>
+            <p>
+              小秘已经就位。你可以继续从人才市场招募这些角色，让一人公司开始分工。
+            </p>
             <div className="role-grid">
               {featuredTemplates.map((template, index) => (
                 <div className="role-option active" key={template.id}>
-                  <div style={{ background: `oklch(0.55 0.11 ${220 + index * 35})` }}>
+                  <div
+                    style={{
+                      background: `oklch(0.55 0.11 ${220 + index * 35})`,
+                    }}
+                  >
                     {['◆', '●', '▲', '■'][index % 4]}
                   </div>
                   <span>
@@ -3376,7 +3505,8 @@ function OnboardingModal({
             <div className="onboarding-logo big">✦</div>
             <h2>从给小秘发消息开始</h2>
             <p>
-              你可以说“帮我把 AgentPulse 第一版拆成今天能做的任务”，小秘会用后端真实模型返回下一步。
+              你可以说“帮我把 AgentPulse
+              第一版拆成今天能做的任务”，小秘会用后端真实模型返回下一步。
             </p>
             <div className="try-chip">
               {materialIcon('chat')}
