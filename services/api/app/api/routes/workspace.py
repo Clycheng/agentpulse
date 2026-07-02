@@ -340,9 +340,10 @@ async def send_message(
     if conversation is None:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    agent = resolve_reply_agent(conn, workspace["id"], conversation, payload)
-    if agent is None:
+    reply_agents = resolve_reply_agents(conn, workspace["id"], conversation, payload)
+    if not reply_agents:
         raise HTTPException(status_code=400, detail="没有可回复的智能体")
+    task_owner = reply_agents[0]
 
     user_message = add_message(
         conn,
@@ -360,7 +361,7 @@ async def send_message(
             title=task_intent["title"],
             description=task_intent["description"],
             priority=task_intent["priority"],
-            owner_agent_id=agent["id"],
+            owner_agent_id=task_owner["id"],
             conversation_id=conversation_id,
             status="进行中",
             progress=10,
@@ -373,97 +374,33 @@ async def send_message(
             title="由聊天自动生成",
             content=payload.content,
             conversation_id=conversation_id,
-            agent_id=agent["id"],
+            agent_id=task_owner["id"],
         )
-    history = load_llm_history(conn, conversation_id)
-    related_tasks = load_related_task_context(conn, conversation_id)
-    try:
-        completion = await DeepSeekChatClient().complete(
-            LlmChatRequest(
-                company_name=workspace["name"],
-                conversation_title=conversation_title(conversation, agent),
-                agent=LlmChatAgent(
-                    id=agent["id"],
-                    name=agent["name"],
-                    role=agent["role"],
-                    department=agent["department_name"],
-                    prompt=agent["prompt"],
-                    skills=json.loads(agent["skills_json"]),
-                ),
-                messages=history,
-                related_tasks=related_tasks,
+    agent_messages = []
+    for agent in reply_agents:
+        try:
+            agent_messages.append(
+                await complete_agent_reply(
+                    conn,
+                    workspace=workspace,
+                    conversation=conversation,
+                    conversation_id=conversation_id,
+                    agent=agent,
+                    user_message=user_message,
+                )
             )
-        )
-    except DeepSeekNotConfigured as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except DeepSeekAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except DeepSeekNotConfigured as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except DeepSeekAPIError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    agent_message = add_message(
-        conn,
-        conversation_id=conversation_id,
-        sender_type="agent",
-        sender_id=agent["id"],
-        content=completion.reply,
-        provider=completion.provider,
-        model=completion.model,
-    )
-    run_id = new_id("run")
-    now = now_iso()
-    conn.execute(
-        """
-        INSERT INTO runs (
-          id, workspace_id, conversation_id, agent_id, status, input_message_id,
-          output_message_id, provider, model, usage_json, created_at, completed_at
-        )
-        VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            run_id,
-            workspace["id"],
-            conversation_id,
-            agent["id"],
-            user_message["id"],
-            agent_message["id"],
-            completion.provider,
-            completion.model,
-            json.dumps(completion.usage or {}),
-            now,
-            now,
-        ),
-    )
-    related_task_rows = conn.execute(
-        """
-        SELECT id, title FROM tasks
-        WHERE workspace_id = ? AND conversation_id = ?
-        ORDER BY updated_at DESC
-        LIMIT 12
-        """,
-        (workspace["id"], conversation_id),
-    ).fetchall()
-    for task in related_task_rows:
-        add_task_event(
-            conn,
-            workspace_id=workspace["id"],
-            task_id=task["id"],
-            kind="agent_output_generated",
-            title=f"{agent['name']} 生成了产出",
-            content=completion.reply[:600],
-            conversation_id=conversation_id,
-            agent_id=agent["id"],
-        )
-        add_task_output(
-            conn,
-            workspace_id=workspace["id"],
-            task_id=task["id"],
-            title=f"{agent['name']} 的回复",
-            content=completion.reply,
-            conversation_id=conversation_id,
-            agent_id=agent["id"],
-        )
+    serialized_agent_messages = [
+        serialize_message(message) for message in agent_messages
+    ]
     return {
         "user_message": serialize_message(user_message),
-        "agent_message": serialize_message(agent_message),
+        "agent_message": serialized_agent_messages[0],
+        "agent_messages": serialized_agent_messages,
         "created_task": serialize_task(created_task) if created_task else None,
     }
 
@@ -538,30 +475,143 @@ def resolve_approval(
     return serialize_approval(updated)
 
 
-def resolve_reply_agent(
+async def complete_agent_reply(
+    conn: Database,
+    *,
+    workspace: Row,
+    conversation: Row,
+    conversation_id: str,
+    agent: Row,
+    user_message: Row,
+) -> Row:
+    history = load_llm_history(conn, conversation_id)
+    related_tasks = load_related_task_context(conn, conversation_id)
+    completion = await DeepSeekChatClient().complete(
+        LlmChatRequest(
+            company_name=workspace["name"],
+            conversation_title=conversation_title(conversation, agent),
+            agent=LlmChatAgent(
+                id=agent["id"],
+                name=agent["name"],
+                role=agent["role"],
+                department=agent["department_name"],
+                prompt=agent["prompt"],
+                skills=json.loads(agent["skills_json"]),
+            ),
+            messages=history,
+            related_tasks=related_tasks,
+        )
+    )
+
+    agent_message = add_message(
+        conn,
+        conversation_id=conversation_id,
+        sender_type="agent",
+        sender_id=agent["id"],
+        content=completion.reply,
+        provider=completion.provider,
+        model=completion.model,
+    )
+    run_id = new_id("run")
+    now = now_iso()
+    conn.execute(
+        """
+        INSERT INTO runs (
+          id, workspace_id, conversation_id, agent_id, status, input_message_id,
+          output_message_id, provider, model, usage_json, created_at, completed_at
+        )
+        VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            workspace["id"],
+            conversation_id,
+            agent["id"],
+            user_message["id"],
+            agent_message["id"],
+            completion.provider,
+            completion.model,
+            json.dumps(completion.usage or {}),
+            now,
+            now,
+        ),
+    )
+    related_task_rows = conn.execute(
+        """
+        SELECT id, title FROM tasks
+        WHERE workspace_id = ? AND conversation_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 12
+        """,
+        (workspace["id"], conversation_id),
+    ).fetchall()
+    for task in related_task_rows:
+        add_task_event(
+            conn,
+            workspace_id=workspace["id"],
+            task_id=task["id"],
+            kind="agent_output_generated",
+            title=f"{agent['name']} 生成了产出",
+            content=completion.reply[:600],
+            conversation_id=conversation_id,
+            agent_id=agent["id"],
+        )
+        add_task_output(
+            conn,
+            workspace_id=workspace["id"],
+            task_id=task["id"],
+            title=f"{agent['name']} 的回复",
+            content=completion.reply,
+            conversation_id=conversation_id,
+            agent_id=agent["id"],
+        )
+    return agent_message
+
+
+def resolve_reply_agents(
     conn: Database,
     workspace_id: str,
     conversation: Row,
     payload: SendMessageRequest,
-) -> Row | None:
+) -> list[Row]:
     if conversation["kind"] == "dm":
-        agent_id = conversation["agent_id"]
-    else:
-        agent_id = payload.target_agent_id
-        if not agent_id:
-            member = conn.execute(
-                """
-                SELECT agent_id FROM conversation_members
-                WHERE conversation_id = ?
-                ORDER BY id
-                LIMIT 1
-                """,
-                (conversation["id"],),
-            ).fetchone()
-            agent_id = member["agent_id"] if member else None
-    if not agent_id:
-        return None
+        if not conversation["agent_id"]:
+            return []
+        agent = load_agent_for_reply(conn, workspace_id, conversation["agent_id"])
+        return [agent] if agent else []
 
+    if payload.target_agent_id:
+        agent = load_agent_for_reply(conn, workspace_id, payload.target_agent_id)
+        if agent is None:
+            return []
+        member = conn.execute(
+            """
+            SELECT 1 FROM conversation_members
+            WHERE conversation_id = ? AND agent_id = ?
+            """,
+            (conversation["id"], agent["id"]),
+        ).fetchone()
+        return [agent] if member else []
+
+    rows = conn.execute(
+        """
+        SELECT agents.*, departments.name AS department_name
+        FROM conversation_members
+        JOIN agents ON agents.id = conversation_members.agent_id
+        JOIN departments ON departments.id = agents.department_id
+        WHERE conversation_members.conversation_id = ?
+          AND agents.workspace_id = ?
+        ORDER BY conversation_members.id
+        LIMIT 3
+        """,
+        (conversation["id"], workspace_id),
+    ).fetchall()
+    return rows
+
+
+def load_agent_for_reply(
+    conn: Database, workspace_id: str, agent_id: str
+) -> Row | None:
     return conn.execute(
         """
         SELECT agents.*, departments.name AS department_name

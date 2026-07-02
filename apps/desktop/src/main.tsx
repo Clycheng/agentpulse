@@ -965,6 +965,8 @@ function App() {
         : (mentionedAgent?.id ?? targetChat.memberIds[0]);
     const replier = replierId ? agentById(replierId) : null;
     if (!replier) return;
+    const targetAgentId =
+      targetChat.kind === 'group' ? (mentionedAgent?.id ?? null) : null;
 
     const optimisticId = tempMessageId();
     const optimisticMessage: Message = {
@@ -979,7 +981,9 @@ function App() {
       [targetChat.id]: [...(current[targetChat.id] ?? []), optimisticMessage],
     }));
     setDraft('');
-    setTypingName(replier.name);
+    setTypingName(
+      targetChat.kind === 'group' && !mentionedAgent ? '群聊成员' : replier.name,
+    );
     setAgents((current) =>
       current.map((agent) =>
         agent.id === replier.id
@@ -992,17 +996,22 @@ function App() {
       const response = await apiRequest<{
         user_message: ApiBootstrap['messages_by_conversation'][string][number];
         agent_message: ApiBootstrap['messages_by_conversation'][string][number];
+        agent_messages?: ApiBootstrap['messages_by_conversation'][string][number][];
         created_task: ApiBootstrap['tasks'][number] | null;
       }>(`/conversations/${targetChat.id}/messages`, {
         method: 'POST',
         token,
         body: JSON.stringify({
           content: text,
-          target_agent_id: targetChat.kind === 'group' ? replier.id : null,
+          target_agent_id: targetAgentId,
         }),
       });
       const userMessage = mapApiMessage(response.user_message);
-      const agentMessage = mapApiMessage(response.agent_message);
+      const agentMessages = (
+        response.agent_messages?.length
+          ? response.agent_messages
+          : [response.agent_message]
+      ).map(mapApiMessage);
       const systemTaskMessage: Message | null = response.created_task
         ? {
             id: tempMessageId(),
@@ -1020,7 +1029,7 @@ function App() {
           ),
           userMessage,
           ...(systemTaskMessage ? [systemTaskMessage] : []),
-          agentMessage,
+          ...agentMessages,
         ],
       }));
       setChats((current) =>

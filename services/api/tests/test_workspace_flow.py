@@ -281,6 +281,115 @@ def test_agent_creation_recruitment_and_group_conversation(tmp_path, monkeypatch
     assert "客服专员" in group_messages[-1]["content"]
 
 
+def test_group_chat_returns_multiple_agent_replies_when_not_mentioned(
+    tmp_path, monkeypatch
+):
+    captured_agents = []
+
+    async def fake_complete(self, payload):
+        captured_agents.append(payload.agent.name)
+        return LlmChatResponse(
+            reply=f"{payload.agent.name}：我基于群聊上下文补充一条建议。",
+            provider="deepseek",
+            model="deepseek-v4-flash",
+            usage={"total_tokens": 42},
+        )
+
+    monkeypatch.setattr(
+        workspace_routes.DeepSeekChatClient,
+        "complete",
+        fake_complete,
+    )
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    analyst = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "增长分析师",
+            "description": "负责增长数据分析",
+            "department_name": "增长与客户",
+            "prompt": "你负责分析渠道数据，输出下一步增长实验建议。",
+        },
+    ).json()
+    writer = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "内容策划",
+            "description": "负责内容方案",
+            "department_name": "内容部",
+            "prompt": "你负责把需求转成内容选题和文案计划。",
+        },
+    ).json()
+    task = client.post(
+        "/api/tasks",
+        headers=auth_header(token),
+        json={
+            "title": "本周增长打法",
+            "description": "形成渠道、内容和执行节奏建议。",
+            "priority": "P1",
+            "owner_agent_id": analyst["id"],
+            "status": "进行中",
+            "progress": 20,
+        },
+    ).json()
+    group = client.post(
+        "/api/conversations/group",
+        headers=auth_header(token),
+        json={
+            "name": "增长作战室",
+            "member_ids": [analyst["id"], writer["id"]],
+            "related_task_ids": [task["id"]],
+        },
+    )
+    assert group.status_code == 200
+    group_id = group.json()["id"]
+
+    send = client.post(
+        f"/api/conversations/{group_id}/messages",
+        headers=auth_header(token),
+        json={"content": "我们一起讨论下本周增长打法"},
+    )
+
+    assert send.status_code == 200
+    payload = send.json()
+    assert payload["agent_message"]["sender_id"] == analyst["id"]
+    assert [message["sender_id"] for message in payload["agent_messages"]] == [
+        analyst["id"],
+        writer["id"],
+    ]
+    assert captured_agents == ["增长分析师", "内容策划"]
+
+    reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    persisted = reloaded["messages_by_conversation"][group_id]
+    assert [message["sender_type"] for message in persisted[-3:]] == [
+        "user",
+        "agent",
+        "agent",
+    ]
+    assert persisted[-2]["sender_id"] == analyst["id"]
+    assert persisted[-1]["sender_id"] == writer["id"]
+    outputs = reloaded["task_outputs_by_task"][task["id"]]
+    assert {output["agent_id"] for output in outputs} == {analyst["id"], writer["id"]}
+
+    mentioned = client.post(
+        f"/api/conversations/{group_id}/messages",
+        headers=auth_header(token),
+        json={
+            "content": "@内容策划 你单独给个文案方向",
+            "target_agent_id": writer["id"],
+        },
+    )
+    assert mentioned.status_code == 200
+    mentioned_payload = mentioned.json()
+    assert [message["sender_id"] for message in mentioned_payload["agent_messages"]] == [
+        writer["id"],
+    ]
+
+
 def test_task_api_updates_and_injects_related_context(tmp_path, monkeypatch):
     captured_payloads = []
 

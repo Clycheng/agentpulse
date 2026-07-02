@@ -142,6 +142,7 @@ class SendMessageRequest(BaseModel):
 class SendMessageResponse(BaseModel):
     user_message: MessageOut
     agent_message: MessageOut
+    agent_messages: list[MessageOut] = Field(default_factory=list)
     created_task: TaskOut | None = None
 
 
