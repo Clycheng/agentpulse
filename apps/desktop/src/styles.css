@@ -2535,6 +2535,56 @@ textarea::placeholder {
   font-style: normal;
 }
 
+.experience-card {
+  margin-bottom: 9px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.experience-card > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.experience-card .material-symbol {
+  color: var(--primary);
+  font-size: 18px;
+  font-variation-settings: 'FILL' 1;
+}
+
+.experience-card.lesson .material-symbol {
+  color: var(--warning);
+}
+
+.experience-card strong {
+  flex: 1;
+  color: var(--text-strong);
+  font-size: 12.5px;
+}
+
+.experience-card span {
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.experience-card p,
+.experience-card em {
+  display: block;
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.6;
+}
+
+.experience-card em {
+  padding-top: 7px;
+  border-top: 1px solid var(--border-soft);
+}
+
 .task-detail-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

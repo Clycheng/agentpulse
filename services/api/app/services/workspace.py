@@ -340,6 +340,18 @@ def serialize_approval(row: Row) -> dict:
     }
 
 
+def serialize_agent_experience(row: Row) -> dict:
+    return {
+        "id": row["id"],
+        "agent_id": row["agent_id"],
+        "task_id": row["task_id"],
+        "outcome": row["outcome"],
+        "summary": row["summary"],
+        "lessons": row["lessons"],
+        "created_at": row["created_at"],
+    }
+
+
 def add_task_event(
     conn: Database,
     *,
@@ -410,6 +422,42 @@ def add_task_output(
         ),
     )
     return conn.execute("SELECT * FROM task_outputs WHERE id = ?", (output_id,)).fetchone()
+
+
+def add_agent_experience(
+    conn: Database,
+    *,
+    workspace_id: str,
+    agent_id: str,
+    task_id: str | None,
+    outcome: str,
+    summary: str,
+    lessons: str = "",
+) -> Row:
+    experience_id = new_id("exp")
+    created_at = now_iso()
+    conn.execute(
+        """
+        INSERT INTO agent_experiences (
+          id, workspace_id, agent_id, task_id, outcome,
+          summary, lessons, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            experience_id,
+            workspace_id,
+            agent_id,
+            task_id,
+            outcome,
+            summary,
+            lessons,
+            created_at,
+        ),
+    )
+    return conn.execute(
+        "SELECT * FROM agent_experiences WHERE id = ?", (experience_id,)
+    ).fetchone()
 
 
 def add_approval(
@@ -771,6 +819,22 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "SELECT * FROM tasks WHERE workspace_id = ? ORDER BY updated_at DESC",
         (workspace_id,),
     ).fetchall()
+    agent_ids = [agent["id"] for agent in agents]
+    agent_experiences_by_agent = {agent_id: [] for agent_id in agent_ids}
+    if agent_ids:
+        placeholders = ",".join("?" for _ in agent_ids)
+        experiences = conn.execute(
+            f"""
+            SELECT * FROM agent_experiences
+            WHERE workspace_id = ? AND agent_id IN ({placeholders})
+            ORDER BY created_at DESC
+            """,
+            (workspace_id, *agent_ids),
+        ).fetchall()
+        for experience in experiences:
+            agent_experiences_by_agent.setdefault(experience["agent_id"], []).append(
+                serialize_agent_experience(experience)
+            )
     task_ids = [task["id"] for task in tasks]
     task_events_by_task = {task_id: [] for task_id in task_ids}
     task_outputs_by_task = {task_id: [] for task_id in task_ids}
@@ -852,6 +916,7 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "task_events_by_task": task_events_by_task,
         "task_outputs_by_task": task_outputs_by_task,
         "approvals_by_task": approvals_by_task,
+        "agent_experiences_by_agent": agent_experiences_by_agent,
         "agent_template_categories": TALENT_CATEGORIES,
         "agent_templates": AGENT_TEMPLATES,
     }

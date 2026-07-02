@@ -20,6 +20,7 @@ from app.schemas.workspace import (
     UpdateTaskRequest,
 )
 from app.services.workspace import (
+    add_agent_experience,
     add_message,
     add_task_event,
     add_task_output,
@@ -454,6 +455,12 @@ def resolve_approval(
             conversation_id=approval["conversation_id"],
             agent_id=approval["agent_id"],
         )
+        capture_agent_experience_from_approval(
+            conn,
+            workspace_id=workspace["id"],
+            approval=approval,
+            resolution=payload.status,
+        )
         if payload.status == "approved":
             update_task(
                 conn,
@@ -473,6 +480,61 @@ def resolve_approval(
         "SELECT * FROM approvals WHERE id = ?", (approval_id,)
     ).fetchone()
     return serialize_approval(updated)
+
+
+def capture_agent_experience_from_approval(
+    conn: Database,
+    *,
+    workspace_id: str,
+    approval: Row,
+    resolution: str,
+) -> None:
+    agent_id = approval["agent_id"]
+    task_id = approval["task_id"]
+    if not agent_id or not task_id:
+        return
+
+    task = conn.execute(
+        "SELECT * FROM tasks WHERE id = ? AND workspace_id = ?",
+        (task_id, workspace_id),
+    ).fetchone()
+    if task is None:
+        return
+
+    latest_output = conn.execute(
+        """
+        SELECT * FROM task_outputs
+        WHERE workspace_id = ? AND task_id = ? AND agent_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (workspace_id, task_id, agent_id),
+    ).fetchone()
+    output_excerpt = latest_output["content"][:180] if latest_output else ""
+    if resolution == "approved":
+        outcome = "success"
+        summary = f"完成任务《{task['title']}》，老板已确认通过。"
+        lessons = (
+            f"可复用经验：围绕「{task['title']}」的输出已通过验收。"
+            + (f" 关键产出：{output_excerpt}" if output_excerpt else "")
+        )
+    else:
+        outcome = "lesson"
+        summary = f"任务《{task['title']}》被老板驳回，需要重新推进。"
+        lessons = (
+            f"改进提醒：下次处理「{task['title']}」前先补充确认标准、风险和老板要拍板的问题。"
+            + (f" 本次产出片段：{output_excerpt}" if output_excerpt else "")
+        )
+
+    add_agent_experience(
+        conn,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        task_id=task_id,
+        outcome=outcome,
+        summary=summary,
+        lessons=lessons,
+    )
 
 
 async def complete_agent_reply(

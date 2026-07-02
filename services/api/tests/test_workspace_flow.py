@@ -502,3 +502,74 @@ def test_task_api_updates_and_injects_related_context(tmp_path, monkeypatch):
     assert completed_task["status"] == "已完成"
     completed_events = completed["task_events_by_task"][task_payload["id"]]
     assert any(event["kind"] == "approval_resolved" for event in completed_events)
+    experiences = completed["agent_experiences_by_agent"][agent["id"]]
+    assert experiences[0]["task_id"] == task_payload["id"]
+    assert experiences[0]["outcome"] == "success"
+    assert "老板已确认通过" in experiences[0]["summary"]
+
+
+def test_rejected_approval_creates_agent_lesson_experience(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    created = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "销售顾问",
+            "description": "负责线索跟进",
+            "department_name": "增长与客户",
+            "prompt": "你负责线索跟进、报价和成交卡点复盘。",
+        },
+    )
+    assert created.status_code == 200
+    agent = created.json()
+
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    dm_chat = next(
+        chat
+        for chat in bootstrap["conversations"]
+        if chat["kind"] == "dm" and chat["agent_id"] == agent["id"]
+    )
+    task = client.post(
+        "/api/tasks",
+        headers=auth_header(token),
+        json={
+            "title": "整理报价策略",
+            "description": "输出报价策略和风险提示。",
+            "priority": "P1",
+            "owner_agent_id": agent["id"],
+            "conversation_id": dm_chat["id"],
+            "status": "进行中",
+            "progress": 40,
+        },
+    )
+    assert task.status_code == 200
+    task_payload = task.json()
+    patched = client.patch(
+        f"/api/tasks/{task_payload['id']}",
+        headers=auth_header(token),
+        json={"status": "待确认", "progress": 80},
+    )
+    assert patched.status_code == 200
+    approval = client.get("/api/me/bootstrap", headers=auth_header(token)).json()[
+        "approvals_by_task"
+    ][task_payload["id"]][0]
+
+    rejected = client.post(
+        f"/api/approvals/{approval['id']}/resolve",
+        headers=auth_header(token),
+        json={"status": "rejected"},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
+
+    reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    rejected_task = next(
+        task for task in reloaded["tasks"] if task["id"] == task_payload["id"]
+    )
+    assert rejected_task["status"] == "阻塞"
+    experiences = reloaded["agent_experiences_by_agent"][agent["id"]]
+    assert experiences[0]["outcome"] == "lesson"
+    assert "被老板驳回" in experiences[0]["summary"]

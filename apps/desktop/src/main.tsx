@@ -44,6 +44,7 @@ type Agent = {
   prompt: string;
   skills: string[];
   mcps: string[];
+  experiences: AgentExperience[];
 };
 
 type Chat =
@@ -125,6 +126,16 @@ type Approval = {
   riskLevel: string;
   resolvedBy: string;
   resolvedAt: string | null;
+  time: string;
+};
+
+type AgentExperience = {
+  id: string;
+  agentId: string;
+  taskId: string | null;
+  outcome: 'success' | 'lesson' | string;
+  summary: string;
+  lessons: string;
   time: string;
 };
 
@@ -247,6 +258,18 @@ type ApiBootstrap = {
       risk_level: string;
       resolved_by: string;
       resolved_at: string | null;
+      created_at: string;
+    }>
+  >;
+  agent_experiences_by_agent: Record<
+    string,
+    Array<{
+      id: string;
+      agent_id: string;
+      task_id: string | null;
+      outcome: string;
+      summary: string;
+      lessons: string;
       created_at: string;
     }>
   >;
@@ -546,6 +569,17 @@ function mapBootstrap(data: ApiBootstrap) {
     prompt: agent.prompt,
     skills: agent.skills,
     mcps: agent.mcps,
+    experiences: (data.agent_experiences_by_agent[agent.id] ?? []).map(
+      (experience) => ({
+        id: experience.id,
+        agentId: experience.agent_id,
+        taskId: experience.task_id,
+        outcome: experience.outcome,
+        summary: experience.summary,
+        lessons: experience.lessons,
+        time: formatTime(experience.created_at),
+      }),
+    ),
   }));
   const agentById = new Map(agents.map((agent) => [agent.id, agent]));
   const chats: Chat[] = data.conversations.map((chat) => {
@@ -3105,6 +3139,33 @@ function AgentDetail({
           <section className="drawer-section">
             <h3>MCP</h3>
             <ChipList items={agent.mcps} emptyText="暂无 MCP" muted />
+          </section>
+
+          <section className="drawer-section">
+            <h3>经验沉淀</h3>
+            {agent.experiences.length === 0 && (
+              <EmptyState>完成并确认任务后会自动沉淀经验</EmptyState>
+            )}
+            {agent.experiences.slice(0, 5).map((experience) => (
+              <article
+                className={`experience-card ${experience.outcome}`}
+                key={experience.id}
+              >
+                <div>
+                  {materialIcon(
+                    experience.outcome === 'success'
+                      ? 'check_circle'
+                      : 'report',
+                  )}
+                  <strong>
+                    {experience.outcome === 'success' ? '成功经验' : '复盘教训'}
+                  </strong>
+                  <span>{experience.time}</span>
+                </div>
+                <p>{experience.summary}</p>
+                {experience.lessons && <em>{experience.lessons}</em>}
+              </article>
+            ))}
           </section>
 
           <section className="drawer-section">

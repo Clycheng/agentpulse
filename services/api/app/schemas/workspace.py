@@ -98,6 +98,16 @@ class ApprovalOut(BaseModel):
     created_at: str
 
 
+class AgentExperienceOut(BaseModel):
+    id: str
+    agent_id: str
+    task_id: str | None
+    outcome: str
+    summary: str
+    lessons: str
+    created_at: str
+
+
 class AgentTemplateOut(BaseModel):
     id: str
     name: str
@@ -130,6 +140,7 @@ class BootstrapResponse(BaseModel):
     task_events_by_task: dict[str, list[TaskEventOut]]
     task_outputs_by_task: dict[str, list[TaskOutputOut]]
     approvals_by_task: dict[str, list[ApprovalOut]]
+    agent_experiences_by_agent: dict[str, list[AgentExperienceOut]]
     agent_template_categories: list[AgentTemplateCategoryOut]
     agent_templates: list[AgentTemplateOut]
 

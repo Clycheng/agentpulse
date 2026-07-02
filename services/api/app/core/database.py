@@ -259,6 +259,17 @@ def init_postgres(conn: Database) -> None:
           created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS agent_experiences (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+          outcome TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          lessons TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS runs (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -414,6 +425,17 @@ def init_sqlite(conn: Database) -> None:
           created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS agent_experiences (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+          outcome TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          lessons TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS runs (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -468,6 +490,7 @@ def reset_database_for_tests() -> None:
             conn.executescript(
                 """
                 DROP TABLE IF EXISTS runs CASCADE;
+                DROP TABLE IF EXISTS agent_experiences CASCADE;
                 DROP TABLE IF EXISTS approvals CASCADE;
                 DROP TABLE IF EXISTS task_outputs CASCADE;
                 DROP TABLE IF EXISTS task_events CASCADE;
@@ -485,6 +508,7 @@ def reset_database_for_tests() -> None:
             conn.executescript(
                 """
                 DROP TABLE IF EXISTS runs;
+                DROP TABLE IF EXISTS agent_experiences;
                 DROP TABLE IF EXISTS approvals;
                 DROP TABLE IF EXISTS task_outputs;
                 DROP TABLE IF EXISTS task_events;
