@@ -1,0 +1,501 @@
+import json
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.api.deps import get_current_user
+from app.core.database import Database, Row, get_db
+from app.runtime.deepseek import DeepSeekAPIError, DeepSeekChatClient, DeepSeekNotConfigured
+from app.schemas.run import LlmChatAgent, LlmChatMessage, LlmChatRequest
+from app.schemas.workspace import (
+    AddConversationMembersRequest,
+    BootstrapResponse,
+    CreateAgentRequest,
+    CreateGroupRequest,
+    CreateTaskRequest,
+    RecruitAgentRequest,
+    SendMessageRequest,
+    SendMessageResponse,
+    TaskOut,
+    UpdateTaskRequest,
+)
+from app.services.workspace import (
+    add_message,
+    create_agent,
+    create_dm_conversation,
+    create_task,
+    ensure_department,
+    get_bootstrap,
+    get_workspace_for_user,
+    new_id,
+    now_iso,
+    recruit_from_template,
+    serialize_agent,
+    serialize_message,
+    serialize_task,
+    update_task,
+)
+
+router = APIRouter(tags=["workspace"])
+
+
+@router.get("/me/bootstrap", response_model=BootstrapResponse)
+def bootstrap(
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    return get_bootstrap(conn, workspace["id"])
+
+
+@router.post("/me/onboarding/complete")
+def complete_onboarding(
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    conn.execute(
+        "UPDATE workspaces SET onboarding_completed = ? WHERE id = ?",
+        (True, workspace["id"]),
+    )
+    return {"ok": True}
+
+
+@router.post("/agents")
+def create_custom_agent(
+    payload: CreateAgentRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    department = ensure_department(conn, workspace["id"], payload.department_name)
+    agent_id = create_agent(
+        conn,
+        workspace_id=workspace["id"],
+        department_id=department["id"],
+        name=payload.name,
+        role=payload.description or "自定义员工",
+        description=payload.description,
+        prompt=payload.prompt,
+        skills=[],
+        mcps=[],
+        source="custom",
+    )
+    create_dm_conversation(conn, workspace["id"], agent_id)
+    agent = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+    return serialize_agent(agent)
+
+
+@router.post("/agents/recruit")
+def recruit_agent(
+    payload: RecruitAgentRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    try:
+        agent = recruit_from_template(
+            conn,
+            workspace_id=workspace["id"],
+            template_id=payload.template_id,
+            department_name=payload.department_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return serialize_agent(agent)
+
+
+@router.post("/conversations/group")
+def create_group(
+    payload: CreateGroupRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+
+    found = conn.execute(
+        f"""
+        SELECT id, name FROM agents
+        WHERE workspace_id = ? AND id IN ({",".join("?" for _ in payload.member_ids)})
+        """,
+        (workspace["id"], *payload.member_ids),
+    ).fetchall()
+    if len(found) != len(set(payload.member_ids)):
+        raise HTTPException(status_code=400, detail="群成员不存在")
+
+    conversation_id = new_id("conv")
+    created_at = now_iso()
+    conn.execute(
+        """
+        INSERT INTO conversations (id, workspace_id, kind, name, unread, created_at, updated_at)
+        VALUES (?, ?, 'group', ?, 0, ?, ?)
+        """,
+        (conversation_id, workspace["id"], payload.name, created_at, created_at),
+    )
+    for agent_id in payload.member_ids:
+        conn.execute(
+            """
+            INSERT INTO conversation_members (conversation_id, agent_id)
+            VALUES (?, ?)
+            """,
+            (conversation_id, agent_id),
+        )
+    names = "、".join(row["name"] for row in found)
+    add_message(
+        conn,
+        conversation_id=conversation_id,
+        sender_type="system",
+        sender_id="",
+        content=f"你创建了群聊，拉入了 {names}",
+    )
+    if payload.related_task_ids:
+        unique_task_ids = list(dict.fromkeys(payload.related_task_ids))
+        tasks = conn.execute(
+            f"""
+            SELECT id, title FROM tasks
+            WHERE workspace_id = ? AND id IN ({",".join("?" for _ in unique_task_ids)})
+            """,
+            (workspace["id"], *unique_task_ids),
+        ).fetchall()
+        if len(tasks) != len(unique_task_ids):
+            raise HTTPException(status_code=400, detail="关联任务不存在")
+        for task in tasks:
+            conn.execute(
+                """
+                UPDATE tasks
+                SET conversation_id = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (conversation_id, now_iso(), task["id"]),
+            )
+        task_names = "、".join(task["title"] for task in tasks)
+        add_message(
+            conn,
+            conversation_id=conversation_id,
+            sender_type="system",
+            sender_id="",
+            content=f"已关联任务：{task_names}",
+        )
+    return {"id": conversation_id}
+
+
+@router.post("/conversations/{conversation_id}/members")
+def add_group_members(
+    conversation_id: str,
+    payload: AddConversationMembersRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+
+    conversation = conn.execute(
+        """
+        SELECT * FROM conversations
+        WHERE id = ? AND workspace_id = ? AND kind = 'group'
+        """,
+        (conversation_id, workspace["id"]),
+    ).fetchone()
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="群聊不存在")
+
+    unique_member_ids = list(dict.fromkeys(payload.member_ids))
+    found = conn.execute(
+        f"""
+        SELECT id, name FROM agents
+        WHERE workspace_id = ? AND id IN ({",".join("?" for _ in unique_member_ids)})
+        """,
+        (workspace["id"], *unique_member_ids),
+    ).fetchall()
+    if len(found) != len(unique_member_ids):
+        raise HTTPException(status_code=400, detail="员工不存在")
+
+    existing = conn.execute(
+        """
+        SELECT agent_id FROM conversation_members
+        WHERE conversation_id = ?
+        """,
+        (conversation_id,),
+    ).fetchall()
+    existing_ids = {row["agent_id"] for row in existing}
+    new_members = [row for row in found if row["id"] not in existing_ids]
+    if not new_members:
+        raise HTTPException(status_code=409, detail="这些员工已经在群聊里")
+
+    for member in new_members:
+        conn.execute(
+            """
+            INSERT INTO conversation_members (conversation_id, agent_id)
+            VALUES (?, ?)
+            """,
+            (conversation_id, member["id"]),
+        )
+
+    names = "、".join(member["name"] for member in new_members)
+    add_message(
+        conn,
+        conversation_id=conversation_id,
+        sender_type="system",
+        sender_id="",
+        content=f"你拉入了 {names}",
+    )
+    return {"ok": True, "added_member_ids": [member["id"] for member in new_members]}
+
+
+@router.post("/tasks", response_model=TaskOut)
+def create_workspace_task(
+    payload: CreateTaskRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    try:
+        task = create_task(
+            conn,
+            workspace_id=workspace["id"],
+            title=payload.title,
+            description=payload.description,
+            priority=payload.priority,
+            owner_agent_id=payload.owner_agent_id,
+            status=payload.status,
+            progress=payload.progress,
+            conversation_id=payload.conversation_id,
+            due_date=payload.due_date,
+            parent_task_id=payload.parent_task_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return serialize_task(task)
+
+
+@router.patch("/tasks/{task_id}", response_model=TaskOut)
+def update_workspace_task(
+    task_id: str,
+    payload: UpdateTaskRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    try:
+        task = update_task(
+            conn,
+            workspace_id=workspace["id"],
+            task_id=task_id,
+            changes=payload.model_dump(exclude_unset=True),
+        )
+    except ValueError as exc:
+        status_code = 404 if str(exc) == "task not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return serialize_task(task)
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages",
+    response_model=SendMessageResponse,
+)
+async def send_message(
+    conversation_id: str,
+    payload: SendMessageRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    conversation = conn.execute(
+        """
+        SELECT * FROM conversations
+        WHERE id = ? AND workspace_id = ?
+        """,
+        (conversation_id, workspace["id"]),
+    ).fetchone()
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    agent = resolve_reply_agent(conn, workspace["id"], conversation, payload)
+    if agent is None:
+        raise HTTPException(status_code=400, detail="没有可回复的智能体")
+
+    user_message = add_message(
+        conn,
+        conversation_id=conversation_id,
+        sender_type="user",
+        sender_id=current_user["id"],
+        content=payload.content,
+    )
+    history = load_llm_history(conn, conversation_id)
+    related_tasks = load_related_task_context(conn, conversation_id)
+    try:
+        completion = await DeepSeekChatClient().complete(
+            LlmChatRequest(
+                company_name=workspace["name"],
+                conversation_title=conversation_title(conversation, agent),
+                agent=LlmChatAgent(
+                    id=agent["id"],
+                    name=agent["name"],
+                    role=agent["role"],
+                    department=agent["department_name"],
+                    prompt=agent["prompt"],
+                    skills=json.loads(agent["skills_json"]),
+                ),
+                messages=history,
+                related_tasks=related_tasks,
+            )
+        )
+    except DeepSeekNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except DeepSeekAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    agent_message = add_message(
+        conn,
+        conversation_id=conversation_id,
+        sender_type="agent",
+        sender_id=agent["id"],
+        content=completion.reply,
+        provider=completion.provider,
+        model=completion.model,
+    )
+    run_id = new_id("run")
+    now = now_iso()
+    conn.execute(
+        """
+        INSERT INTO runs (
+          id, workspace_id, conversation_id, agent_id, status, input_message_id,
+          output_message_id, provider, model, usage_json, created_at, completed_at
+        )
+        VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            workspace["id"],
+            conversation_id,
+            agent["id"],
+            user_message["id"],
+            agent_message["id"],
+            completion.provider,
+            completion.model,
+            json.dumps(completion.usage or {}),
+            now,
+            now,
+        ),
+    )
+    return {
+        "user_message": serialize_message(user_message),
+        "agent_message": serialize_message(agent_message),
+    }
+
+
+def resolve_reply_agent(
+    conn: Database,
+    workspace_id: str,
+    conversation: Row,
+    payload: SendMessageRequest,
+) -> Row | None:
+    if conversation["kind"] == "dm":
+        agent_id = conversation["agent_id"]
+    else:
+        agent_id = payload.target_agent_id
+        if not agent_id:
+            member = conn.execute(
+                """
+                SELECT agent_id FROM conversation_members
+                WHERE conversation_id = ?
+                ORDER BY id
+                LIMIT 1
+                """,
+                (conversation["id"],),
+            ).fetchone()
+            agent_id = member["agent_id"] if member else None
+    if not agent_id:
+        return None
+
+    return conn.execute(
+        """
+        SELECT agents.*, departments.name AS department_name
+        FROM agents
+        JOIN departments ON departments.id = agents.department_id
+        WHERE agents.id = ? AND agents.workspace_id = ?
+        """,
+        (agent_id, workspace_id),
+    ).fetchone()
+
+
+def load_llm_history(
+    conn: Database, conversation_id: str
+) -> list[LlmChatMessage]:
+    rows = conn.execute(
+        """
+        SELECT messages.*, agents.name AS agent_name
+        FROM messages
+        LEFT JOIN agents ON agents.id = messages.sender_id
+        WHERE conversation_id = ? AND sender_type IN ('user', 'agent')
+        ORDER BY created_at DESC
+        LIMIT 12
+        """,
+        (conversation_id,),
+    ).fetchall()
+    messages = []
+    for row in reversed(rows):
+        messages.append(
+            LlmChatMessage(
+                role="user" if row["sender_type"] == "user" else "assistant",
+                name="老板" if row["sender_type"] == "user" else row["agent_name"],
+                content=row["content"],
+            )
+        )
+    return messages
+
+
+def load_related_task_context(conn: Database, conversation_id: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT
+          tasks.id, tasks.title, tasks.description, tasks.priority,
+          tasks.status, tasks.progress, agents.name AS owner_name
+        FROM tasks
+        LEFT JOIN agents ON agents.id = tasks.owner_agent_id
+        WHERE tasks.conversation_id = ?
+        ORDER BY
+          CASE tasks.priority
+            WHEN 'P0' THEN 0
+            WHEN 'P1' THEN 1
+            ELSE 2
+          END,
+          tasks.updated_at DESC
+        LIMIT 12
+        """,
+        (conversation_id,),
+    ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "description": row["description"],
+            "priority": row["priority"],
+            "status": row["status"],
+            "progress": row["progress"],
+            "owner_name": row["owner_name"],
+        }
+        for row in rows
+    ]
+
+
+def conversation_title(conversation: Row, agent: Row) -> str:
+    if conversation["kind"] == "dm":
+        return f"私聊 · {agent['name']}"
+    return f"群聊 · {conversation['name']}"

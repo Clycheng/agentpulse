@@ -71,24 +71,24 @@ AgentPulse 的设计原则很简单，也很硬：
 | Area           | Status          | Notes                                         |
 | -------------- | --------------- | --------------------------------------------- |
 | Web 官网       | Scaffolded      | Vite + React + TypeScript                     |
-| Desktop 工作台 | Prototype ready | Electron + React，已实现 AI 员工协作工作台 UI |
-| Backend API    | Scaffolded      | FastAPI，当前有 health check                  |
+| Desktop 工作台 | MVP workbench   | Electron + React，已实现消息、员工、人才市场、群聊、任务闭环 |
+| Backend API    | MVP API ready   | FastAPI + PostgreSQL，已接入登录、员工、群聊、任务、DeepSeek 调用 |
 | Product docs   | In progress     | PRD、workflow、backlog、Dust 调研已沉淀       |
 | Agent runtime  | Planned         | 后续实现本地任务运行、工具调用、事件流        |
 
 桌面端已包含：
 
-- 首页总览
-- 消息会话
-- AI 员工和部门
-- 任务中心
+- 默认进入消息会话
+- AI 员工和组织树
+- 官方人才市场与招募详情
+- 创建员工与招募员工
+- 群聊创建、邀请员工、@ 点名
+- 任务中心、任务创建、任务推进、会话关联任务
 - 资料库与能力
 - 员工详情抽屉
-- 招聘员工弹窗
-- 拉群讨论弹窗
 - 新手引导
-- 待拍板确认流
-- 模拟员工回复
+- DeepSeek 真实调用链与运行记录
+- 关联任务自动注入 Agent 回复上下文
 
 ## Architecture
 
@@ -102,7 +102,7 @@ flowchart LR
   Desktop --> API["FastAPI Backend"]
   Web --> API
 
-  API --> DB["PostgreSQL / SQLite"]
+  API --> DB["PostgreSQL"]
   API --> Queue["Task Queue"]
   API --> Realtime["WebSocket Event Stream"]
 
@@ -129,13 +129,13 @@ flowchart LR
 | `memory`    | 公司长期资料、品牌语气、客户信息、历史结果    |
 | `approval`  | 用户确认节点，用于控制高风险动作              |
 
-任务状态第一阶段采用简单状态机：
+任务状态第一阶段采用面向用户的简单状态机：
 
 ```text
-queued -> assigned -> running -> waiting_user -> completed
-                         |              |
-                         v              v
-                       failed        cancelled
+进行中 -> 待确认 -> 已完成
+  ^
+  |
+阻塞
 ```
 
 ## Repository Layout
@@ -162,7 +162,8 @@ agentpulse/
 | Monorepo | npm workspaces                                             |
 | Web      | Vite, React, TypeScript                                    |
 | Desktop  | Electron, Vite, React, TypeScript                          |
-| API      | FastAPI, Pydantic Settings, Uvicorn                        |
+| API      | FastAPI, Pydantic Settings, Uvicorn, psycopg                |
+| Database | PostgreSQL for app data, SQLite only for isolated tests     |
 | Tests    | Pytest, TypeScript checks                                  |
 | UI Icons | Material Symbols in desktop prototype, lucide-react in web |
 
@@ -173,6 +174,7 @@ agentpulse/
 - Node.js 20+
 - npm 10+
 - Python 3.12+
+- PostgreSQL 16+ or Docker
 
 The repository includes `.npmrc` with npm and Electron mirrors for faster installs in China.
 
@@ -196,6 +198,28 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+### Start PostgreSQL
+
+AgentPulse 现在默认使用 PostgreSQL 作为后端主存储。最简单的本地启动方式：
+
+```bash
+docker compose up -d postgres
+```
+
+默认连接串：
+
+```text
+postgresql://agentpulse:agentpulse@127.0.0.1:55432/agentpulse
+```
+
+如果你使用自己的数据库，启动 API 前设置：
+
+```bash
+export AGENTPULSE_DATABASE_URL="postgresql://user:password@host:5432/agentpulse"
+```
+
+测试环境会使用临时 SQLite 文件隔离数据，不影响本地 PostgreSQL。
 
 ### Run The Desktop Workbench
 
@@ -230,6 +254,27 @@ http://localhost:8000
 http://localhost:8000/api/health
 ```
 
+### Configure DeepSeek
+
+第一版 Agent Runtime 使用 DeepSeek 跑通 `llm_api` 闭环。启动 API 前配置：
+
+```bash
+export AGENTPULSE_DEEPSEEK_API_KEY="你的 DeepSeek API Key"
+export AGENTPULSE_DEEPSEEK_MODEL="deepseek-v4-flash"
+```
+
+桌面端默认请求：
+
+```text
+http://127.0.0.1:8000/api/runs/llm-chat
+```
+
+如果 API 地址不同，可以设置：
+
+```bash
+export VITE_AGENTPULSE_API_URL="http://127.0.0.1:8000/api"
+```
+
 ## Useful Commands
 
 ```bash
@@ -253,12 +298,12 @@ npm run format      # Format the repository with Prettier
 ### Phase 1: MVP Workbench
 
 - Workspace model
-- Default AI employees for one-person media company
-- Task board and task detail
-- Message-driven collaboration
-- Approval requests
-- Mock agent orchestration
-- Local draft outputs
+- Default secretary employee
+- Agent creation and template recruitment
+- Group chat with members and mentions
+- Task creation, assignment, status updates, and conversation links
+- Message-driven DeepSeek agent replies
+- Related task context injection into agent prompts
 
 ### Phase 2: Real Agent Loop
 
@@ -334,4 +379,4 @@ AgentPulse 就是这个问题的实验场。
 
 ## License
 
-License has not been selected yet.
+AgentPulse is open-source software licensed under the [MIT License](LICENSE).

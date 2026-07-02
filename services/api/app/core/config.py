@@ -6,8 +6,20 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     cors_origins: list[str] = [
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "http://localhost:5174",
+        "http://127.0.0.1:5174",
     ]
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_timeout_seconds: float = 60.0
+    deepseek_temperature: float = 0.7
+    deepseek_thinking_enabled: bool = False
+    database_url: str = "postgresql://agentpulse:agentpulse@127.0.0.1:55432/agentpulse"
+    auth_secret_key: str = "agentpulse-local-dev-secret"
+    access_token_ttl_hours: int = 24 * 14
+    password_iterations: int = 260_000
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="AGENTPULSE_")
 

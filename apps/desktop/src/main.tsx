@@ -1,18 +1,41 @@
 import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-type View = 'home' | 'chat' | 'staff' | 'tasks' | 'lib';
+type View = 'chat' | 'staff' | 'market' | 'tasks' | 'lib';
+type ThemeMode = 'system' | 'light' | 'dark';
+type EffectiveTheme = 'light' | 'dark';
 type AgentStatus = 'busy' | 'wait' | 'stuck' | 'idle';
-type TaskStatus = '进行中' | '待确认' | '卡住' | '已完成';
+type TaskStatus = '进行中' | '待确认' | '阻塞' | '已完成';
 type Priority = 'P0' | 'P1' | 'P2';
 type LibraryTab = 'docs' | 'skills' | 'mcp';
+
+type User = {
+  id: string;
+  email: string;
+  display_name: string;
+};
+
+type Workspace = {
+  id: string;
+  name: string;
+  onboarding_completed: boolean;
+};
+
+type Department = {
+  id: string;
+  name: string;
+  sort_order: number;
+};
 
 type Agent = {
   id: string;
   name: string;
   role: string;
+  description: string;
   dept: string;
+  departmentId: string;
   hue: number;
   glyph: string;
   statusKind: AgentStatus;
@@ -40,59 +63,34 @@ type Chat =
       time: string;
     };
 
-type Message =
-  | {
-      id: string;
-      from: string;
-      type: 'system' | 'text';
-      time: string;
-      text: string;
-    }
-  | {
-      id: string;
-      from: string;
-      type: 'result';
-      time: string;
-      cardTitle: string;
-      cardDesc: string;
-      cardFile: string;
-    }
-  | {
-      id: string;
-      from: string;
-      type: 'approval';
-      time: string;
-      apQ: string;
-      apDesc: string;
-      apOptA: string;
-      apOptB: string;
-      apStatus: 'pending' | 'A' | 'B';
-      taskId: string;
-      followA: string;
-      followB: string;
-    }
-  | {
-      id: string;
-      from: string;
-      type: 'task';
-      time: string;
-      taskTitle: string;
-      taskPr: Priority;
-    };
+type Message = {
+  id: string;
+  from: string;
+  type: 'system' | 'text';
+  time: string;
+  text: string;
+  provider?: string;
+  model?: string;
+};
 
 type Task = {
   id: string;
   title: string;
+  description: string;
   pr: Priority;
   owner: string;
   status: TaskStatus;
   progress: number;
   src: string;
   srcLabel: string;
+  dueDate?: string | null;
+  parentTaskId?: string | null;
 };
 
 type HireTemplate = {
+  id: string;
   name: string;
+  category: string;
   dept: string;
   desc: string;
   prompt: string;
@@ -105,596 +103,88 @@ type ToastState = {
   message: string;
 };
 
-const accent = '#3B5BDB';
-const companyName = '星野工作室';
-const hueCycle = [200, 40, 320, 110, 250, 10];
-const glyphCycle = ['◆', '●', '▲', '■', '◗', '✱'];
-const allSkills = [
-  '公众号文案',
-  '竞品分析',
-  '数据报表',
-  'SEO 优化',
-  '客服话术',
-  '任务拆解',
-  '投放策略',
-];
-const allMcps = ['飞书文档', 'Notion', '企业邮箱', 'Stripe', '微信公众号'];
-const secretaryReplies = [
-  '收到。我整理一下要点，稍后把建议和分工方案发给你。',
-  '好的。需要我直接建任务，还是先拉个群让大家讨论？',
-  '明白，已记到任务池。等你确认优先级后我就分配下去。',
-];
-
-let messageCounter = 500;
-const messageId = () => `m${messageCounter++}`;
-const makeMessage = <T extends Omit<Message, 'id'>>(
-  message: T,
-): T & { id: string } => ({
-  id: messageId(),
-  ...message,
-});
-
-const initialAgents: Agent[] = [
-  {
-    id: 'sec',
-    name: '小秘',
-    role: '老板秘书',
-    dept: '老板办公室',
-    hue: 262,
-    glyph: '✦',
-    statusKind: 'idle',
-    statusLabel: '在线待命',
-    joined: '系统内置',
-    prompt:
-      '你是老板的贴身秘书兼幕僚长。接收老板的任何想法，转化为任务、招聘建议或群组讨论；跟踪全公司任务进度；需要老板拍板时，整理好决策要点再去打扰他。',
-    skills: ['任务拆解', '会议纪要', '信息检索'],
-    mcps: ['飞书文档', '企业邮箱'],
-  },
-  {
-    id: 'alan',
-    name: '阿澜',
-    role: '运营负责人',
-    dept: '运营部',
-    hue: 230,
-    glyph: '▲',
-    statusKind: 'busy',
-    statusLabel: '执行中',
-    joined: '2026-04 入职',
-    prompt:
-      '你是一名资深运营负责人。负责渠道盘点、预算分配与节奏把控，输出可直接执行的运营方案，并统筹团队成员分工。',
-    skills: ['数据报表', '竞品分析', '投放策略'],
-    mcps: ['飞书文档', 'Notion'],
-  },
-  {
-    id: 'jianyi',
-    name: '简一',
-    role: '运营专家',
-    dept: '运营部',
-    hue: 205,
-    glyph: '●',
-    statusKind: 'busy',
-    statusLabel: '执行中',
-    joined: '2026-04 入职',
-    prompt:
-      '你是一名运营专家，擅长竞品拆解与增长实验设计。输出结论时给出数据依据和可复制的打法。',
-    skills: ['竞品分析', '数据报表'],
-    mcps: ['飞书文档'],
-  },
-  {
-    id: 'xiaohe',
-    name: '小禾',
-    role: '运营同学',
-    dept: '运营部',
-    hue: 170,
-    glyph: '■',
-    statusKind: 'wait',
-    statusLabel: '等待确认',
-    joined: '2026-05 入职',
-    prompt:
-      '你是一名运营执行同学。负责渠道调研、素材整理与投放执行，结果用结构化报告沉淀到群里。',
-    skills: ['数据报表'],
-    mcps: ['飞书文档'],
-  },
-  {
-    id: 'mobai',
-    name: '墨白',
-    role: '内容主笔',
-    dept: '内容部',
-    hue: 300,
-    glyph: '◆',
-    statusKind: 'stuck',
-    statusLabel: '卡住了',
-    joined: '2026-04 入职',
-    prompt:
-      '你是一名内容主笔。擅长品牌叙事与转化型文案，为官网、公众号与销售物料产出高质量内容。',
-    skills: ['公众号文案', 'SEO 优化'],
-    mcps: ['飞书文档', '微信公众号'],
-  },
-  {
-    id: 'qingzhu',
-    name: '青竹',
-    role: '短视频策划',
-    dept: '内容部',
-    hue: 140,
-    glyph: '◗',
-    statusKind: 'busy',
-    statusLabel: '执行中',
-    joined: '2026-05 入职',
-    prompt:
-      '你是一名短视频策划。负责选题、脚本与分发节奏，选题要能挂钩获客目标。',
-    skills: ['公众号文案'],
-    mcps: ['飞书文档'],
-  },
-  {
-    id: 'tuyuan',
-    name: '途远',
-    role: '销售顾问',
-    dept: '增长与客户',
-    hue: 55,
-    glyph: '✱',
-    statusKind: 'wait',
-    statusLabel: '等待确认',
-    joined: '2026-04 入职',
-    prompt:
-      '你是一名销售顾问。负责线索跟进、报价与周报，成交卡点要及时上报老板拍板。',
-    skills: ['客服话术', '数据报表'],
-    mcps: ['企业邮箱', 'Notion'],
-  },
-  {
-    id: 'anran',
-    name: '安然',
-    role: '客服专员',
-    dept: '增长与客户',
-    hue: 20,
-    glyph: '◍',
-    statusKind: 'idle',
-    statusLabel: '空闲',
-    joined: '2026-05 入职',
-    prompt:
-      '你是一名客服专员。基于公司 FAQ 与话术库回复客户，超出权限的承诺必须请老板拍板。',
-    skills: ['客服话术'],
-    mcps: ['企业邮箱'],
-  },
-  {
-    id: 'jiansuan',
-    name: '简算',
-    role: '财务助理',
-    dept: '财务行政',
-    hue: 330,
-    glyph: '◉',
-    statusKind: 'idle',
-    statusLabel: '空闲',
-    joined: '2026-05 入职',
-    prompt:
-      '你是一名财务助理。负责记账、对账与月度报表，任何异常支出立即标红上报。',
-    skills: ['数据报表'],
-    mcps: ['Stripe', '飞书文档'],
-  },
-];
-
-const initialMessages: Record<string, Message[]> = {
-  sec: [
-    makeMessage({
-      from: 'sec',
-      type: 'text',
-      time: '08:30',
-      text: '早上好，老板。今天有 2 件事需要你拍板，5 个任务在推进中。\n有任何想法直接丢给我 —— 我可以帮你创建任务、招聘员工、或者拉群讨论。',
-    }),
-    makeMessage({
-      from: 'boss',
-      type: 'text',
-      time: '09:02',
-      text: '我想做个老客户回访的事，还没想清楚找谁。',
-    }),
-    makeMessage({
-      from: 'sec',
-      type: 'text',
-      time: '09:02',
-      text: '建议：由途远负责整理回访清单，安然跟进执行回访。\n我先建一个 P2 任务放进任务池，等你确认优先级；需要的话我再拉一个「客户回访」群。',
-    }),
-    makeMessage({
-      from: 'sec',
-      type: 'task',
-      time: '09:03',
-      taskTitle: '老客户回访计划',
-      taskPr: 'P2',
-    }),
-  ],
-  g1: [
-    makeMessage({
-      from: 'system',
-      type: 'system',
-      time: '',
-      text: '你创建了群聊，拉入了 阿澜、简一、小禾',
-    }),
-    makeMessage({
-      from: 'boss',
-      type: 'text',
-      time: '09:32',
-      text: '下半年重点是拉新。Q3 我想做一波获客，预算 2 万以内，先出个完整方案。目标：新增 500 个付费用户。',
-    }),
-    makeMessage({
-      from: 'alan',
-      type: 'text',
-      time: '09:33',
-      text: '收到。我先拆解：1. 渠道盘点与调研（小禾）2. 竞品打法分析（简一）3. 预算分配与节奏（我）。今天下班前给你第一版框架。',
-    }),
-    makeMessage({
-      from: 'alan',
-      type: 'task',
-      time: '09:33',
-      taskTitle: 'Q3 拉新方案 v1',
-      taskPr: 'P0',
-    }),
-    makeMessage({
-      from: 'jianyi',
-      type: 'text',
-      time: '09:41',
-      text: '一个问题：目标用户还是以设计师群体为主吗？还是要往中小企业主扩？这影响竞品选取。',
-    }),
-    makeMessage({
-      from: 'boss',
-      type: 'text',
-      time: '09:52',
-      text: '以设计师为主，中小企业主作为次要人群观察就行。',
-    }),
-    makeMessage({
-      from: 'xiaohe',
-      type: 'result',
-      time: '11:47',
-      cardTitle: '渠道调研报告 v1',
-      cardDesc:
-        '盘点了 12 个获客渠道，按 CAC 与起量速度排序，推荐优先测试其中 3 个：设计社区投放、垂类 KOC、SEO 专题页。',
-      cardFile: '渠道调研报告v1.pdf · 14 页',
-    }),
-    makeMessage({
-      from: 'alan',
-      type: 'approval',
-      time: '14:20',
-      apQ: '预算分配需要你拍板',
-      apDesc:
-        '方案A：70% 投放 + 30% 内容，起量快，预估 CAC 约 42 元；方案B：40% 投放 + 60% 内容，起量慢一拍，但能沉淀私域和搜索资产。',
-      apOptA: '方案A · 投放优先',
-      apOptB: '方案B · 内容优先',
-      apStatus: 'pending',
-      taskId: 't1',
-      followA:
-        '收到，按「方案A · 投放优先」推进：本周内上线两条投放计划，预算表我更新后同步到群里。',
-      followB:
-        '收到，按「方案B · 内容优先」推进：我和内容部对齐排期，预算表更新后同步到群里。',
-    }),
-  ],
-  g2: [
-    makeMessage({
-      from: 'system',
-      type: 'system',
-      time: '',
-      text: '你创建了群聊，拉入了 墨白、青竹、途远',
-    }),
-    makeMessage({
-      from: 'boss',
-      type: 'text',
-      time: '昨天',
-      text: '官网首页要改版，重点突出客户案例和评价，下周五前上线。',
-    }),
-    makeMessage({
-      from: 'mobai',
-      type: 'text',
-      time: '昨天',
-      text: '结构我重排了：首屏价值主张 → 案例墙 → 客户评价 → 价格。文案今天出，视觉稿明天。',
-    }),
-    makeMessage({
-      from: 'qingzhu',
-      type: 'text',
-      time: '昨天',
-      text: '我配套出 3 条官网上线的预热短视频脚本，选题清单整理中。',
-    }),
-    makeMessage({
-      from: 'mobai',
-      type: 'approval',
-      time: '10:15',
-      apQ: '视觉素材缺失，需要你拍板',
-      apDesc:
-        '品牌素材库里没有高清客户案例图。先用占位图继续排版，还是等你上传素材再继续？',
-      apOptA: '用占位图继续',
-      apOptB: '等我上传素材',
-      apStatus: 'pending',
-      taskId: 't4',
-      followA:
-        '好的，先用占位图完成整版排版，素材到位后替换即可，不影响下周五上线。',
-      followB:
-        '好的，我先完成文案与结构部分，等素材到位再出视觉稿，需要占用你一点时间上传。',
-    }),
-  ],
-  mobai: [
-    makeMessage({
-      from: 'boss',
-      type: 'text',
-      time: '周一',
-      text: '案例页的文案这周内给我初稿。',
-    }),
-    makeMessage({
-      from: 'mobai',
-      type: 'text',
-      time: '周一',
-      text: '好的。我列了 6 个案例的叙事角度，先给你两个方向的小样，你挑一个我再铺开写。',
-    }),
-  ],
-  tuyuan: [
-    makeMessage({
-      from: 'tuyuan',
-      type: 'result',
-      time: '17:40',
-      cardTitle: '6月销售周报（W26）',
-      cardDesc:
-        '新增线索 86 条，成交 9 单，环比 +12%。两个大客户卡在报价环节，建议下周电话跟进。',
-      cardFile: '销售周报-W26.pdf · 6 页',
-    }),
-    makeMessage({
-      from: 'tuyuan',
-      type: 'text',
-      time: '17:41',
-      text: '周报已完成，待你确认后我归档，并把两个卡单客户建成跟进任务。',
-    }),
-  ],
+type ApiBootstrap = {
+  workspace: Workspace;
+  departments: Department[];
+  agents: Array<{
+    id: string;
+    name: string;
+    role: string;
+    description: string;
+    department_id: string;
+    prompt: string;
+    hue: number;
+    glyph: string;
+    status_kind: string;
+    status_label: string;
+    joined: string;
+    skills: string[];
+    mcps: string[];
+  }>;
+  conversations: Array<{
+    id: string;
+    kind: 'dm' | 'group';
+    name: string;
+    agent_id: string | null;
+    member_ids: string[];
+    unread: number;
+    updated_at: string;
+  }>;
+  messages_by_conversation: Record<
+    string,
+    Array<{
+      id: string;
+      sender_type: 'user' | 'agent' | 'system';
+      sender_id: string;
+      content: string;
+      created_at: string;
+      provider?: string | null;
+      model?: string | null;
+    }>
+  >;
+  tasks: Array<{
+    id: string;
+    title: string;
+    description: string;
+    priority: string;
+    owner_agent_id: string | null;
+    status: string;
+    progress: number;
+    conversation_id: string | null;
+    due_date?: string | null;
+    parent_task_id?: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  agent_templates: Array<{
+    id: string;
+    name: string;
+    category: string;
+    department: string;
+    description: string;
+    prompt: string;
+    skills: string[];
+    mcps: string[];
+  }>;
 };
 
-const initialChats: Chat[] = [
-  { id: 'sec', kind: 'dm', agentId: 'sec', unread: 0, time: '09:03' },
-  {
-    id: 'g1',
-    kind: 'group',
-    name: 'Q3 拉新方案',
-    memberIds: ['alan', 'jianyi', 'xiaohe'],
-    unread: 0,
-    time: '14:20',
-  },
-  {
-    id: 'g2',
-    kind: 'group',
-    name: '官网改版',
-    memberIds: ['mobai', 'qingzhu', 'tuyuan'],
-    unread: 2,
-    time: '10:15',
-  },
-  { id: 'mobai', kind: 'dm', agentId: 'mobai', unread: 0, time: '周一' },
-  { id: 'tuyuan', kind: 'dm', agentId: 'tuyuan', unread: 1, time: '17:41' },
+const themeOptions: Array<{
+  mode: ThemeMode;
+  icon: string;
+  label: string;
+}> = [
+  { mode: 'light', icon: 'light_mode', label: '浅色' },
+  { mode: 'dark', icon: 'dark_mode', label: '深色' },
+  { mode: 'system', icon: 'computer', label: '跟随系统' },
 ];
 
-const initialTasks: Task[] = [
-  {
-    id: 't1',
-    title: 'Q3 拉新方案 v1',
-    pr: 'P0',
-    owner: 'alan',
-    status: '进行中',
-    progress: 60,
-    src: 'g1',
-    srcLabel: '#Q3 拉新方案',
-  },
-  {
-    id: 't2',
-    title: '渠道调研报告',
-    pr: 'P1',
-    owner: 'xiaohe',
-    status: '待确认',
-    progress: 100,
-    src: 'g1',
-    srcLabel: '#Q3 拉新方案',
-  },
-  {
-    id: 't3',
-    title: '竞品打法分析',
-    pr: 'P1',
-    owner: 'jianyi',
-    status: '进行中',
-    progress: 45,
-    src: 'g1',
-    srcLabel: '#Q3 拉新方案',
-  },
-  {
-    id: 't4',
-    title: '官网改版视觉稿',
-    pr: 'P1',
-    owner: 'mobai',
-    status: '卡住',
-    progress: 40,
-    src: 'g2',
-    srcLabel: '#官网改版',
-  },
-  {
-    id: 't5',
-    title: '官网案例页文案',
-    pr: 'P2',
-    owner: 'mobai',
-    status: '进行中',
-    progress: 70,
-    src: 'mobai',
-    srcLabel: '私聊 · 墨白',
-  },
-  {
-    id: 't6',
-    title: '短视频选题清单',
-    pr: 'P2',
-    owner: 'qingzhu',
-    status: '进行中',
-    progress: 30,
-    src: 'g2',
-    srcLabel: '#官网改版',
-  },
-  {
-    id: 't7',
-    title: '6月销售周报',
-    pr: 'P2',
-    owner: 'tuyuan',
-    status: '待确认',
-    progress: 100,
-    src: 'tuyuan',
-    srcLabel: '私聊 · 途远',
-  },
-  {
-    id: 't8',
-    title: '6月账目核对',
-    pr: 'P2',
-    owner: 'jiansuan',
-    status: '已完成',
-    progress: 100,
-    src: 'sec',
-    srcLabel: '秘书 · 小秘',
-  },
-  {
-    id: 't9',
-    title: '老客户回访计划',
-    pr: 'P2',
-    owner: 'tuyuan',
-    status: '进行中',
-    progress: 10,
-    src: 'sec',
-    srcLabel: '秘书 · 小秘',
-  },
-];
+const apiBaseUrl =
+  import.meta.env.VITE_AGENTPULSE_API_URL ?? 'http://127.0.0.1:8000/api';
+const tokenStorageKey = 'agentpulse_access_token';
+const userStorageKey = 'agentpulse_user';
 
-const hireTemplates: HireTemplate[] = [
-  {
-    name: '运营负责人',
-    dept: '运营部',
-    desc: '渠道·预算·节奏',
-    prompt:
-      '你是一名资深运营负责人。负责渠道盘点、预算分配与节奏把控，输出可直接执行的运营方案，并统筹团队成员分工。',
-    skills: ['数据报表', '竞品分析', '投放策略'],
-    mcps: ['飞书文档', 'Notion'],
-  },
-  {
-    name: '内容主笔',
-    dept: '内容部',
-    desc: '文案·品牌叙事',
-    prompt:
-      '你是一名内容主笔。擅长品牌叙事与转化型文案，为官网、公众号与销售物料产出高质量内容。',
-    skills: ['公众号文案', 'SEO 优化'],
-    mcps: ['飞书文档', '微信公众号'],
-  },
-  {
-    name: '短视频策划',
-    dept: '内容部',
-    desc: '选题·脚本·分发',
-    prompt:
-      '你是一名短视频策划。负责选题、脚本与分发节奏，选题要能挂钩获客目标。',
-    skills: ['公众号文案'],
-    mcps: ['飞书文档'],
-  },
-  {
-    name: '销售顾问',
-    dept: '增长与客户',
-    desc: '线索·报价·周报',
-    prompt:
-      '你是一名销售顾问。负责线索跟进、报价与周报，成交卡点要及时上报老板拍板。',
-    skills: ['客服话术', '数据报表'],
-    mcps: ['企业邮箱', 'Notion'],
-  },
-  {
-    name: '客服专员',
-    dept: '增长与客户',
-    desc: 'FAQ·话术·响应',
-    prompt:
-      '你是一名客服专员。基于公司 FAQ 与话术库回复客户，超出权限的承诺必须请老板拍板。',
-    skills: ['客服话术'],
-    mcps: ['企业邮箱'],
-  },
-  {
-    name: '财务助理',
-    dept: '财务行政',
-    desc: '记账·对账·报表',
-    prompt:
-      '你是一名财务助理。负责记账、对账与月度报表，任何异常支出立即标红上报。',
-    skills: ['数据报表'],
-    mcps: ['Stripe', '飞书文档'],
-  },
-];
-
-const docs = [
-  {
-    name: '公司介绍.md',
-    desc: '公司定位、业务范围与团队结构',
-    meta: '全员可见 · 更新于 6月28日',
-    icon: 'description',
-  },
-  {
-    name: '品牌视觉手册.pdf',
-    desc: 'Logo、色彩、字体与使用规范',
-    meta: '全员可见 · 更新于 6月12日',
-    icon: 'palette',
-  },
-  {
-    name: '产品定价表.xlsx',
-    desc: '各版本定价、折扣权限与报价口径',
-    meta: '全员可见 · 更新于 6月30日',
-    icon: 'table',
-  },
-  {
-    name: '客户 FAQ.md',
-    desc: '高频问题与标准答复，客服与销售共用',
-    meta: '全员可见 · 更新于 6月25日',
-    icon: 'quiz',
-  },
-  {
-    name: '常用文案素材库',
-    desc: '标语、案例故事、客户评价原文',
-    meta: '全员可见 · 更新于 6月20日',
-    icon: 'style',
-  },
-];
-
-const skills = [
-  {
-    name: '公众号文案',
-    desc: '结构化写作框架 + 品牌语气校验',
-    users: '2 名员工绑定',
-  },
-  {
-    name: '竞品分析',
-    desc: '竞品拆解模板，输出打法对比矩阵',
-    users: '2 名员工绑定',
-  },
-  {
-    name: '数据报表',
-    desc: '数据清洗、图表生成与周报格式',
-    users: '5 名员工绑定',
-  },
-  { name: 'SEO 优化', desc: '关键词研究与页面优化清单', users: '1 名员工绑定' },
-  {
-    name: '客服话术',
-    desc: '基于 FAQ 的应答策略与升级规则',
-    users: '2 名员工绑定',
-  },
-  {
-    name: '任务拆解',
-    desc: '把模糊想法拆成可执行任务树',
-    users: '1 名员工绑定',
-  },
-];
-
-const mcps = [
-  {
-    name: '飞书文档',
-    desc: '读写云文档、多维表格',
-    status: '已连接',
-    users: 6,
-  },
-  { name: 'Notion', desc: '知识库读写与页面创建', status: '已连接', users: 2 },
-  {
-    name: '企业邮箱',
-    desc: '收发邮件、跟进客户会话',
-    status: '已连接',
-    users: 3,
-  },
-  { name: 'Stripe', desc: '订单、账单与收入数据', status: '未连接', users: 0 },
-  {
-    name: '微信公众号',
-    desc: '草稿发布与留言管理',
-    status: '未连接',
-    users: 0,
-  },
-];
+let messageCounter = 1;
+const tempMessageId = () => `temp_${messageCounter++}`;
 
 const materialIcon = (name: string, className?: string) => (
   <span
@@ -706,6 +196,88 @@ const materialIcon = (name: string, className?: string) => (
 );
 
 const avatarColor = (agent: Agent) => `oklch(0.55 0.11 ${agent.hue})`;
+
+function avatarText(name: string) {
+  const normalized = name.trim();
+  if (!normalized) return '?';
+  return Array.from(normalized).slice(0, 2).join('');
+}
+
+function getInitialThemeMode(): ThemeMode {
+  const stored = localStorage.getItem('agentpulse_theme_mode');
+  return stored === 'light' || stored === 'dark' || stored === 'system'
+    ? stored
+    : 'light';
+}
+
+function getSystemTheme(): EffectiveTheme {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light';
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getMentionContext(value: string, cursor: number) {
+  if (cursor < 0) return null;
+  const beforeCursor = value.slice(0, cursor);
+  const match = /(^|\s)@([^\s@]*)$/.exec(beforeCursor);
+  if (!match) return null;
+
+  return {
+    query: match[2],
+    start: beforeCursor.length - match[2].length - 1,
+  };
+}
+
+function renderMentionText(text: string, agents: Agent[]): ReactNode {
+  const mentionNames = Array.from(
+    new Set([...agents.map((agent) => agent.name), '老板']),
+  )
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+
+  if (!mentionNames.length) return text;
+
+  const pattern = new RegExp(
+    `@(${mentionNames.map(escapeRegExp).join('|')})(?=\\s|$|[，。！？、,.!?;；:：])`,
+    'g',
+  );
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    nodes.push(
+      <span className="mention-token" key={`${match.index}-${match[0]}`}>
+        {match[0]}
+      </span>,
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes.length ? nodes : text;
+}
+
+function resolveMentionedAgent(
+  text: string,
+  memberIds: string[],
+  agents: Agent[],
+) {
+  return agents.find(
+    (agent) =>
+      memberIds.includes(agent.id) &&
+      new RegExp(
+        `@${escapeRegExp(agent.name)}(?=\\s|$|[，。！？、,.!?;；:：])`,
+      ).test(text),
+  );
+}
 
 function dotColor(status: AgentStatus) {
   return {
@@ -727,61 +299,296 @@ function statusStyle(status: TaskStatus) {
     return { background: '#EEF1FB', color: '#3B5BDB', bar: '#3B5BDB' };
   if (status === '待确认')
     return { background: '#FEF3E2', color: '#B45309', bar: '#D97706' };
-  if (status === '卡住')
+  if (status === '阻塞')
     return { background: '#FDF1F0', color: '#C0392B', bar: '#DC2626' };
   return { background: '#EEF4EE', color: '#16803C', bar: '#16A34A' };
 }
 
+function formatTime(value: string) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function normalizeStatus(value: string): AgentStatus {
+  return value === 'busy' ||
+    value === 'wait' ||
+    value === 'stuck' ||
+    value === 'idle'
+    ? value
+    : 'idle';
+}
+
+function normalizePriority(value: string): Priority {
+  return value === 'P0' || value === 'P1' || value === 'P2' ? value : 'P2';
+}
+
+function normalizeTaskStatus(value: string): TaskStatus {
+  return value === '进行中' ||
+    value === '待确认' ||
+    value === '阻塞' ||
+    value === '已完成'
+    ? value
+    : value === '卡住'
+      ? '阻塞'
+    : '进行中';
+}
+
+function nextTaskStatus(status: TaskStatus): TaskStatus {
+  if (status === '进行中') return '待确认';
+  if (status === '待确认') return '已完成';
+  if (status === '阻塞') return '进行中';
+  return '已完成';
+}
+
+function progressForNextStatus(status: TaskStatus, current: number) {
+  if (status === '已完成') return 100;
+  if (status === '待确认') return Math.max(current, 80);
+  if (status === '进行中') return Math.max(current, 20);
+  return current;
+}
+
+function authHeaders(token: string) {
+  return { Authorization: `Bearer ${token}` };
+}
+
+async function apiRequest<T>(
+  path: string,
+  options: RequestInit & { token?: string } = {},
+): Promise<T> {
+  const headers = new Headers(options.headers);
+  headers.set('Content-Type', 'application/json');
+  if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    ...options,
+    headers,
+  });
+  const payload = await response
+    .json()
+    .catch(() => ({ detail: '后端返回了无法解析的响应' }));
+  if (!response.ok) {
+    throw new Error(formatApiError(payload, response.status));
+  }
+  return payload as T;
+}
+
+function formatApiError(payload: unknown, status: number) {
+  if (payload && typeof payload === 'object' && 'detail' in payload) {
+    const detail = (payload as { detail: unknown }).detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+      const messages = detail
+        .map((item) => {
+          if (!item || typeof item !== 'object') return '';
+          const record = item as {
+            loc?: unknown[];
+            msg?: unknown;
+            type?: unknown;
+          };
+          const field =
+            Array.isArray(record.loc) && record.loc.length
+              ? fieldLabel(String(record.loc.at(-1)))
+              : '字段';
+          const message =
+            typeof record.msg === 'string' ? record.msg : '格式不正确';
+          if (
+            typeof record.type === 'string' &&
+            record.type.includes('string_too_short')
+          ) {
+            return `${field}不能为空`;
+          }
+          return `${field}${message}`;
+        })
+        .filter(Boolean);
+      if (messages.length) return messages.join('，');
+    }
+  }
+  return `请求失败：${status}`;
+}
+
+function fieldLabel(field: string) {
+  return (
+    {
+      email: '邮箱',
+      password: '密码',
+      display_name: '你的称呼',
+      workspace_name: '公司/工作室名称',
+      content: '消息',
+    }[field] ?? field
+  );
+}
+
+function mapBootstrap(data: ApiBootstrap) {
+  const departmentsById = new Map(
+    data.departments.map((department) => [department.id, department]),
+  );
+  const agents: Agent[] = data.agents.map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    role: agent.role,
+    description: agent.description,
+    dept: departmentsById.get(agent.department_id)?.name ?? '未分配',
+    departmentId: agent.department_id,
+    hue: agent.hue,
+    glyph: agent.glyph,
+    statusKind: normalizeStatus(agent.status_kind),
+    statusLabel: agent.status_label,
+    joined: agent.joined,
+    prompt: agent.prompt,
+    skills: agent.skills,
+    mcps: agent.mcps,
+  }));
+  const agentById = new Map(agents.map((agent) => [agent.id, agent]));
+  const chats: Chat[] = data.conversations.map((chat) => {
+    if (chat.kind === 'dm') {
+      return {
+        id: chat.id,
+        kind: 'dm',
+        agentId: chat.agent_id ?? chat.member_ids[0] ?? '',
+        unread: chat.unread,
+        time: formatTime(chat.updated_at),
+      };
+    }
+    return {
+      id: chat.id,
+      kind: 'group',
+      name: chat.name,
+      memberIds: chat.member_ids,
+      unread: chat.unread,
+      time: formatTime(chat.updated_at),
+    };
+  });
+  const messagesByChat: Record<string, Message[]> = Object.fromEntries(
+    Object.entries(data.messages_by_conversation).map(([conversationId, rows]) => [
+      conversationId,
+      rows.map((message) => ({
+        id: message.id,
+        from:
+          message.sender_type === 'user'
+            ? 'boss'
+            : message.sender_type === 'system'
+              ? 'system'
+              : message.sender_id,
+        type: message.sender_type === 'system' ? 'system' : 'text',
+        time: formatTime(message.created_at),
+        text: message.content,
+        provider: message.provider ?? undefined,
+        model: message.model ?? undefined,
+      })),
+    ]),
+  );
+  const chatById = new Map(chats.map((chat) => [chat.id, chat]));
+  const tasks: Task[] = data.tasks.map((task) => {
+    const chat = task.conversation_id ? chatById.get(task.conversation_id) : null;
+    const owner = task.owner_agent_id ? agentById.get(task.owner_agent_id) : null;
+    return {
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      pr: normalizePriority(task.priority),
+      owner: task.owner_agent_id ?? '',
+      status: normalizeTaskStatus(task.status),
+      progress: task.progress,
+      src: task.conversation_id ?? '',
+      srcLabel: chat
+        ? chat.kind === 'dm'
+          ? `私聊 · ${owner?.name ?? '员工'}`
+          : `#${chat.name}`
+        : '未关联会话',
+      dueDate: task.due_date ?? null,
+      parentTaskId: task.parent_task_id ?? null,
+    };
+  });
+  const templates: HireTemplate[] = data.agent_templates.map((template) => ({
+    id: template.id,
+    name: template.name,
+    category: template.category,
+    dept: template.department,
+    desc: template.description,
+    prompt: template.prompt,
+    skills: template.skills,
+    mcps: template.mcps,
+  }));
+
+  return {
+    workspace: data.workspace,
+    departments: data.departments,
+    agents,
+    chats,
+    messagesByChat,
+    tasks,
+    templates,
+  };
+}
+
 function App() {
-  const [view, setView] = useState<View>('home');
-  const [chatId, setChatId] = useState('g1');
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialThemeMode);
+  const [systemTheme, setSystemTheme] =
+    useState<EffectiveTheme>(getSystemTheme);
+  const [token, setToken] = useState(() =>
+    localStorage.getItem(tokenStorageKey),
+  );
+  const [user, setUser] = useState<User | null>(() => {
+    const raw = localStorage.getItem(userStorageKey);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as User;
+    } catch {
+      return null;
+    }
+  });
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [messagesByChat, setMessagesByChat] = useState<Record<string, Message[]>>(
+    {},
+  );
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [hireTemplates, setHireTemplates] = useState<HireTemplate[]>([]);
+  const [bootLoading, setBootLoading] = useState(Boolean(token));
+  const [authError, setAuthError] = useState('');
+  const [view, setView] = useState<View>('chat');
+  const [chatId, setChatId] = useState('');
   const [draft, setDraft] = useState('');
   const [detailId, setDetailId] = useState<string | null>(null);
   const [hireOpen, setHireOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [groupOpen, setGroupOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [taskOpen, setTaskOpen] = useState(false);
   const [taskFilter, setTaskFilter] = useState<TaskStatus | '全部'>('全部');
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('docs');
-  const [agents, setAgents] = useState<Agent[]>(initialAgents);
-  const [chats, setChats] = useState<Chat[]>(initialChats);
-  const [messagesByChat, setMessagesByChat] = useState(initialMessages);
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [typingName, setTypingName] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState>({
     visible: false,
     message: '',
   });
-  const [hireTpl, setHireTpl] = useState(0);
-  const [hireName, setHireName] = useState('');
-  const [hireDept, setHireDept] = useState(hireTemplates[0].dept);
-  const [hirePrompt, setHirePrompt] = useState(hireTemplates[0].prompt);
-  const [hireSkills, setHireSkills] = useState<string[]>(
-    hireTemplates[0].skills,
-  );
-  const [hireMcps, setHireMcps] = useState<string[]>(hireTemplates[0].mcps);
+  const [hireTpl, setHireTpl] = useState('');
+  const [hireDept, setHireDept] = useState('');
+  const [createName, setCreateName] = useState('');
+  const [createDesc, setCreateDesc] = useState('');
+  const [createDept, setCreateDept] = useState('');
+  const [createPrompt, setCreatePrompt] = useState('');
   const [groupName, setGroupName] = useState('');
   const [groupMembers, setGroupMembers] = useState<string[]>([]);
-  const [onboardingOpen, setOnboardingOpen] = useState(
-    () => !localStorage.getItem('agentpulse_onboarded'),
-  );
+  const [groupTaskIds, setGroupTaskIds] = useState<string[]>([]);
+  const [inviteMembers, setInviteMembers] = useState<string[]>([]);
+  const [taskScopeChatId, setTaskScopeChatId] = useState<string | null>(null);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDesc, setTaskDesc] = useState('');
+  const [taskPriority, setTaskPriority] = useState<Priority>('P2');
+  const [taskOwnerId, setTaskOwnerId] = useState('');
+  const [taskConversationId, setTaskConversationId] = useState('');
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
-  const [onboardingRoles, setOnboardingRoles] = useState([0, 1, 4]);
-  const secretaryReplyIndex = useRef(0);
   const messagesRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
-  const replyTimerA = useRef<number | undefined>(undefined);
-  const replyTimerB = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight });
-  }, [chatId, messagesByChat, typingName]);
-
-  useEffect(() => {
-    return () => {
-      window.clearTimeout(toastTimer.current);
-      window.clearTimeout(replyTimerA.current);
-      window.clearTimeout(replyTimerB.current);
-    };
-  }, []);
 
   const showToast = (message: string) => {
     window.clearTimeout(toastTimer.current);
@@ -792,23 +599,113 @@ function App() {
     );
   };
 
+  const applyBootstrap = (data: ApiBootstrap) => {
+    const mapped = mapBootstrap(data);
+    setWorkspace(mapped.workspace);
+    setDepartments(mapped.departments);
+    setAgents(mapped.agents);
+    setChats(mapped.chats);
+    setMessagesByChat(mapped.messagesByChat);
+    setTasks(mapped.tasks);
+    setHireTemplates(mapped.templates);
+    setOnboardingOpen(!mapped.workspace.onboarding_completed);
+
+    const preferredChat =
+      mapped.chats.find((chat) => chat.kind === 'dm' && chat.agentId) ??
+      mapped.chats[0];
+    if (preferredChat && !mapped.chats.some((chat) => chat.id === chatId)) {
+      setChatId(preferredChat.id);
+    }
+  };
+
+  const loadBootstrap = async (activeToken = token) => {
+    if (!activeToken) return;
+    setBootLoading(true);
+    try {
+      const data = await apiRequest<ApiBootstrap>('/me/bootstrap', {
+        token: activeToken,
+      });
+      applyBootstrap(data);
+      setAuthError('');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : '加载工作台失败');
+      localStorage.removeItem(tokenStorageKey);
+      setToken(null);
+      setUser(null);
+      setWorkspace(null);
+    } finally {
+      setBootLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    localStorage.setItem('agentpulse_theme_mode', themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const updateSystemTheme = () =>
+      setSystemTheme(mediaQuery.matches ? 'dark' : 'light');
+
+    updateSystemTheme();
+    mediaQuery.addEventListener('change', updateSystemTheme);
+    return () => mediaQuery.removeEventListener('change', updateSystemTheme);
+  }, []);
+
+  useEffect(() => {
+    if (token) void loadBootstrap(token);
+  }, []);
+
+  useEffect(() => {
+    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight });
+  }, [chatId, messagesByChat, typingName]);
+
+  useEffect(() => {
+    return () => window.clearTimeout(toastTimer.current);
+  }, []);
+
+  const effectiveTheme = themeMode === 'system' ? systemTheme : themeMode;
+
+  const handleAuthSuccess = async (payload: {
+    access_token: string;
+    user: User;
+    workspace: Workspace;
+  }) => {
+    localStorage.setItem(tokenStorageKey, payload.access_token);
+    localStorage.setItem(userStorageKey, JSON.stringify(payload.user));
+    setToken(payload.access_token);
+    setUser(payload.user);
+    setWorkspace(payload.workspace);
+    await loadBootstrap(payload.access_token);
+  };
+
+  const logout = () => {
+    localStorage.removeItem(tokenStorageKey);
+    localStorage.removeItem(userStorageKey);
+    setToken(null);
+    setUser(null);
+    setWorkspace(null);
+    setAgents([]);
+    setChats([]);
+    setMessagesByChat({});
+    setTasks([]);
+    setHireTemplates([]);
+  };
+
   const agentById = (id: string) => agents.find((agent) => agent.id === id);
   const activeChat = chats.find((chat) => chat.id === chatId) ?? chats[0];
   const busyCount = agents.filter(
     (agent) => agent.statusKind === 'busy',
   ).length;
   const confirmTasks = tasks.filter((task) => task.status === '待确认');
-  const stuckCount = tasks.filter((task) => task.status === '卡住').length;
+  const stuckCount = tasks.filter((task) => task.status === '阻塞').length;
   const unreadTotal = chats.reduce((count, chat) => count + chat.unread, 0);
-  const pendingApprovals = chats.flatMap((chat) =>
-    (messagesByChat[chat.id] ?? [])
-      .filter(
-        (message): message is Extract<Message, { type: 'approval' }> =>
-          message.type === 'approval' && message.apStatus === 'pending',
-      )
-      .map((message) => ({ chat, message })),
+  const allSkills = Array.from(
+    new Set(hireTemplates.flatMap((template) => template.skills)),
   );
-  const inboxCount = pendingApprovals.length + confirmTasks.length;
+  const allMcps = Array.from(
+    new Set(hireTemplates.flatMap((template) => template.mcps)),
+  );
 
   const lastMessagePreview = (id: string) => {
     const messages = messagesByChat[id] ?? [];
@@ -823,12 +720,7 @@ function App() {
           : (agentById(last.from)?.name ?? '');
     const prefix = author ? `${author}：` : '';
 
-    if (last.type === 'text') return `${prefix}${last.text}`;
-    if (last.type === 'system') return `${prefix}${last.text}`;
-    if (last.type === 'result') return `${prefix}[执行结果] ${last.cardTitle}`;
-    if (last.type === 'approval') return `${prefix}[待拍板] ${last.apQ}`;
-    if (last.type === 'task') return `${prefix}[任务] ${last.taskTitle}`;
-    return prefix;
+    return `${prefix}${last.text}`;
   };
 
   const openChat = (id: string) => {
@@ -841,419 +733,416 @@ function App() {
     );
   };
 
-  const openHire = () => {
-    const template = hireTemplates[0];
-    setHireTpl(0);
-    setHireName('');
+  const openHire = (templateId: string) => {
+    const template = hireTemplates.find((item) => item.id === templateId);
+    if (!template) return;
+    setHireTpl(template.id);
     setHireDept(template.dept);
-    setHirePrompt(template.prompt);
-    setHireSkills(template.skills);
-    setHireMcps(template.mcps);
     setHireOpen(true);
   };
 
-  const pickHireTemplate = (index: number) => {
-    const template = hireTemplates[index];
-    setHireTpl(index);
-    setHireDept(template.dept);
-    setHirePrompt(template.prompt);
-    setHireSkills(template.skills);
-    setHireMcps(template.mcps);
+  const openCreateAgent = () => {
+    setCreateName('');
+    setCreateDesc('');
+    setCreateDept('');
+    setCreatePrompt('');
+    setCreateOpen(true);
   };
 
-  const send = () => {
+  const openGroupModal = () => {
+    setGroupName('');
+    setGroupMembers([]);
+    setGroupTaskIds([]);
+    setGroupOpen(true);
+  };
+
+  const openAllTasks = () => {
+    setTaskScopeChatId(null);
+    setView('tasks');
+    setDetailId(null);
+  };
+
+  const openRelatedTasks = () => {
+    if (!activeChat) return;
+    setTaskScopeChatId(activeChat.id);
+    setTaskFilter('全部');
+    setView('tasks');
+    setDetailId(null);
+  };
+
+  const openCreateTask = () => {
+    setTaskTitle('');
+    setTaskDesc('');
+    setTaskPriority('P2');
+    setTaskOwnerId('');
+    setTaskConversationId(taskScopeChatId ?? activeChat?.id ?? '');
+    setTaskOpen(true);
+  };
+
+  const send = async () => {
     const text = draft.trim();
-    if (!text || !activeChat) return;
+    if (!text || !activeChat || !token) return;
 
     const targetChat = activeChat;
-    const userMessage: Message = {
-      id: messageId(),
+    const memberIds =
+      targetChat.kind === 'dm' ? [targetChat.agentId] : targetChat.memberIds;
+    const mentionedAgent =
+      targetChat.kind === 'group'
+        ? resolveMentionedAgent(text, memberIds, agents)
+        : null;
+    const replierId =
+      targetChat.kind === 'dm'
+        ? targetChat.agentId
+        : (mentionedAgent?.id ?? targetChat.memberIds[0]);
+    const replier = replierId ? agentById(replierId) : null;
+    if (!replier) return;
+
+    const optimisticId = tempMessageId();
+    const optimisticMessage: Message = {
+      id: optimisticId,
       from: 'boss',
       type: 'text',
       time: '刚刚',
       text,
     };
-
     setMessagesByChat((current) => ({
       ...current,
-      [targetChat.id]: [...(current[targetChat.id] ?? []), userMessage],
+      [targetChat.id]: [...(current[targetChat.id] ?? []), optimisticMessage],
     }));
     setDraft('');
-
-    const replierId =
-      targetChat.kind === 'dm' ? targetChat.agentId : targetChat.memberIds[0];
-    if (!replierId) return;
-    const replier = agentById(replierId);
-    if (!replier) return;
-
-    window.clearTimeout(replyTimerA.current);
-    window.clearTimeout(replyTimerB.current);
-    replyTimerA.current = window.setTimeout(
-      () => setTypingName(replier.name),
-      500,
+    setTypingName(replier.name);
+    setAgents((current) =>
+      current.map((agent) =>
+        agent.id === replier.id
+          ? { ...agent, statusKind: 'busy', statusLabel: '思考中' }
+          : agent,
+      ),
     );
-    replyTimerB.current = window.setTimeout(() => {
-      let replyText = '收到。我排进今天的工作里，有进展直接发你。';
-      if (replierId === 'sec') {
-        replyText =
-          secretaryReplies[
-            secretaryReplyIndex.current % secretaryReplies.length
-          ];
-        secretaryReplyIndex.current += 1;
-      } else if (targetChat.kind === 'group') {
-        replyText =
-          '收到，我来跟进。有结论我会第一时间在群里同步，需要拍板的地方会 @你。';
-      }
 
-      const reply: Message = {
-        id: messageId(),
-        from: replierId,
-        type: 'text',
-        time: '刚刚',
-        text: replyText,
-      };
+    try {
+      const response = await apiRequest<{
+        user_message: ApiBootstrap['messages_by_conversation'][string][number];
+        agent_message: ApiBootstrap['messages_by_conversation'][string][number];
+      }>(`/conversations/${targetChat.id}/messages`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          content: text,
+          target_agent_id: targetChat.kind === 'group' ? replier.id : null,
+        }),
+      });
+      const userMessage = mapApiMessage(response.user_message);
+      const agentMessage = mapApiMessage(response.agent_message);
       setMessagesByChat((current) => ({
         ...current,
-        [targetChat.id]: [...(current[targetChat.id] ?? []), reply],
+        [targetChat.id]: [
+          ...(current[targetChat.id] ?? []).filter(
+            (message) => message.id !== optimisticId,
+          ),
+          userMessage,
+          agentMessage,
+        ],
       }));
-      setTypingName(null);
-    }, 1700);
-  };
-
-  const decide = (
-    targetChatId: string,
-    messageIdToUpdate: string,
-    choice: 'A' | 'B',
-  ) => {
-    let chosenLabel = '';
-    let followText = '';
-    let ownerId = '';
-    let taskId: string | null = null;
-
-    setMessagesByChat((current) => {
-      const next = { ...current };
-      const updatedMessages = (next[targetChatId] ?? []).map((message) => {
-        if (message.id !== messageIdToUpdate || message.type !== 'approval')
-          return message;
-        chosenLabel = choice === 'A' ? message.apOptA : message.apOptB;
-        followText = choice === 'A' ? message.followA : message.followB;
-        ownerId = message.from;
-        taskId = message.taskId;
-        return { ...message, apStatus: choice };
-      });
-
-      next[targetChatId] = [
-        ...updatedMessages,
-        {
-          id: messageId(),
-          from: 'system',
-          type: 'system',
-          time: '',
-          text: `你拍板了：${chosenLabel}`,
-        },
-        {
-          id: messageId(),
-          from: ownerId,
-          type: 'text',
-          time: '刚刚',
-          text: followText,
-        },
-      ];
-      return next;
-    });
-
-    if (taskId) {
-      setTasks((current) =>
-        current.map((task) =>
-          task.id === taskId ? { ...task, status: '进行中' } : task,
+      setChats((current) =>
+        current.map((chat) =>
+          chat.id === targetChat.id ? { ...chat, time: '刚刚' } : chat,
         ),
       );
-    }
-
-    if (targetChatId === 'g2') {
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'LLM 调用失败，请稍后重试';
+      setMessagesByChat((current) => ({
+        ...current,
+        [targetChat.id]: [
+          ...(current[targetChat.id] ?? []),
+          {
+            id: tempMessageId(),
+            from: 'system',
+            type: 'system',
+            time: '',
+            text: `真实调用 DeepSeek 失败：${errorMessage}`,
+          },
+        ],
+      }));
+      showToast('DeepSeek 调用失败，请检查后端和 API Key');
+    } finally {
+      setTypingName(null);
       setAgents((current) =>
         current.map((agent) =>
-          agent.id === 'mobai'
-            ? { ...agent, statusKind: 'busy', statusLabel: '执行中' }
+          agent.id === replier.id
+            ? { ...agent, statusKind: 'idle', statusLabel: '在线待命' }
             : agent,
         ),
       );
     }
-
-    showToast('已拍板，团队继续推进');
   };
 
-  const confirmTask = (id: string) => {
-    const targetTask = tasks.find((task) => task.id === id);
-    const nextTasks = tasks.map((task) =>
-      task.id === id ? { ...task, status: '已完成' as const } : task,
-    );
-    setTasks(nextTasks);
-
-    if (targetTask) {
-      setAgents((current) =>
-        current.map((agent) => {
-          if (agent.id !== targetTask.owner || agent.statusKind !== 'wait')
-            return agent;
-          const stillBusy = nextTasks.some(
-            (task) =>
-              task.owner === agent.id &&
-              (task.status === '进行中' || task.status === '卡住'),
-          );
-          return {
-            ...agent,
-            statusKind: stillBusy ? 'busy' : 'idle',
-            statusLabel: stillBusy ? '执行中' : '空闲',
-          };
+  const submitHire = async () => {
+    if (!token || !hireTpl) return;
+    try {
+      await apiRequest('/agents/recruit', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          template_id: hireTpl,
+          department_name: hireDept,
         }),
-      );
+      });
+      await loadBootstrap(token);
+      setHireOpen(false);
+      setView('staff');
+      showToast('招募成功，已加入组织架构');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '招募失败');
     }
-
-    showToast('任务已确认结束，归档完成');
   };
 
-  const continueTask = (id: string) => {
-    setTasks((current) =>
-      current.map((task) =>
-        task.id === id
-          ? {
-              ...task,
-              status: '进行中' as const,
-              progress: Math.min(task.progress, 85),
-            }
-          : task,
-      ),
-    );
-    showToast('已让负责人继续推进');
-  };
-
-  const openDm = (agentId: string) => {
-    const existing = chats.find(
-      (chat) => chat.kind === 'dm' && chat.agentId === agentId,
-    );
-    if (existing) {
-      openChat(existing.id);
+  const submitCreateAgent = async () => {
+    if (!token) return;
+    const name = createName.trim();
+    const prompt = createPrompt.trim();
+    const departmentName = createDept.trim();
+    if (!name || !prompt || !departmentName) {
+      showToast('请填写员工名称、部门和工作职责 Prompt');
       return;
     }
-
-    const agent = agentById(agentId);
-    if (!agent) return;
-    setChats((current) => [
-      ...current,
-      { id: agentId, kind: 'dm', agentId, unread: 0, time: '刚刚' },
-    ]);
-    setMessagesByChat((current) => ({
-      ...current,
-      [agentId]: [
-        {
-          id: messageId(),
-          from: 'system',
-          type: 'system',
-          time: '',
-          text: `你发起了与 ${agent.name} 的私聊`,
-        },
-      ],
-    }));
-    setView('chat');
-    setChatId(agentId);
-    setDetailId(null);
+    try {
+      await apiRequest('/agents', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          name,
+          description: createDesc.trim(),
+          department_name: departmentName,
+          prompt,
+        }),
+      });
+      await loadBootstrap(token);
+      setCreateOpen(false);
+      setView('staff');
+      showToast(`已创建「${name}」`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '创建失败');
+    }
   };
 
-  const submitHire = () => {
-    const template = hireTemplates[hireTpl];
-    const name = hireName.trim() || template.name;
-    const index = agents.length;
-    const newAgent: Agent = {
-      id: `new${index}`,
-      name,
-      role: template.name,
-      dept: hireDept,
-      hue: hueCycle[index % hueCycle.length],
-      glyph: glyphCycle[index % glyphCycle.length],
-      statusKind: 'idle',
-      statusLabel: '空闲',
-      joined: '今天入职',
-      prompt: hirePrompt || template.prompt,
-      skills: hireSkills.length ? hireSkills : template.skills,
-      mcps: hireMcps.length ? hireMcps : template.mcps,
-    };
-
-    setAgents((current) => [...current, newAgent]);
-    setMessagesByChat((current) => ({
-      ...current,
-      sec: [
-        ...(current.sec ?? []),
-        {
-          id: messageId(),
-          from: 'sec',
-          type: 'text',
-          time: '刚刚',
-          text: `新员工「${name}」已办理入职，加入${newAgent.dept}。赋能配置我已按模板绑定好，随时可以给 TA 分配任务。`,
-        },
-      ],
-    }));
-    setHireOpen(false);
-    setView('staff');
-    showToast(`「${name}」已入职 · ${newAgent.dept}`);
-  };
-
-  const createGroup = () => {
+  const createGroup = async () => {
+    if (!token) return;
     if (!groupMembers.length) {
       showToast('至少拉一位员工进群');
       return;
     }
-    const name = groupName.trim() || '新的讨论';
-    const id = `g${Date.now()}`;
-    const names = groupMembers
-      .map((memberId) => agentById(memberId)?.name)
-      .filter(Boolean)
-      .join('、');
-
-    setChats((current) => [
-      ...current,
-      {
-        id,
-        kind: 'group',
-        name,
-        memberIds: groupMembers,
-        unread: 0,
-        time: '刚刚',
-      },
-    ]);
-    setMessagesByChat((current) => ({
-      ...current,
-      [id]: [
-        {
-          id: messageId(),
-          from: 'system',
-          type: 'system',
-          time: '',
-          text: `你创建了群聊，拉入了 ${names}`,
-        },
-      ],
-    }));
-    setGroupOpen(false);
-    setGroupName('');
-    setGroupMembers([]);
-    setView('chat');
-    setChatId(id);
-    showToast('群聊已创建，把事情说给他们听吧');
+    try {
+      const response = await apiRequest<{ id: string }>('/conversations/group', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          name: groupName.trim() || '新的讨论',
+          member_ids: groupMembers,
+          related_task_ids: groupTaskIds,
+        }),
+      });
+      await loadBootstrap(token);
+      setGroupOpen(false);
+      setGroupName('');
+      setGroupMembers([]);
+      setGroupTaskIds([]);
+      setView('chat');
+      setChatId(response.id);
+      showToast('群聊已创建，把事情说给他们听吧');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '建群失败');
+    }
   };
 
-  const finishOnboarding = () => {
-    localStorage.setItem('agentpulse_onboarded', '1');
+  const openInviteMembers = () => {
+    if (!activeChat || activeChat.kind !== 'group') return;
+    setInviteMembers([]);
+    setInviteOpen(true);
+  };
+
+  const inviteGroupMembers = async () => {
+    if (!token || !activeChat || activeChat.kind !== 'group') return;
+    if (!inviteMembers.length) {
+      showToast('请选择要拉入群聊的员工');
+      return;
+    }
+    try {
+      await apiRequest(`/conversations/${activeChat.id}/members`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          member_ids: inviteMembers,
+        }),
+      });
+      await loadBootstrap(token);
+      setInviteOpen(false);
+      setInviteMembers([]);
+      showToast('已拉入群聊');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '拉人失败');
+    }
+  };
+
+  const submitCreateTask = async () => {
+    if (!token) return;
+    const title = taskTitle.trim();
+    if (!title) {
+      showToast('请填写任务标题');
+      return;
+    }
+    try {
+      await apiRequest('/tasks', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          title,
+          description: taskDesc.trim(),
+          priority: taskPriority,
+          owner_agent_id: taskOwnerId || null,
+          conversation_id: taskConversationId || null,
+          status: '进行中',
+          progress: 10,
+        }),
+      });
+      await loadBootstrap(token);
+      setTaskOpen(false);
+      setView('tasks');
+      showToast('任务已创建');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '创建任务失败');
+    }
+  };
+
+  const advanceTask = async (task: Task) => {
+    if (!token) return;
+    const nextStatus = nextTaskStatus(task.status);
+    try {
+      await apiRequest(`/tasks/${task.id}`, {
+        method: 'PATCH',
+        token,
+        body: JSON.stringify({
+          status: nextStatus,
+          progress: progressForNextStatus(nextStatus, task.progress),
+        }),
+      });
+      await loadBootstrap(token);
+      showToast(`任务已更新为「${nextStatus}」`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '更新任务失败');
+    }
+  };
+
+  const finishOnboarding = async () => {
+    if (token) {
+      await apiRequest('/me/onboarding/complete', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({}),
+      }).catch(() => null);
+    }
     setOnboardingOpen(false);
+    setWorkspace((current) =>
+      current ? { ...current, onboarding_completed: true } : current,
+    );
     showToast('团队已就位，从给小秘发条消息开始吧');
   };
 
-  const inboxItems = useMemo(
-    () => [
-      ...pendingApprovals.map(({ chat, message }) => {
-        const agent = agentById(message.from);
-        return {
-          id: message.id,
-          avatarBg: agent ? avatarColor(agent) : '#9AA1AD',
-          avatar: agent?.glyph ?? '',
-          title: message.apQ,
-          detail: `${agent?.name ?? '员工'} 在「${chat.kind === 'group' ? chat.name : '私聊'}」里等你拍板 —— ${message.apDesc}`,
-          labelA: message.apOptA,
-          labelB: message.apOptB,
-          srcLabel: '去群里看',
-          actA: () => decide(chat.id, message.id, 'A'),
-          actB: () => decide(chat.id, message.id, 'B'),
-          goSrc: () => openChat(chat.id),
-        };
-      }),
-      ...confirmTasks.map((task) => {
-        const agent = agentById(task.owner);
-        return {
-          id: task.id,
-          avatarBg: agent ? avatarColor(agent) : '#9AA1AD',
-          avatar: agent?.glyph ?? '',
-          title: `「${task.title}」已执行完毕，等你确认`,
-          detail: `${agent?.name ?? '员工'} 已交付结果 · 优先级 ${task.pr} · 确认后任务归档`,
-          labelA: '确认结束',
-          labelB: '继续推进',
-          srcLabel: '看交付',
-          actA: () => confirmTask(task.id),
-          actB: () => continueTask(task.id),
-          goSrc: () => openChat(task.src),
-        };
-      }),
-    ],
-    [pendingApprovals, confirmTasks, agents],
-  );
-
-  const homeTasks = tasks
-    .filter((task) => task.status !== '已完成')
-    .slice(0, 5);
-  const filteredTasks = tasks.filter(
+  const scopedTasks = taskScopeChatId
+    ? tasks.filter((task) => task.src === taskScopeChatId)
+    : tasks;
+  const filteredTasks = scopedTasks.filter(
     (task) => taskFilter === '全部' || task.status === taskFilter,
   );
   const taskTabs = (
-    ['全部', '进行中', '待确认', '卡住', '已完成'] as const
+    ['全部', '进行中', '待确认', '阻塞', '已完成'] as const
   ).map((status) => ({
     status,
     count:
       status === '全部'
-        ? tasks.length
-        : tasks.filter((task) => task.status === status).length,
+        ? scopedTasks.length
+        : scopedTasks.filter((task) => task.status === status).length,
   }));
   const libraryTabs: Array<{ key: LibraryTab; label: string }> = [
     { key: 'docs', label: '公司资料库' },
     { key: 'skills', label: 'Skills 技能' },
     { key: 'mcp', label: 'MCP 服务' },
   ];
-
-  const depts = ['老板办公室', '运营部', '内容部', '增长与客户', '财务行政']
-    .concat(
-      Array.from(
-        new Set(
-          agents
-            .map((agent) => agent.dept)
-            .filter(
-              (dept) =>
-                ![
-                  '老板办公室',
-                  '运营部',
-                  '内容部',
-                  '增长与客户',
-                  '财务行政',
-                ].includes(dept),
-            ),
-        ),
-      ),
-    )
+  const depts = departments
     .map((dept) => ({
-      name: dept,
-      members: agents.filter((agent) => agent.dept === dept),
+      name: dept.name,
+      members: agents.filter((agent) => agent.departmentId === dept.id),
     }))
     .filter((dept) => dept.members.length > 0);
 
   const currentChatAgent =
-    activeChat.kind === 'dm' ? agentById(activeChat.agentId) : null;
+    activeChat?.kind === 'dm' ? agentById(activeChat.agentId) : null;
   const chatTitle =
-    activeChat.kind === 'dm'
-      ? currentChatAgent?.id === 'sec'
-        ? '小秘 · 秘书'
-        : currentChatAgent?.name
-      : `# ${activeChat.name}`;
-  const relatedTasks = tasks.filter((task) => task.src === activeChat.id);
+    activeChat?.kind === 'dm'
+      ? currentChatAgent?.id
+        ? `${currentChatAgent.name} · ${currentChatAgent.role}`
+        : '消息'
+      : activeChat
+        ? `# ${activeChat.name}`
+        : '消息';
+  const relatedTasks = activeChat
+    ? tasks.filter((task) => task.src === activeChat.id)
+    : [];
+  const scopedChat =
+    taskScopeChatId ? chats.find((chat) => chat.id === taskScopeChatId) : null;
+  const taskScopeLabel =
+    scopedChat?.kind === 'group'
+      ? `# ${scopedChat.name}`
+      : scopedChat?.kind === 'dm'
+        ? (agentById(scopedChat.agentId)?.name ?? '私聊')
+        : null;
   const chatMeta =
-    activeChat.kind === 'dm'
+    activeChat?.kind === 'dm'
       ? `${currentChatAgent?.role ?? ''} · ${currentChatAgent?.statusLabel ?? ''}`
-      : `${activeChat.memberIds.length} 名成员 · 讨论与执行结果都沉淀在这里`;
+      : activeChat
+        ? `${activeChat.memberIds.length} 名成员 · 讨论与执行结果都沉淀在这里`
+        : '登录后开始工作';
   const chatMembers =
-    activeChat.kind === 'group' ? activeChat.memberIds : [activeChat.agentId];
+    activeChat?.kind === 'group'
+      ? activeChat.memberIds
+      : activeChat?.kind === 'dm'
+        ? [activeChat.agentId]
+        : [];
   const detailAgent = detailId ? agentById(detailId) : null;
 
+  if (!token || !user || !workspace) {
+    return (
+      <AuthScreen
+        theme={effectiveTheme}
+        error={authError}
+        onAuthSuccess={handleAuthSuccess}
+      />
+    );
+  }
+
+  if (bootLoading) {
+    return (
+      <main className="workbench-shell auth-shell" data-theme={effectiveTheme}>
+        <div className="loading-panel">正在加载你的 AI 公司...</div>
+      </main>
+    );
+  }
+
   return (
-    <main className="workbench-shell">
+    <main
+      className="workbench-shell"
+      data-theme={effectiveTheme}
+      data-theme-mode={themeMode}
+    >
       <Sidebar
         view={view}
         unreadTotal={unreadTotal}
         taskAlerts={confirmTasks.length + stuckCount}
+        themeMode={themeMode}
+        onThemeModeChange={setThemeMode}
+        onLogout={logout}
         onNavigate={(nextView) => {
+          if (nextView === 'tasks') setTaskScopeChatId(null);
           setView(nextView);
           setDetailId(null);
         }}
@@ -1266,29 +1155,14 @@ function App() {
           agents={agents}
           lastMessagePreview={lastMessagePreview}
           onOpenChat={openChat}
-          onOpenGroupModal={() => setGroupOpen(true)}
+          onOpenGroupModal={openGroupModal}
         />
       )}
 
       <section className="main-stage">
-        {view === 'home' && (
-          <HomeView
-            busyCount={busyCount}
-            inboxItems={inboxItems}
-            agents={agents}
-            tasks={homeTasks}
-            onOpenSecretary={() => openChat('sec')}
-            onOpenHire={openHire}
-            onOpenStaff={() => setView('staff')}
-            onOpenTasks={() => setView('tasks')}
-            onOpenAgent={(id) => setDetailId(id)}
-            onOpenChat={openChat}
-          />
-        )}
-
-        {view === 'chat' && (
+        {view === 'chat' && activeChat && (
           <ChatView
-            title={chatTitle ?? '消息'}
+            title={chatTitle}
             meta={chatMeta}
             members={chatMembers}
             messages={messagesByChat[activeChat.id] ?? []}
@@ -1304,23 +1178,37 @@ function App() {
             messagesRef={messagesRef}
             onDraftChange={setDraft}
             onSend={send}
-            onOpenTasks={() => setView('tasks')}
-            onOpenAgent={(id) => setDetailId(id)}
-            onViewFile={() => showToast('原型演示：此处将打开文档预览')}
-            onDecision={(messageIdToUpdate, choice) =>
-              decide(activeChat.id, messageIdToUpdate, choice)
+            onOpenTasks={openRelatedTasks}
+            onInviteMembers={
+              activeChat.kind === 'group' ? openInviteMembers : undefined
             }
+            onOpenAgent={(id) => setDetailId(id)}
           />
+        )}
+
+        {view === 'chat' && !activeChat && (
+          <EmptyWorkbenchState title="暂无会话" text="注册后系统会自动创建小秘私聊。" />
         )}
 
         {view === 'staff' && (
           <StaffView
+            companyName={workspace.name}
             depts={depts}
             agents={agents}
             tasks={tasks}
             busyCount={busyCount}
-            onOpenHire={openHire}
+            onOpenCreate={openCreateAgent}
             onOpenAgent={(id) => setDetailId(id)}
+          />
+        )}
+
+        {view === 'market' && (
+          <TalentMarketView
+            agents={agents}
+            templates={hireTemplates}
+            skillCount={allSkills.length}
+            mcpCount={allMcps.length}
+            onRecruit={openHire}
           />
         )}
 
@@ -1330,11 +1218,13 @@ function App() {
             tabs={taskTabs}
             activeFilter={taskFilter}
             agents={agents}
+            scopeLabel={taskScopeLabel}
             onPickFilter={setTaskFilter}
+            onClearScope={openAllTasks}
+            onOpenCreateTask={openCreateTask}
+            onAdvanceTask={advanceTask}
             onOpenChat={openChat}
             onOpenAgent={(id) => setDetailId(id)}
-            onConfirmTask={confirmTask}
-            onContinueTask={continueTask}
           />
         )}
 
@@ -1343,7 +1233,8 @@ function App() {
             tabs={libraryTabs}
             activeTab={libraryTab}
             onPickTab={setLibraryTab}
-            onToast={showToast}
+            skills={allSkills}
+            mcps={allMcps}
           />
         )}
       </section>
@@ -1353,49 +1244,53 @@ function App() {
           agent={detailAgent}
           tasks={tasks.filter((task) => task.owner === detailAgent.id)}
           onClose={() => setDetailId(null)}
-          onDm={() => openDm(detailAgent.id)}
-          onEdit={() =>
-            showToast('原型演示：此处编辑 Prompt / Skill / MCP 绑定')
-          }
+          onDm={() => {
+            const chat = chats.find(
+              (item) => item.kind === 'dm' && item.agentId === detailAgent.id,
+            );
+            if (chat) openChat(chat.id);
+          }}
         />
       )}
 
       {hireOpen && (
         <HireModal
-          templateIndex={hireTpl}
-          hireName={hireName}
+          template={hireTemplates.find((template) => template.id === hireTpl)}
+          departments={depts
+            .filter((dept) => dept.name !== '老板办公室')
+            .map((dept) => dept.name)}
           hireDept={hireDept}
-          hirePrompt={hirePrompt}
-          hireSkills={hireSkills}
-          hireMcps={hireMcps}
-          onPickTemplate={pickHireTemplate}
-          onNameChange={setHireName}
           onDeptChange={setHireDept}
-          onPromptChange={setHirePrompt}
-          onToggleSkill={(skill) =>
-            setHireSkills((current) =>
-              current.includes(skill)
-                ? current.filter((item) => item !== skill)
-                : [...current, skill],
-            )
-          }
-          onToggleMcp={(mcp) =>
-            setHireMcps((current) =>
-              current.includes(mcp)
-                ? current.filter((item) => item !== mcp)
-                : [...current, mcp],
-            )
-          }
           onClose={() => setHireOpen(false)}
           onSubmit={submitHire}
+        />
+      )}
+
+      {createOpen && (
+        <CreateAgentModal
+          departments={depts
+            .filter((dept) => dept.name !== '老板办公室')
+            .map((dept) => dept.name)}
+          createName={createName}
+          createDesc={createDesc}
+          createDept={createDept}
+          createPrompt={createPrompt}
+          onNameChange={setCreateName}
+          onDescChange={setCreateDesc}
+          onDeptChange={setCreateDept}
+          onPromptChange={setCreatePrompt}
+          onClose={() => setCreateOpen(false)}
+          onSubmit={submitCreateAgent}
         />
       )}
 
       {groupOpen && (
         <GroupModal
           agents={agents}
+          tasks={tasks}
           groupName={groupName}
           groupMembers={groupMembers}
+          selectedTaskIds={groupTaskIds}
           onGroupNameChange={setGroupName}
           onToggleMember={(id) =>
             setGroupMembers((current) =>
@@ -1404,22 +1299,64 @@ function App() {
                 : [...current, id],
             )
           }
+          onToggleTask={(id) =>
+            setGroupTaskIds((current) =>
+              current.includes(id)
+                ? current.filter((taskId) => taskId !== id)
+                : [...current, id],
+            )
+          }
           onClose={() => setGroupOpen(false)}
           onCreate={createGroup}
+        />
+      )}
+
+      {inviteOpen && activeChat?.kind === 'group' && (
+        <GroupMembersModal
+          title="邀请员工"
+          description="把更多员工拉进当前群聊，后续可以用 @ 点名。"
+          agents={agents.filter(
+            (agent) => !activeChat.memberIds.includes(agent.id),
+          )}
+          selectedMembers={inviteMembers}
+          submitLabel="拉入群聊"
+          emptyText="所有员工都已经在这个群聊里"
+          onToggleMember={(id) =>
+            setInviteMembers((current) =>
+              current.includes(id)
+                ? current.filter((memberId) => memberId !== id)
+                : [...current, id],
+            )
+          }
+          onClose={() => setInviteOpen(false)}
+          onSubmit={inviteGroupMembers}
+        />
+      )}
+
+      {taskOpen && (
+        <CreateTaskModal
+          agents={agents}
+          chats={chats}
+          taskTitle={taskTitle}
+          taskDesc={taskDesc}
+          taskPriority={taskPriority}
+          taskOwnerId={taskOwnerId}
+          taskConversationId={taskConversationId}
+          agentById={agentById}
+          onTitleChange={setTaskTitle}
+          onDescChange={setTaskDesc}
+          onPriorityChange={setTaskPriority}
+          onOwnerChange={setTaskOwnerId}
+          onConversationChange={setTaskConversationId}
+          onClose={() => setTaskOpen(false)}
+          onSubmit={submitCreateTask}
         />
       )}
 
       {onboardingOpen && (
         <OnboardingModal
           step={onboardingStep}
-          selectedRoles={onboardingRoles}
-          onToggleRole={(index) =>
-            setOnboardingRoles((current) =>
-              current.includes(index)
-                ? current.filter((item) => item !== index)
-                : [...current, index],
-            )
-          }
+          templates={hireTemplates}
           onNext={() =>
             setOnboardingStep((current) => Math.min(2, current + 1))
           }
@@ -1432,15 +1369,255 @@ function App() {
   );
 }
 
+function mapApiMessage(message: {
+  id: string;
+  sender_type: 'user' | 'agent' | 'system';
+  sender_id: string;
+  content: string;
+  created_at: string;
+  provider?: string | null;
+  model?: string | null;
+}): Message {
+  return {
+    id: message.id,
+    from:
+      message.sender_type === 'user'
+        ? 'boss'
+        : message.sender_type === 'system'
+          ? 'system'
+          : message.sender_id,
+    type: message.sender_type === 'system' ? 'system' : 'text',
+    time: formatTime(message.created_at),
+    text: message.content,
+    provider: message.provider ?? undefined,
+    model: message.model ?? undefined,
+  };
+}
+
+function AuthScreen({
+  theme,
+  error,
+  onAuthSuccess,
+}: {
+  theme: EffectiveTheme;
+  error: string;
+  onAuthSuccess: (payload: {
+    access_token: string;
+    user: User;
+    workspace: Workspace;
+  }) => void;
+}) {
+  const [mode, setMode] = useState<'login' | 'register'>('register');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [localError, setLocalError] = useState(error);
+
+  const submit = async () => {
+    const nextEmail = email.trim();
+    const nextPassword = password.trim();
+    const nextDisplayName = displayName.trim();
+    const nextWorkspaceName = workspaceName.trim();
+
+    if (!nextEmail) {
+      setLocalError('请填写邮箱');
+      return;
+    }
+    if (mode === 'register' && nextPassword.length < 6) {
+      setLocalError('密码至少需要 6 位');
+      return;
+    }
+    if (mode === 'login' && !nextPassword) {
+      setLocalError('请填写密码');
+      return;
+    }
+    if (mode === 'register' && !nextDisplayName) {
+      setLocalError('请填写你的称呼');
+      return;
+    }
+    if (mode === 'register' && !nextWorkspaceName) {
+      setLocalError('请填写公司/工作室名称');
+      return;
+    }
+
+    setSubmitting(true);
+    setLocalError('');
+    try {
+      const path = mode === 'register' ? '/auth/register' : '/auth/login';
+      const body =
+        mode === 'register'
+          ? {
+              email: nextEmail,
+              password: nextPassword,
+              display_name: nextDisplayName,
+              workspace_name: nextWorkspaceName,
+            }
+          : { email: nextEmail, password: nextPassword };
+      const payload = await apiRequest<{
+        access_token: string;
+        user: User;
+        workspace: Workspace;
+      }>(path, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      await onAuthSuccess(payload);
+    } catch (authError) {
+      setLocalError(
+        authError instanceof Error ? authError.message : '登录失败',
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <main className="workbench-shell auth-shell" data-theme={theme}>
+      <section className="auth-hero" aria-label="AgentPulse 介绍">
+        <div className="auth-brand">
+          <div className="auth-mark">✦</div>
+          <span>AgentPulse</span>
+        </div>
+        <h1>把一人公司，搭成一支 AI 团队。</h1>
+        <p>
+          创建工作区后，小秘、组织架构、人才市场和会话数据都会写入本地 SQLite。第一版先跑通真实 DeepSeek 对话闭环。
+        </p>
+        <div className="auth-feature-list">
+          <div>
+            {materialIcon('account_tree')}
+            <span>
+              <strong>组织化智能体</strong>
+              <em>部门、员工、职责 Prompt 都能沉淀</em>
+            </span>
+          </div>
+          <div>
+            {materialIcon('forum')}
+            <span>
+              <strong>从消息开始协作</strong>
+              <em>默认进入小秘私聊，后续拉群推进</em>
+            </span>
+          </div>
+          <div>
+            {materialIcon('verified')}
+            <span>
+              <strong>真实模型调用</strong>
+              <em>回复会标记 provider 与 model</em>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section className="auth-panel">
+        <div className="auth-panel-header">
+          <span>{mode === 'register' ? '开始搭建' : '欢迎回来'}</span>
+          <h2>{mode === 'register' ? '创建你的 AI 公司' : '登录工作台'}</h2>
+          <p>
+            {mode === 'register'
+              ? '没有演示账号，提交后会创建你的真实本地工作区。'
+              : '使用平台注册邮箱和密码继续进入工作台。'}
+          </p>
+        </div>
+
+        <div className="auth-tabs">
+          <button
+            className={mode === 'register' ? 'active' : ''}
+            type="button"
+            onClick={() => {
+              setMode('register');
+              setLocalError('');
+            }}
+          >
+            注册
+          </button>
+          <button
+            className={mode === 'login' ? 'active' : ''}
+            type="button"
+            onClick={() => {
+              setMode('login');
+              setLocalError('');
+            }}
+          >
+            登录
+          </button>
+        </div>
+
+        <div className="auth-form">
+          <label>
+            <span>邮箱</span>
+            <input
+              value={email}
+              placeholder="you@example.com"
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>密码</span>
+            <input
+              type="password"
+              value={password}
+              placeholder="至少 6 位"
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          {mode === 'register' && (
+            <>
+              <label>
+                <span>你的称呼</span>
+                <input
+                  value={displayName}
+                  placeholder="例如：老板"
+                  onChange={(event) => setDisplayName(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>公司/工作室名称</span>
+                <input
+                  value={workspaceName}
+                  placeholder="例如：我的一人公司"
+                  onChange={(event) => setWorkspaceName(event.target.value)}
+                />
+              </label>
+            </>
+          )}
+        </div>
+
+        {(localError || error) && (
+          <div className="auth-error">{localError || error}</div>
+        )}
+        <button
+          className="button primary auth-submit"
+          type="button"
+          onClick={submit}
+          disabled={submitting}
+        >
+          {submitting
+            ? '请稍候...'
+            : mode === 'register'
+              ? '注册并进入'
+              : '登录'}
+        </button>
+      </section>
+    </main>
+  );
+}
+
 function Sidebar({
   view,
   unreadTotal,
   taskAlerts,
+  themeMode,
+  onThemeModeChange,
+  onLogout,
   onNavigate,
 }: {
   view: View;
   unreadTotal: number;
   taskAlerts: number;
+  themeMode: ThemeMode;
+  onThemeModeChange: (themeMode: ThemeMode) => void;
+  onLogout: () => void;
   onNavigate: (view: View) => void;
 }) {
   const items: Array<{
@@ -1449,9 +1626,9 @@ function Sidebar({
     label: string;
     badge: number;
   }> = [
-    { key: 'home', icon: 'space_dashboard', label: '首页', badge: 0 },
     { key: 'chat', icon: 'forum', label: '消息', badge: unreadTotal },
     { key: 'staff', icon: 'group', label: '员工', badge: 0 },
+    { key: 'market', icon: 'storefront', label: '人才市场', badge: 0 },
     { key: 'tasks', icon: 'task_alt', label: '任务', badge: taskAlerts },
     { key: 'lib', icon: 'folder_open', label: '资料库', badge: 0 },
   ];
@@ -1473,9 +1650,30 @@ function Sidebar({
         </button>
       ))}
       <div className="sidebar-spacer" />
-      <div className="owner-avatar" title="老板（你）">
-        我
+      <div className="theme-switcher" aria-label="主题设置">
+        {themeOptions.map((option) => (
+          <button
+            className={themeMode === option.mode ? 'active' : ''}
+            key={option.mode}
+            type="button"
+            title={option.label}
+            aria-label={option.label}
+            onClick={() => onThemeModeChange(option.mode)}
+          >
+            {materialIcon(option.icon)}
+          </button>
+        ))}
       </div>
+      <button
+        className="logout-nav-button"
+        type="button"
+        title="退出登录"
+        aria-label="退出登录"
+        onClick={onLogout}
+      >
+        <span className="owner-avatar">我</span>
+        {materialIcon('logout')}
+      </button>
     </aside>
   );
 }
@@ -1497,20 +1695,18 @@ function ConversationList({
 }) {
   const agentById = (id: string) => agents.find((agent) => agent.id === id);
   const pinnedChats = chats.filter(
-    (chat) => chat.kind === 'dm' && chat.agentId === 'sec',
+    (chat) => chat.kind === 'dm' && agentById(chat.agentId)?.role === '老板秘书',
   );
   const groupChats = chats.filter((chat) => chat.kind === 'group');
   const dmChats = chats.filter(
-    (chat) => chat.kind === 'dm' && chat.agentId !== 'sec',
+    (chat) => chat.kind === 'dm' && agentById(chat.agentId)?.role !== '老板秘书',
   );
 
   const renderChat = (chat: Chat) => {
     const agent = chat.kind === 'dm' ? agentById(chat.agentId) : null;
     const name =
       chat.kind === 'dm'
-        ? agent?.id === 'sec'
-          ? '小秘 · 秘书'
-          : `${agent?.name ?? ''} · ${agent?.role ?? ''}`
+        ? `${agent?.name ?? ''} · ${agent?.role ?? ''}`
         : chat.name;
 
     return (
@@ -1532,7 +1728,7 @@ function ConversationList({
               : undefined
           }
         >
-          {chat.kind === 'group' ? '#' : agent?.glyph}
+          {chat.kind === 'group' ? '#' : agent ? avatarText(agent.name) : ''}
         </div>
         <div className="chat-copy">
           <div className="chat-line">
@@ -1564,9 +1760,9 @@ function ConversationList({
         <SectionLabel label="秘书" />
         {pinnedChats.map(renderChat)}
         <SectionLabel label="群组" />
-        {groupChats.map(renderChat)}
+        {groupChats.length ? groupChats.map(renderChat) : <EmptyState>暂无群聊</EmptyState>}
         <SectionLabel label="私聊" />
-        {dmChats.map(renderChat)}
+        {dmChats.length ? dmChats.map(renderChat) : <EmptyState>暂无其他私聊</EmptyState>}
       </div>
     </aside>
   );
@@ -1576,265 +1772,19 @@ function SectionLabel({ label }: { label: string }) {
   return <div className="section-label">{label}</div>;
 }
 
-function HomeView({
-  busyCount,
-  inboxItems,
-  agents,
-  tasks,
-  onOpenSecretary,
-  onOpenHire,
-  onOpenStaff,
-  onOpenTasks,
-  onOpenAgent,
-  onOpenChat,
-}: {
-  busyCount: number;
-  inboxItems: Array<{
-    id: string;
-    avatarBg: string;
-    avatar: string;
-    title: string;
-    detail: string;
-    labelA: string;
-    labelB: string;
-    srcLabel: string;
-    actA: () => void;
-    actB: () => void;
-    goSrc: () => void;
-  }>;
-  agents: Agent[];
-  tasks: Task[];
-  onOpenSecretary: () => void;
-  onOpenHire: () => void;
-  onOpenStaff: () => void;
-  onOpenTasks: () => void;
-  onOpenAgent: (id: string) => void;
-  onOpenChat: (id: string) => void;
-}) {
-  return (
-    <div className="screen-scroll">
-      <div className="screen-inner">
-        <header className="page-header">
-          <div>
-            <h1>下午好，老板</h1>
-            <p>
-              {companyName} · 7月2日 周四 · {busyCount} 位员工正在执行任务
-            </p>
-          </div>
-          <div className="header-actions">
-            <button
-              className="button secondary"
-              type="button"
-              onClick={onOpenSecretary}
-            >
-              {materialIcon('auto_awesome')}找秘书交代任务
-            </button>
-            <button
-              className="button primary"
-              type="button"
-              onClick={onOpenHire}
-            >
-              {materialIcon('person_add')}招聘员工
-            </button>
-          </div>
-        </header>
-
-        <section className="home-grid">
-          <article className="card decision-card">
-            <CardHeader
-              icon="notifications_active"
-              iconClassName="warning"
-              title="待你拍板"
-              badge={String(inboxItems.length)}
-              note="决定权始终在你手里"
-            />
-            {inboxItems.length === 0 ? (
-              <EmptyState>全部处理完了，喝口茶吧</EmptyState>
-            ) : (
-              inboxItems.map((item) => (
-                <div className="approval-row" key={item.id}>
-                  <div
-                    className="mini-avatar"
-                    style={{ background: item.avatarBg }}
-                  >
-                    {item.avatar}
-                  </div>
-                  <div>
-                    <strong>{item.title}</strong>
-                    <p>{item.detail}</p>
-                    <div className="approval-actions">
-                      <button
-                        className="small-button primary"
-                        type="button"
-                        onClick={item.actA}
-                      >
-                        {item.labelA}
-                      </button>
-                      <button
-                        className="small-button"
-                        type="button"
-                        onClick={item.actB}
-                      >
-                        {item.labelB}
-                      </button>
-                      <button
-                        className="link-button"
-                        type="button"
-                        onClick={item.goSrc}
-                      >
-                        {item.srcLabel}
-                        {materialIcon('arrow_forward')}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </article>
-
-          <article className="card pulse-card">
-            <CardHeader
-              title="员工动态"
-              actionLabel="管理团队 →"
-              onAction={onOpenStaff}
-            />
-            {agents.map((agent) => {
-              const currentTask = tasks.find(
-                (task) => task.owner === agent.id && task.status !== '已完成',
-              );
-              return (
-                <button
-                  className="agent-pulse-row"
-                  key={agent.id}
-                  type="button"
-                  onClick={() => onOpenAgent(agent.id)}
-                >
-                  <div
-                    className="mini-avatar"
-                    style={{ background: avatarColor(agent) }}
-                  >
-                    {agent.glyph}
-                  </div>
-                  <div>
-                    <strong>
-                      {agent.name} <span>{agent.role}</span>
-                    </strong>
-                    <p>
-                      {currentTask
-                        ? `正在做：${currentTask.title}`
-                        : agent.id === 'sec'
-                          ? '随时听候差遣'
-                          : '暂无任务'}
-                    </p>
-                  </div>
-                  <em style={{ color: dotColor(agent.statusKind) }}>
-                    <i style={{ background: dotColor(agent.statusKind) }} />
-                    {agent.statusLabel}
-                  </em>
-                </button>
-              );
-            })}
-          </article>
-        </section>
-
-        <article className="card task-progress-card">
-          <CardHeader
-            title="任务进展"
-            actionLabel="进入任务中心 →"
-            onAction={onOpenTasks}
-          />
-          {tasks.map((task) => (
-            <TaskProgressRow
-              key={task.id}
-              task={task}
-              owner={agents.find((agent) => agent.id === task.owner)}
-              onOpenChat={onOpenChat}
-            />
-          ))}
-        </article>
-      </div>
-    </div>
-  );
-}
-
-function CardHeader({
-  icon,
-  iconClassName,
-  title,
-  badge,
-  note,
-  actionLabel,
-  onAction,
-}: {
-  icon?: string;
-  iconClassName?: string;
-  title: string;
-  badge?: string;
-  note?: string;
-  actionLabel?: string;
-  onAction?: () => void;
-}) {
-  return (
-    <div className="card-header">
-      <div className="card-heading">
-        {icon && materialIcon(icon, iconClassName)}
-        <strong>{title}</strong>
-        {badge && <em>{badge}</em>}
-      </div>
-      {note && <span>{note}</span>}
-      {actionLabel && (
-        <button type="button" onClick={onAction}>
-          {actionLabel}
-        </button>
-      )}
-    </div>
-  );
-}
-
 function EmptyState({ children }: { children: string }) {
   return <div className="empty-state">{children}</div>;
 }
 
-function TaskProgressRow({
-  task,
-  owner,
-  onOpenChat,
-}: {
-  task: Task;
-  owner?: Agent;
-  onOpenChat: (id: string) => void;
-}) {
-  const priority = priorityStyle(task.pr);
-  const status = statusStyle(task.status);
-
+function EmptyWorkbenchState({ title, text }: { title: string; text: string }) {
   return (
-    <div className="home-task-row">
-      <span className="priority-pill" style={priority}>
-        {task.pr}
-      </span>
-      <button type="button" onClick={() => onOpenChat(task.src)}>
-        {task.title}
-      </button>
-      <div className="owner-cell">
-        {owner && (
-          <div
-            className="tiny-avatar"
-            style={{ background: avatarColor(owner) }}
-          >
-            {owner.glyph}
-          </div>
-        )}
-        <span>{owner?.name}</span>
+    <div className="screen-scroll">
+      <div className="screen-inner">
+        <article className="card empty-workbench-state">
+          <h2>{title}</h2>
+          <p>{text}</p>
+        </article>
       </div>
-      <div className="progress-track">
-        <i style={{ width: `${task.progress}%`, background: status.bar }} />
-      </div>
-      <span
-        className="status-pill"
-        style={{ background: status.background, color: status.color }}
-      >
-        {task.status}
-      </span>
     </div>
   );
 }
@@ -1853,9 +1803,8 @@ function ChatView({
   onDraftChange,
   onSend,
   onOpenTasks,
+  onInviteMembers,
   onOpenAgent,
-  onViewFile,
-  onDecision,
 }: {
   title: string;
   meta: string;
@@ -1866,15 +1815,78 @@ function ChatView({
   draft: string;
   placeholder: string;
   typingName: string | null;
-  messagesRef: React.RefObject<HTMLDivElement | null>;
+  messagesRef: RefObject<HTMLDivElement | null>;
   onDraftChange: (draft: string) => void;
   onSend: () => void;
   onOpenTasks: () => void;
+  onInviteMembers?: () => void;
   onOpenAgent: (id: string) => void;
-  onViewFile: () => void;
-  onDecision: (messageId: string, choice: 'A' | 'B') => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const agentById = (id: string) => agents.find((agent) => agent.id === id);
+  const mentionableAgents = useMemo(
+    () =>
+      members
+        .map((memberId) => agents.find((agent) => agent.id === memberId))
+        .filter((agent): agent is Agent => Boolean(agent)),
+    [agents, members],
+  );
+  const mentionMatches = useMemo(() => {
+    const query = mentionQuery.trim().toLocaleLowerCase();
+    return mentionableAgents
+      .filter((agent) => {
+        if (!query) return true;
+        return [agent.name, agent.role, agent.dept]
+          .join(' ')
+          .toLocaleLowerCase()
+          .includes(query);
+      })
+      .slice(0, 6);
+  }, [mentionQuery, mentionableAgents]);
+
+  const closeMention = () => {
+    setMentionOpen(false);
+    setMentionQuery('');
+    setMentionStart(null);
+    setMentionIndex(0);
+  };
+
+  const updateMentionState = (value: string, cursor: number) => {
+    const context = getMentionContext(value, cursor);
+    if (!context) {
+      closeMention();
+      return;
+    }
+    setMentionOpen(true);
+    setMentionQuery(context.query);
+    setMentionStart(context.start);
+    setMentionIndex(0);
+  };
+
+  const insertMention = (agent: Agent) => {
+    const cursor = inputRef.current?.selectionStart ?? draft.length;
+    const context =
+      mentionStart === null
+        ? getMentionContext(draft, cursor)
+        : { query: mentionQuery, start: mentionStart };
+    if (!context) return;
+
+    const before = draft.slice(0, context.start);
+    const after = draft.slice(cursor).replace(/^\s*/, '');
+    const nextDraft = `${before}@${agent.name} ${after}`;
+    const nextCursor = `${before}@${agent.name} `.length;
+
+    onDraftChange(nextDraft);
+    closeMention();
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
 
   return (
     <div className="chat-view">
@@ -1895,11 +1907,21 @@ function ChatView({
                 type="button"
                 onClick={() => onOpenAgent(memberId)}
               >
-                {agent.glyph}
+                {avatarText(agent.name)}
               </button>
             );
           })}
         </div>
+        {onInviteMembers && (
+          <button
+            className="chat-icon-button"
+            title="邀请员工"
+            type="button"
+            onClick={onInviteMembers}
+          >
+            {materialIcon('person_add')}
+          </button>
+        )}
         <button
           className="related-task-button"
           type="button"
@@ -1917,9 +1939,7 @@ function ChatView({
             message={message}
             agent={agentById(message.from)}
             onOpenAgent={onOpenAgent}
-            onViewFile={onViewFile}
-            onDecision={onDecision}
-            onOpenTasks={onOpenTasks}
+            agents={agents}
           />
         ))}
         {typingName && (
@@ -1931,12 +1951,86 @@ function ChatView({
       </div>
 
       <footer className="composer">
+        {mentionOpen && mentionMatches.length > 0 && (
+          <div className="mention-popover">
+            {mentionMatches.map((agent, index) => (
+              <button
+                className={mentionIndex === index ? 'active' : ''}
+                key={agent.id}
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  insertMention(agent);
+                }}
+              >
+                <span
+                  className="mention-avatar"
+                  style={{ background: avatarColor(agent) }}
+                >
+                  {avatarText(agent.name)}
+                </span>
+                <span>
+                  <strong>{agent.name}</strong>
+                  <em>{agent.role}</em>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="composer-box">
           <input
+            ref={inputRef}
             value={draft}
             placeholder={placeholder}
-            onChange={(event) => onDraftChange(event.target.value)}
+            onChange={(event) => {
+              const nextDraft = event.currentTarget.value;
+              onDraftChange(nextDraft);
+              updateMentionState(
+                nextDraft,
+                event.currentTarget.selectionStart ?? nextDraft.length,
+              );
+            }}
+            onClick={(event) =>
+              updateMentionState(
+                draft,
+                event.currentTarget.selectionStart ?? draft.length,
+              )
+            }
+            onFocus={(event) =>
+              updateMentionState(
+                draft,
+                event.currentTarget.selectionStart ?? draft.length,
+              )
+            }
             onKeyDown={(event) => {
+              if (mentionOpen && mentionMatches.length > 0) {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  setMentionIndex(
+                    (current) => (current + 1) % mentionMatches.length,
+                  );
+                  return;
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setMentionIndex(
+                    (current) =>
+                      (current - 1 + mentionMatches.length) %
+                      mentionMatches.length,
+                  );
+                  return;
+                }
+                if (event.key === 'Enter' || event.key === 'Tab') {
+                  event.preventDefault();
+                  insertMention(mentionMatches[mentionIndex]);
+                  return;
+                }
+              }
+              if (event.key === 'Escape' && mentionOpen) {
+                event.preventDefault();
+                closeMention();
+                return;
+              }
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 onSend();
@@ -1947,7 +2041,7 @@ function ChatView({
             {materialIcon('send')}
           </button>
         </div>
-        <p>Enter 发送 · 员工遇到需要拍板的决定会在这里 @你</p>
+        <p>Enter 发送 · 群聊里可以 @员工 点名</p>
       </footer>
     </div>
   );
@@ -1956,17 +2050,13 @@ function ChatView({
 function MessageItem({
   message,
   agent,
+  agents,
   onOpenAgent,
-  onViewFile,
-  onDecision,
-  onOpenTasks,
 }: {
   message: Message;
   agent?: Agent;
+  agents: Agent[];
   onOpenAgent: (id: string) => void;
-  onViewFile: () => void;
-  onDecision: (messageId: string, choice: 'A' | 'B') => void;
-  onOpenTasks: () => void;
 }) {
   if (message.type === 'system') {
     return <div className="system-message">{message.text}</div>;
@@ -1983,177 +2073,426 @@ function MessageItem({
         type="button"
         onClick={() => agent && onOpenAgent(agent.id)}
       >
-        {isBoss ? '我' : agent?.glyph}
+        {isBoss ? '我' : agent ? avatarText(agent.name) : ''}
       </button>
       <div className="message-body">
         <div className="message-meta">
           <strong>{isBoss ? '我（老板）' : agent?.name}</strong>
           {!isBoss && <span>{agent?.role}</span>}
           <em>{message.time}</em>
+          {message.provider && (
+            <em className="model-badge">
+              {message.provider}
+              {message.model ? ` · ${message.model}` : ''}
+            </em>
+          )}
         </div>
-
-        {message.type === 'text' && (
-          <p className="message-text">{message.text}</p>
-        )}
-
-        {message.type === 'result' && (
-          <div className="result-card">
-            <div>
-              <span>{materialIcon('check_circle')}</span>
-              <em>执行结果</em>
-            </div>
-            <strong>{message.cardTitle}</strong>
-            <p>{message.cardDesc}</p>
-            <footer>
-              {materialIcon('description')}
-              <span>{message.cardFile}</span>
-              <button type="button" onClick={onViewFile}>
-                查看
-              </button>
-            </footer>
-          </div>
-        )}
-
-        {message.type === 'approval' && (
-          <div
-            className={
-              message.apStatus === 'pending'
-                ? 'approval-card pending'
-                : 'approval-card'
-            }
-          >
-            <div>
-              {materialIcon('front_hand')}
-              <em>需要你拍板</em>
-              <span>@老板</span>
-            </div>
-            <strong>{message.apQ}</strong>
-            <p>{message.apDesc}</p>
-            {message.apStatus === 'pending' ? (
-              <footer>
-                <button
-                  className="small-button primary"
-                  type="button"
-                  onClick={() => onDecision(message.id, 'A')}
-                >
-                  {message.apOptA}
-                </button>
-                <button
-                  className="small-button"
-                  type="button"
-                  onClick={() => onDecision(message.id, 'B')}
-                >
-                  {message.apOptB}
-                </button>
-              </footer>
-            ) : (
-              <div className="decided-chip">
-                {materialIcon('check_circle')}
-                已拍板：
-                {message.apStatus === 'A' ? message.apOptA : message.apOptB} ·
-                团队已收到
-              </div>
-            )}
-          </div>
-        )}
-
-        {message.type === 'task' && (
-          <div className="task-message-card">
-            {materialIcon('assignment_add')}
-            <div>
-              <strong>创建了任务「{message.taskTitle}」</strong>
-              <p>优先级 {message.taskPr} · 已同步到任务中心</p>
-            </div>
-            <button type="button" onClick={onOpenTasks}>
-              查看
-            </button>
-          </div>
-        )}
+        <p className="message-text">{renderMentionText(message.text, agents)}</p>
       </div>
     </div>
   );
 }
 
 function StaffView({
+  companyName,
   depts,
   agents,
   tasks,
   busyCount,
-  onOpenHire,
+  onOpenCreate,
   onOpenAgent,
 }: {
+  companyName: string;
   depts: Array<{ name: string; members: Agent[] }>;
   agents: Agent[];
   tasks: Task[];
   busyCount: number;
-  onOpenHire: () => void;
+  onOpenCreate: () => void;
   onOpenAgent: (id: string) => void;
 }) {
+  const [selectedDept, setSelectedDept] = useState<string | null>(null);
+  const activeDept = selectedDept
+    ? depts.find((dept) => dept.name === selectedDept)
+    : null;
+
   return (
     <div className="screen-scroll">
       <div className="screen-inner">
-        <header className="page-header">
-          <div>
-            <h1>员工与部门</h1>
-            <p>
-              {companyName} · {agents.length} 名员工 · {depts.length} 个部门 ·{' '}
-              {busyCount} 人执行中
-            </p>
+        <section className="org-directory">
+          <header className="org-header">
+            <div>
+              <h1>组织内联系人</h1>
+              <p>
+                {companyName} · {agents.length} 名 AI 员工 · {depts.length}{' '}
+                个部门 · {busyCount} 人执行中
+              </p>
+            </div>
+            <button
+              className="button secondary blue"
+              type="button"
+              onClick={onOpenCreate}
+            >
+              {materialIcon('add_circle')}创建员工
+            </button>
+          </header>
+
+          <div className="org-body">
+            <nav className="org-breadcrumb" aria-label="组织路径">
+              <button type="button" onClick={() => setSelectedDept(null)}>
+                {companyName}
+              </button>
+              {activeDept && (
+                <>
+                  {materialIcon('chevron_right')}
+                  <span>{activeDept.name}</span>
+                </>
+              )}
+            </nav>
+
+            {!activeDept && (
+              <div className="org-list" aria-label="部门列表">
+                {depts.map((dept) => {
+                  const busyMembers = dept.members.filter(
+                    (agent) => agent.statusKind === 'busy',
+                  ).length;
+                  const waitingMembers = dept.members.filter(
+                    (agent) => agent.statusKind === 'wait',
+                  ).length;
+
+                  return (
+                    <div className="org-row" key={dept.name}>
+                      <div className="org-node-icon">
+                        {materialIcon('account_tree')}
+                      </div>
+                      <div className="org-row-main">
+                        <strong>
+                          {dept.name}
+                          <span>({dept.members.length})</span>
+                        </strong>
+                        <p>
+                          {busyMembers} 人执行中 · {waitingMembers} 个待确认
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDept(dept.name)}
+                      >
+                        下级
+                      </button>
+                    </div>
+                  );
+                })}
+                {!depts.length && <EmptyState>暂无部门</EmptyState>}
+              </div>
+            )}
+
+            {activeDept && (
+              <div className="org-list" aria-label={`${activeDept.name} 成员`}>
+                {activeDept.members.map((agent) => {
+                  const currentTask = tasks.find(
+                    (task) =>
+                      task.owner === agent.id && task.status !== '已完成',
+                  );
+                  return (
+                    <button
+                      className="org-member-row"
+                      key={agent.id}
+                      type="button"
+                      onClick={() => onOpenAgent(agent.id)}
+                    >
+                      <div
+                        className="org-member-avatar"
+                        style={{ background: avatarColor(agent) }}
+                      >
+                        {avatarText(agent.name)}
+                      </div>
+                      <div className="org-member-copy">
+                        <strong>
+                          {agent.name}
+                          {agent.role === '老板秘书' && <em>内置秘书</em>}
+                        </strong>
+                        <p>
+                          {agent.role}
+                          {currentTask ? ` | ${currentTask.title}` : ''}
+                        </p>
+                      </div>
+                      <span style={{ color: dotColor(agent.statusKind) }}>
+                        <i style={{ background: dotColor(agent.statusKind) }} />
+                        {agent.statusLabel}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
-          <button className="button primary" type="button" onClick={onOpenHire}>
-            {materialIcon('person_add')}招聘员工
-          </button>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function TalentMarketView({
+  agents,
+  templates,
+  skillCount,
+  mcpCount,
+  onRecruit,
+}: {
+  agents: Agent[];
+  templates: HireTemplate[];
+  skillCount: number;
+  mcpCount: number;
+  onRecruit: (templateId: string) => void;
+}) {
+  const [activeCategory, setActiveCategory] = useState('全部');
+  const [keyword, setKeyword] = useState('');
+  const [detailTemplateId, setDetailTemplateId] = useState<string | null>(null);
+  const categoryOptions = ['全部'].concat(
+    Array.from(new Set(templates.map((template) => template.category))),
+  );
+  const visibleTemplates = templates.filter((template) => {
+    const matchCategory =
+      activeCategory === '全部' || template.category === activeCategory;
+    const query = keyword.trim();
+    if (!query) return matchCategory;
+    return (
+      matchCategory &&
+      [
+        template.name,
+        template.category,
+        template.dept,
+        template.desc,
+        template.prompt,
+        ...template.skills,
+        ...template.mcps,
+      ]
+        .join(' ')
+        .includes(query)
+    );
+  });
+  const detailTemplate = detailTemplateId
+    ? templates.find((template) => template.id === detailTemplateId)
+    : null;
+
+  return (
+    <>
+      <div className="market-screen">
+        <header className="page-header compact">
+          <div>
+            <h1>人才市场中心</h1>
+            <p>官方员工模板库，分类、上架和版本后续由平台后台统一维护</p>
+          </div>
         </header>
 
-        <div className="dept-grid">
-          {depts.map((dept) => (
-            <article className="card dept-card" key={dept.name}>
-              <CardHeader
-                title={dept.name}
-                note={`${dept.members.length} 人`}
-              />
-              {dept.members.map((agent) => {
-                const currentTask = tasks.find(
-                  (task) => task.owner === agent.id && task.status !== '已完成',
-                );
+        <section className="market-summary" aria-label="人才市场概览">
+          <div>
+            {materialIcon('badge')}
+            <span>
+              <strong>{templates.length}</strong>
+              <em>上架岗位</em>
+            </span>
+          </div>
+          <div>
+            {materialIcon('verified_user')}
+            <span>
+              <strong>{skillCount}</strong>
+              <em>可绑定技能</em>
+            </span>
+          </div>
+          <div>
+            {materialIcon('extension')}
+            <span>
+              <strong>{mcpCount}</strong>
+              <em>MCP 工具</em>
+            </span>
+          </div>
+          <div>
+            {materialIcon('group')}
+            <span>
+              <strong>{agents.length}</strong>
+              <em>已入职员工</em>
+            </span>
+          </div>
+        </section>
+
+        <section className="market-layout">
+          <aside className="market-filter" aria-label="岗位筛选">
+            <strong>岗位分类</strong>
+            <div>
+              {categoryOptions.map((category) => {
+                const count =
+                  category === '全部'
+                    ? templates.length
+                    : templates.filter(
+                        (template) => template.category === category,
+                      ).length;
                 return (
                   <button
-                    className="dept-agent"
-                    key={agent.id}
+                    className={activeCategory === category ? 'active' : ''}
+                    key={category}
                     type="button"
-                    onClick={() => onOpenAgent(agent.id)}
+                    onClick={() => setActiveCategory(category)}
                   >
-                    <div
-                      className="agent-avatar"
-                      style={{ background: avatarColor(agent) }}
-                    >
-                      {agent.glyph}
-                    </div>
-                    <div>
-                      <strong>
-                        {agent.name}
-                        <span style={{ color: dotColor(agent.statusKind) }}>
-                          <i
-                            style={{ background: dotColor(agent.statusKind) }}
-                          />
-                          {agent.statusLabel}
-                        </span>
-                      </strong>
-                      <p>{agent.role}</p>
-                      <em>
-                        {currentTask
-                          ? `进行中：${currentTask.title}`
-                          : '待命中'}
-                      </em>
-                    </div>
+                    <span>{category}</span>
+                    <em>{count}</em>
                   </button>
                 );
               })}
-            </article>
-          ))}
+            </div>
+          </aside>
+
+          <div className="market-main">
+            <div className="market-toolbar">
+              <label>
+                {materialIcon('search')}
+                <input
+                  value={keyword}
+                  placeholder="搜索岗位、能力、工具或分类"
+                  onChange={(event) => setKeyword(event.target.value)}
+                />
+              </label>
+              <span>{visibleTemplates.length} 个可招募角色</span>
+            </div>
+
+            <div className="market-list">
+              {visibleTemplates.map((template, index) => (
+                <article
+                  className="market-card"
+                  key={template.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setDetailTemplateId(template.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setDetailTemplateId(template.id);
+                    }
+                  }}
+                >
+                  <div className="market-card-main">
+                    <div
+                      className="market-role-icon"
+                      style={{
+                        background: `oklch(0.55 0.11 ${220 + index * 30})`,
+                      }}
+                    >
+                      {['◆', '●', '▲', '■', '◗', '✱'][index % 6]}
+                    </div>
+                    <div className="market-copy">
+                      <div>
+                        <strong>{template.name}</strong>
+                        <span>官方模板</span>
+                      </div>
+                      <p>
+                        {template.category} · 默认入职 {template.dept} ·{' '}
+                        {template.desc}
+                      </p>
+                      <em>{template.prompt}</em>
+                      <div className="market-tags">
+                        {template.skills.map((skill) => (
+                          <span key={skill}>
+                            {materialIcon('bolt')}
+                            {skill}
+                          </span>
+                        ))}
+                        {template.mcps.map((mcp) => (
+                          <span className="muted" key={mcp}>
+                            {materialIcon('extension')}
+                            {mcp}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="market-card-actions">
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRecruit(template.id);
+                      }}
+                    >
+                      {materialIcon('person_add')}招募
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {visibleTemplates.length === 0 && (
+                <div className="market-empty">没有匹配的人才模板</div>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+      {detailTemplate && (
+        <TalentDetailModal
+          template={detailTemplate}
+          onClose={() => setDetailTemplateId(null)}
+          onRecruit={() => {
+            setDetailTemplateId(null);
+            onRecruit(detailTemplate.id);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function TalentDetailModal({
+  template,
+  onClose,
+  onRecruit,
+}: {
+  template: HireTemplate;
+  onClose: () => void;
+  onRecruit: () => void;
+}) {
+  return (
+    <Modal
+      title={template.name}
+      description={`${template.category} · 默认入职 ${template.dept}`}
+      width={680}
+      onClose={onClose}
+    >
+      <div className="talent-detail-head">
+        <div
+          className="large-avatar"
+          style={{ background: 'oklch(0.55 0.11 230)' }}
+        >
+          {avatarText(template.name)}
+        </div>
+        <div>
+          <strong>{template.name}</strong>
+          <p>{template.desc}</p>
+          <span>官方模板 · 可招募</span>
         </div>
       </div>
-    </div>
+
+      <FieldLabel>岗位 Prompt</FieldLabel>
+      <div className="prompt-box">{template.prompt}</div>
+
+      <FieldLabel>Skills</FieldLabel>
+      <ChipList items={template.skills} emptyText="暂无技能" />
+
+      <FieldLabel>MCP 工具</FieldLabel>
+      <ChipList items={template.mcps} emptyText="暂无 MCP 工具" />
+
+      <FieldLabel>平台说明</FieldLabel>
+      <div className="market-admin-note">
+        分类、模板内容、默认 Prompt、Skills 和 MCP 权限后续由官方后台维护；用户侧只负责查看能力是否匹配，并招募到自己的组织。
+      </div>
+
+      <div className="modal-actions">
+        <button className="button secondary" type="button" onClick={onClose}>
+          关闭
+        </button>
+        <button className="button primary" type="button" onClick={onRecruit}>
+          {materialIcon('person_add')}招募
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -2162,21 +2501,25 @@ function TasksView({
   tabs,
   activeFilter,
   agents,
+  scopeLabel,
   onPickFilter,
+  onClearScope,
+  onOpenCreateTask,
+  onAdvanceTask,
   onOpenChat,
   onOpenAgent,
-  onConfirmTask,
-  onContinueTask,
 }: {
   tasks: Task[];
   tabs: Array<{ status: TaskStatus | '全部'; count: number }>;
   activeFilter: TaskStatus | '全部';
   agents: Agent[];
+  scopeLabel: string | null;
   onPickFilter: (status: TaskStatus | '全部') => void;
+  onClearScope: () => void;
+  onOpenCreateTask: () => void;
+  onAdvanceTask: (task: Task) => void;
   onOpenChat: (id: string) => void;
   onOpenAgent: (id: string) => void;
-  onConfirmTask: (id: string) => void;
-  onContinueTask: (id: string) => void;
 }) {
   return (
     <div className="screen-scroll">
@@ -2184,19 +2527,38 @@ function TasksView({
         <header className="page-header compact">
           <div>
             <h1>任务中心</h1>
-            <p>每个任务结束前都需要你确认 —— 完成、继续，还是关掉</p>
+            <p>任务数据来自后端；后续会由小秘自动拆解生成</p>
+          </div>
+          <div className="header-actions">
+            <button className="button primary" type="button" onClick={onOpenCreateTask}>
+              {materialIcon('add_task')}创建任务
+            </button>
           </div>
         </header>
 
-        <div className="tabs">
+        {scopeLabel && (
+          <div className="task-scope-bar">
+            <span>{materialIcon('forum')}正在查看 {scopeLabel} 的关联任务</span>
+            <button type="button" onClick={onClearScope}>
+              查看全部任务
+            </button>
+          </div>
+        )}
+
+        <div className="task-filter-bar" aria-label="任务状态筛选">
           {tabs.map((tab) => (
             <button
-              className={activeFilter === tab.status ? 'tab active' : 'tab'}
+              className={
+                activeFilter === tab.status
+                  ? 'task-filter-button active'
+                  : 'task-filter-button'
+              }
               key={tab.status}
               type="button"
               onClick={() => onPickFilter(tab.status)}
             >
-              {tab.status} {tab.count}
+              <span>{tab.status}</span>
+              <em>{tab.count}</em>
             </button>
           ))}
         </div>
@@ -2210,6 +2572,13 @@ function TasksView({
             <span>状态</span>
             <span>操作</span>
           </div>
+          {tasks.length === 0 && (
+            <div className="task-table-empty">
+              {scopeLabel
+                ? '这个群聊还没有关联任务，可以在创建群聊时选择任务，后续也会支持从任务详情绑定。'
+                : '暂无任务。先从给小秘发消息开始。'}
+            </div>
+          )}
           {tasks.map((task) => {
             const owner = agents.find((agent) => agent.id === task.owner);
             const priority = priorityStyle(task.pr);
@@ -2221,9 +2590,11 @@ function TasksView({
                 </span>
                 <div className="task-title-cell">
                   <strong>{task.title}</strong>
-                  <button type="button" onClick={() => onOpenChat(task.src)}>
-                    {task.srcLabel}
-                  </button>
+                  {task.src && (
+                    <button type="button" onClick={() => onOpenChat(task.src)}>
+                      {task.srcLabel}
+                    </button>
+                  )}
                 </div>
                 <div className="owner-cell">
                   {owner && (
@@ -2233,10 +2604,10 @@ function TasksView({
                       type="button"
                       onClick={() => onOpenAgent(owner.id)}
                     >
-                      {owner.glyph}
+                      {avatarText(owner.name)}
                     </button>
                   )}
-                  <span>{owner?.name}</span>
+                  <span>{owner?.name ?? '未分配'}</span>
                 </div>
                 <div className="task-progress">
                   <div className="progress-track">
@@ -2256,36 +2627,9 @@ function TasksView({
                   {task.status}
                 </span>
                 <div className="task-actions">
-                  {task.status === '待确认' && (
-                    <>
-                      <button
-                        className="small-button primary"
-                        type="button"
-                        onClick={() => onConfirmTask(task.id)}
-                      >
-                        确认结束
-                      </button>
-                      <button
-                        className="small-button"
-                        type="button"
-                        onClick={() => onContinueTask(task.id)}
-                      >
-                        继续推进
-                      </button>
-                    </>
-                  )}
-                  {task.status === '卡住' && (
-                    <button
-                      className="small-button danger"
-                      type="button"
-                      onClick={() => onOpenChat(task.src)}
-                    >
-                      {materialIcon('forum')}去群里处理
-                    </button>
-                  )}
-                  {(task.status === '进行中' || task.status === '已完成') && (
-                    <span>—</span>
-                  )}
+                  <button type="button" onClick={() => onAdvanceTask(task)}>
+                    {task.status === '已完成' ? '已完成' : '推进'}
+                  </button>
                 </div>
               </div>
             );
@@ -2300,12 +2644,14 @@ function LibraryView({
   tabs,
   activeTab,
   onPickTab,
-  onToast,
+  skills,
+  mcps,
 }: {
   tabs: Array<{ key: LibraryTab; label: string }>;
   activeTab: LibraryTab;
   onPickTab: (tab: LibraryTab) => void;
-  onToast: (message: string) => void;
+  skills: string[];
+  mcps: string[];
 }) {
   return (
     <div className="screen-scroll">
@@ -2313,7 +2659,7 @@ function LibraryView({
         <header className="page-header compact">
           <div>
             <h1>资料库与能力</h1>
-            <p>全公司共享 —— 每位员工都能在这里取用资料、技能与工具连接</p>
+            <p>第一版先展示后端模板里的 Skills / MCP，资料上传后续接入</p>
           </div>
         </header>
 
@@ -2331,89 +2677,50 @@ function LibraryView({
         </div>
 
         {activeTab === 'docs' && (
-          <div className="docs-grid">
-            {docs.map((doc) => (
-              <button
-                className="doc-card"
-                key={doc.name}
-                type="button"
-                onClick={() => onToast('原型演示：此处将打开资料详情')}
-              >
-                <div>{materialIcon(doc.icon)}</div>
-                <span>
-                  <strong>{doc.name}</strong>
-                  <p>{doc.desc}</p>
-                  <em>
-                    {materialIcon('visibility')}
-                    {doc.meta}
-                  </em>
-                </span>
-              </button>
-            ))}
-            <button
-              className="upload-card"
-              type="button"
-              onClick={() => onToast('原型演示：此处上传资料，全员立即可见')}
-            >
-              {materialIcon('upload_file')}上传资料，全员可见
-            </button>
-          </div>
+          <article className="card simple-list">
+            <div className="library-row">
+              <div className="library-icon">{materialIcon('description')}</div>
+              <div>
+                <strong>暂无资料</strong>
+                <p>资料上传后会从后端读取，这里先保持空状态。</p>
+              </div>
+            </div>
+          </article>
         )}
 
         {activeTab === 'skills' && (
           <article className="card simple-list">
             {skills.map((skill) => (
-              <div className="library-row" key={skill.name}>
+              <div className="library-row" key={skill}>
                 <div className="library-icon">{materialIcon('bolt')}</div>
                 <div>
-                  <strong>{skill.name}</strong>
-                  <p>{skill.desc}</p>
+                  <strong>{skill}</strong>
+                  <p>来自后端人才模板，可绑定给员工。</p>
                 </div>
-                <span>{skill.users}</span>
-                <button
-                  type="button"
-                  onClick={() => onToast('原型演示：此处管理技能与员工的绑定')}
-                >
-                  管理绑定
-                </button>
               </div>
             ))}
+            {!skills.length && <EmptyState>暂无 Skills</EmptyState>}
           </article>
         )}
 
         {activeTab === 'mcp' && (
           <article className="card simple-list">
-            {mcps.map((mcp) => {
-              const connected = mcp.status === '已连接';
-              return (
-                <div className="library-row" key={mcp.name}>
-                  <div className="library-icon neutral">
-                    {materialIcon('extension')}
-                  </div>
-                  <div>
-                    <strong>{mcp.name}</strong>
-                    <p>{mcp.desc}</p>
-                  </div>
-                  <span className={connected ? 'connected' : ''}>
-                    <i />
-                    {mcp.status}
-                  </span>
-                  <button
-                    className={connected ? '' : 'primary-lite'}
-                    type="button"
-                    onClick={() =>
-                      onToast(
-                        connected
-                          ? '原型演示：此处配置 MCP 权限'
-                          : '原型演示：此处发起 MCP 连接授权',
-                      )
-                    }
-                  >
-                    {connected ? '配置' : '连接'}
-                  </button>
+            {mcps.map((mcp) => (
+              <div className="library-row" key={mcp}>
+                <div className="library-icon neutral">
+                  {materialIcon('extension')}
                 </div>
-              );
-            })}
+                <div>
+                  <strong>{mcp}</strong>
+                  <p>来自后端人才模板，第一版仅做权限占位。</p>
+                </div>
+                <span>
+                  <i />
+                  未连接
+                </span>
+              </div>
+            ))}
+            {!mcps.length && <EmptyState>暂无 MCP</EmptyState>}
           </article>
         )}
       </div>
@@ -2426,38 +2733,31 @@ function AgentDetail({
   tasks,
   onClose,
   onDm,
-  onEdit,
 }: {
   agent: Agent;
   tasks: Task[];
   onClose: () => void;
   onDm: () => void;
-  onEdit: () => void;
 }) {
   return (
     <>
-      <button
-        className="overlay"
-        aria-label="关闭员工详情"
-        type="button"
-        onClick={onClose}
-      />
-      <aside className="agent-drawer">
+      <div className="overlay" onClick={onClose} />
+      <aside className="agent-drawer" aria-label={`${agent.name} 详情`}>
         <header>
           <div className="drawer-topline">
             <div
               className="large-avatar"
               style={{ background: avatarColor(agent) }}
             >
-              {agent.glyph}
+              {avatarText(agent.name)}
             </div>
-            <button type="button" onClick={onClose}>
+            <button type="button" title="关闭" onClick={onClose}>
               {materialIcon('close')}
             </button>
           </div>
           <h2>
             {agent.name}
-            <span style={{ color: dotColor(agent.statusKind) }}>
+            <span>
               <i style={{ background: dotColor(agent.statusKind) }} />
               {agent.statusLabel}
             </span>
@@ -2467,237 +2767,343 @@ function AgentDetail({
           </p>
           <div className="drawer-actions">
             <button className="button primary" type="button" onClick={onDm}>
-              {materialIcon('chat')}私聊 TA
-            </button>
-            <button className="button secondary" type="button" onClick={onDm}>
-              {materialIcon('assignment_add')}交代任务
+              {materialIcon('chat')}私信
             </button>
           </div>
         </header>
+
         <div className="drawer-scroll">
-          <DrawerSection title="手里的任务">
-            {tasks.length === 0 ? (
-              <EmptyState>暂无任务，处于待命状态</EmptyState>
-            ) : (
-              tasks.map((task) => {
-                const priority = priorityStyle(task.pr);
-                const status = statusStyle(task.status);
-                return (
-                  <div className="drawer-task" key={task.id}>
-                    <div>
-                      <span className="priority-pill" style={priority}>
-                        {task.pr}
-                      </span>
-                      <strong>{task.title}</strong>
-                      <em style={{ color: status.color }}>{task.status}</em>
-                    </div>
-                    <div className="drawer-progress">
-                      <div className="progress-track">
-                        <i
-                          style={{
-                            width: `${task.progress}%`,
-                            background: status.bar,
-                          }}
-                        />
-                      </div>
-                      <span>{task.progress}%</span>
-                    </div>
+          <section className="drawer-section">
+            <h3>员工描述</h3>
+            <p className="prompt-box">{agent.description || '暂无描述'}</p>
+          </section>
+
+          <section className="drawer-section">
+            <h3>工作职责 Prompt</h3>
+            <p className="prompt-box">{agent.prompt}</p>
+          </section>
+
+          <section className="drawer-section">
+            <h3>Skills</h3>
+            <ChipList items={agent.skills} emptyText="暂无绑定技能" />
+          </section>
+
+          <section className="drawer-section">
+            <h3>MCP</h3>
+            <ChipList items={agent.mcps} emptyText="暂无 MCP" muted />
+          </section>
+
+          <section className="drawer-section">
+            <h3>相关任务</h3>
+            {tasks.length === 0 && <EmptyState>暂无任务</EmptyState>}
+            {tasks.map((task) => {
+              const status = statusStyle(task.status);
+              const priority = priorityStyle(task.pr);
+              return (
+                <article className="drawer-task" key={task.id}>
+                  <div>
+                    <em style={priority}>{task.pr}</em>
+                    <strong>{task.title}</strong>
                   </div>
-                );
-              })
-            )}
-          </DrawerSection>
-          <DrawerSection title="系统 Prompt">
-            <div className="prompt-box">{agent.prompt}</div>
-          </DrawerSection>
-          <DrawerSection title="Skills 技能">
-            <ChipList items={agent.skills} icon="bolt" />
-          </DrawerSection>
-          <DrawerSection title="MCP 工具连接">
-            <ChipList items={agent.mcps} icon="extension" muted />
-          </DrawerSection>
-          <button className="edit-config" type="button" onClick={onEdit}>
-            {materialIcon('tune')}编辑赋能配置
-          </button>
+                  <div className="drawer-progress">
+                    <div className="progress-track">
+                      <i
+                        style={{
+                          width: `${task.progress}%`,
+                          background: status.bar,
+                        }}
+                      />
+                    </div>
+                    <span>{task.status}</span>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
         </div>
       </aside>
     </>
   );
 }
 
-function DrawerSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="drawer-section">
-      <h3>{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-function ChipList({
-  items,
-  icon,
-  muted = false,
-}: {
-  items: string[];
-  icon: string;
-  muted?: boolean;
-}) {
-  return (
-    <div className="chip-list">
-      {items.map((item) => (
-        <span className={muted ? 'chip muted' : 'chip'} key={item}>
-          {materialIcon(icon)}
-          {item}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function HireModal({
-  templateIndex,
-  hireName,
+  template,
+  departments,
   hireDept,
-  hirePrompt,
-  hireSkills,
-  hireMcps,
-  onPickTemplate,
-  onNameChange,
   onDeptChange,
-  onPromptChange,
-  onToggleSkill,
-  onToggleMcp,
   onClose,
   onSubmit,
 }: {
-  templateIndex: number;
-  hireName: string;
+  template?: HireTemplate;
+  departments: string[];
   hireDept: string;
-  hirePrompt: string;
-  hireSkills: string[];
-  hireMcps: string[];
-  onPickTemplate: (index: number) => void;
-  onNameChange: (name: string) => void;
   onDeptChange: (dept: string) => void;
-  onPromptChange: (prompt: string) => void;
-  onToggleSkill: (skill: string) => void;
-  onToggleMcp: (mcp: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  if (!template) return null;
+
+  return (
+    <Modal
+      title="招募员工"
+      description="从人才市场招募预设岗位，确认部门后加入你的组织。"
+      width={560}
+      onClose={onClose}
+    >
+      <div className="hire-summary">
+        <div
+          className="large-avatar"
+          style={{ background: 'oklch(0.55 0.11 230)' }}
+        >
+          {avatarText(template.name)}
+        </div>
+        <div>
+          <strong>{template.name}</strong>
+          <p>
+            {template.dept} · {template.desc}
+          </p>
+        </div>
+      </div>
+
+      <FieldLabel>入职部门</FieldLabel>
+      <input
+        value={hireDept}
+        placeholder={`例如：${template.dept}`}
+        onChange={(event) => onDeptChange(event.currentTarget.value)}
+      />
+      {departments.length > 0 && (
+        <>
+          <FieldLabel>已有部门</FieldLabel>
+          <div className="chip-row compact">
+            {departments.map((department) => (
+              <button
+                className={
+                  hireDept === department ? 'selector-chip active' : 'selector-chip'
+                }
+                key={department}
+                type="button"
+                onClick={() => onDeptChange(department)}
+              >
+                {department}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <FieldLabel>岗位 Prompt</FieldLabel>
+      <textarea readOnly rows={5} value={template.prompt} />
+
+      <FieldLabel>能力标签</FieldLabel>
+      <ChipList items={template.skills} emptyText="暂无技能" />
+
+      <div className="modal-actions">
+        <button className="button secondary" type="button" onClick={onClose}>
+          取消
+        </button>
+        <button className="button primary" type="button" onClick={onSubmit}>
+          {materialIcon('person_add')}确认招募
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function CreateTaskModal({
+  agents,
+  chats,
+  taskTitle,
+  taskDesc,
+  taskPriority,
+  taskOwnerId,
+  taskConversationId,
+  agentById,
+  onTitleChange,
+  onDescChange,
+  onPriorityChange,
+  onOwnerChange,
+  onConversationChange,
+  onClose,
+  onSubmit,
+}: {
+  agents: Agent[];
+  chats: Chat[];
+  taskTitle: string;
+  taskDesc: string;
+  taskPriority: Priority;
+  taskOwnerId: string;
+  taskConversationId: string;
+  agentById: (id: string) => Agent | undefined;
+  onTitleChange: (value: string) => void;
+  onDescChange: (value: string) => void;
+  onPriorityChange: (value: Priority) => void;
+  onOwnerChange: (value: string) => void;
+  onConversationChange: (value: string) => void;
   onClose: () => void;
   onSubmit: () => void;
 }) {
   return (
-    <Modal onClose={onClose} width={620}>
-      <header className="modal-header">
-        <h2>招聘新员工</h2>
-        <p>选一个角色模板，或者从零开始 —— 入职即可分配任务</p>
-      </header>
-      <div className="modal-body">
-        <FieldLabel>角色模板</FieldLabel>
-        <div className="chip-row">
-          {hireTemplates.map((template, index) => (
-            <button
-              className={
-                templateIndex === index
-                  ? 'selector-chip active'
-                  : 'selector-chip'
-              }
-              key={template.name}
-              type="button"
-              onClick={() => onPickTemplate(index)}
-            >
-              {template.name}
-            </button>
-          ))}
-        </div>
+    <Modal
+      title="创建任务"
+      description="把想法沉淀成可追踪的工作项，后续会进入员工上下文。"
+      width={680}
+      onClose={onClose}
+    >
+      <FieldLabel>任务标题</FieldLabel>
+      <input
+        value={taskTitle}
+        placeholder="例如：官网首屏文案确认"
+        onChange={(event) => onTitleChange(event.currentTarget.value)}
+      />
 
-        <div className="form-grid">
-          <label>
-            <FieldLabel>名字</FieldLabel>
-            <input
-              value={hireName}
-              placeholder="给 TA 起个名字"
-              onChange={(event) => onNameChange(event.target.value)}
-            />
-          </label>
-          <div>
-            <FieldLabel>所属部门</FieldLabel>
-            <div className="chip-row compact">
-              {['运营部', '内容部', '增长与客户', '财务行政'].map((dept) => (
-                <button
-                  className={
-                    hireDept === dept ? 'selector-chip active' : 'selector-chip'
-                  }
-                  key={dept}
-                  type="button"
-                  onClick={() => onDeptChange(dept)}
-                >
-                  {dept}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+      <FieldLabel>任务说明</FieldLabel>
+      <textarea
+        rows={4}
+        value={taskDesc}
+        placeholder="写清楚目标、产出格式和验收标准"
+        onChange={(event) => onDescChange(event.currentTarget.value)}
+      />
 
-        <FieldLabel>系统 Prompt（TA 的岗位职责）</FieldLabel>
-        <textarea
-          rows={4}
-          value={hirePrompt}
-          onChange={(event) => onPromptChange(event.target.value)}
-        />
+      <div className="form-grid even">
+        <label>
+          <FieldLabel>负责人</FieldLabel>
+          <select
+            value={taskOwnerId}
+            onChange={(event) => onOwnerChange(event.currentTarget.value)}
+          >
+            <option value="">未分配</option>
+            {agents.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.name} · {agent.role}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <FieldLabel>关联会话</FieldLabel>
+          <select
+            value={taskConversationId}
+            onChange={(event) => onConversationChange(event.currentTarget.value)}
+          >
+            <option value="">不关联</option>
+            {chats.map((chat) => (
+              <option key={chat.id} value={chat.id}>
+                {chat.kind === 'group'
+                  ? `# ${chat.name}`
+                  : `私聊 · ${agentById(chat.agentId)?.name ?? '员工'}`}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
-        <FieldLabel>绑定 Skills</FieldLabel>
-        <div className="chip-row">
-          {allSkills.map((skill) => (
-            <button
-              className={
-                hireSkills.includes(skill)
-                  ? 'selector-chip active'
-                  : 'selector-chip'
-              }
-              key={skill}
-              type="button"
-              onClick={() => onToggleSkill(skill)}
-            >
-              {materialIcon('bolt')}
-              {skill}
-            </button>
-          ))}
-        </div>
-
-        <FieldLabel>连接 MCP 工具</FieldLabel>
-        <div className="chip-row">
-          {allMcps.map((mcp) => (
-            <button
-              className={
-                hireMcps.includes(mcp)
-                  ? 'selector-chip active'
-                  : 'selector-chip'
-              }
-              key={mcp}
-              type="button"
-              onClick={() => onToggleMcp(mcp)}
-            >
-              {materialIcon('extension')}
-              {mcp}
-            </button>
-          ))}
-        </div>
-
-        <div className="modal-actions">
-          <button className="button secondary" type="button" onClick={onClose}>
-            取消
+      <FieldLabel>优先级</FieldLabel>
+      <div className="chip-row compact">
+        {(['P0', 'P1', 'P2'] as const).map((priority) => (
+          <button
+            className={
+              taskPriority === priority ? 'selector-chip active' : 'selector-chip'
+            }
+            key={priority}
+            type="button"
+            onClick={() => onPriorityChange(priority)}
+          >
+            {priority}
           </button>
-          <button className="button primary" type="button" onClick={onSubmit}>
-            完成招聘，立即入职
-          </button>
-        </div>
+        ))}
+      </div>
+
+      <div className="modal-actions">
+        <button className="button secondary" type="button" onClick={onClose}>
+          取消
+        </button>
+        <button className="button primary" type="button" onClick={onSubmit}>
+          {materialIcon('add_task')}创建任务
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function CreateAgentModal({
+  departments,
+  createName,
+  createDesc,
+  createDept,
+  createPrompt,
+  onNameChange,
+  onDescChange,
+  onDeptChange,
+  onPromptChange,
+  onClose,
+  onSubmit,
+}: {
+  departments: string[];
+  createName: string;
+  createDesc: string;
+  createDept: string;
+  createPrompt: string;
+  onNameChange: (value: string) => void;
+  onDescChange: (value: string) => void;
+  onDeptChange: (value: string) => void;
+  onPromptChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal
+      title="创建新员工"
+      description="自定义员工名称、描述、部门和工作职责 Prompt。"
+      width={680}
+      onClose={onClose}
+    >
+      <div className="form-grid even">
+        <label>
+          <FieldLabel>员工名称</FieldLabel>
+          <input
+            value={createName}
+            placeholder="例如：增长分析师"
+            onChange={(event) => onNameChange(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          <FieldLabel>所属部门</FieldLabel>
+          <input
+            value={createDept}
+            list="agentpulse-departments"
+            placeholder="例如：增长与客户"
+            onChange={(event) => onDeptChange(event.currentTarget.value)}
+          />
+          <datalist id="agentpulse-departments">
+            {departments.map((department) => (
+              <option key={department} value={department} />
+            ))}
+          </datalist>
+        </label>
+      </div>
+
+      <FieldLabel>员工描述</FieldLabel>
+      <input
+        value={createDesc}
+        placeholder="一句话说明他擅长什么"
+        onChange={(event) => onDescChange(event.currentTarget.value)}
+      />
+
+      <FieldLabel>工作职责 Prompt</FieldLabel>
+      <textarea
+        rows={8}
+        value={createPrompt}
+        placeholder="写清楚这个员工的职责、边界、输出格式和协作方式"
+        onChange={(event) => onPromptChange(event.currentTarget.value)}
+      />
+
+      <div className="modal-actions">
+        <button className="button secondary" type="button" onClick={onClose}>
+          取消
+        </button>
+        <button className="button primary" type="button" onClick={onSubmit}>
+          {materialIcon('add_circle')}创建
+        </button>
       </div>
     </Modal>
   );
@@ -2705,116 +3111,239 @@ function HireModal({
 
 function GroupModal({
   agents,
+  tasks,
   groupName,
   groupMembers,
+  selectedTaskIds,
   onGroupNameChange,
   onToggleMember,
+  onToggleTask,
   onClose,
   onCreate,
 }: {
   agents: Agent[];
+  tasks: Task[];
   groupName: string;
   groupMembers: string[];
-  onGroupNameChange: (name: string) => void;
+  selectedTaskIds: string[];
+  onGroupNameChange: (value: string) => void;
   onToggleMember: (id: string) => void;
+  onToggleTask: (id: string) => void;
   onClose: () => void;
   onCreate: () => void;
 }) {
   return (
-    <Modal onClose={onClose} width={520}>
-      <header className="modal-header">
-        <h2>拉个群，把事说清楚</h2>
-        <p>把相关员工拉进来 —— 讨论、提问、执行结果都沉淀在这个群里</p>
-      </header>
-      <div className="modal-body">
-        <FieldLabel>这件事叫什么</FieldLabel>
-        <input
-          value={groupName}
-          placeholder="例如：客户回访计划"
-          onChange={(event) => onGroupNameChange(event.target.value)}
-        />
-        <FieldLabel>把谁拉进来</FieldLabel>
-        <div className="member-picker">
-          {agents
-            .filter((agent) => agent.id !== 'sec')
-            .map((agent) => {
-              const picked = groupMembers.includes(agent.id);
-              return (
-                <button
-                  className={picked ? 'member-option active' : 'member-option'}
-                  key={agent.id}
-                  type="button"
-                  onClick={() => onToggleMember(agent.id)}
-                >
-                  <div
-                    className="tiny-avatar"
-                    style={{ background: avatarColor(agent) }}
-                  >
-                    {agent.glyph}
-                  </div>
-                  <span>
-                    <strong>{agent.name}</strong>
-                    <em>{agent.role}</em>
-                  </span>
-                  {materialIcon('check_circle')}
-                </button>
-              );
-            })}
-        </div>
-        <div className="modal-actions">
-          <button className="button secondary" type="button" onClick={onClose}>
-            取消
-          </button>
-          <button className="button primary" type="button" onClick={onCreate}>
-            建群并开始讨论
-          </button>
-        </div>
+    <Modal
+      title="创建群聊"
+      description="把相关员工拉到同一个会话里，后续可以用 @ 点名。"
+      width={620}
+      onClose={onClose}
+    >
+      <FieldLabel>群聊名称</FieldLabel>
+      <input
+        value={groupName}
+        placeholder="例如：官网上线作战室"
+        onChange={(event) => onGroupNameChange(event.currentTarget.value)}
+      />
+
+      <FieldLabel>选择成员</FieldLabel>
+      <MemberPicker
+        agents={agents}
+        selectedMembers={groupMembers}
+        onToggleMember={onToggleMember}
+      />
+
+      <FieldLabel>关联任务（可选）</FieldLabel>
+      <TaskPicker
+        tasks={tasks}
+        selectedTaskIds={selectedTaskIds}
+        onToggleTask={onToggleTask}
+      />
+
+      <div className="modal-actions">
+        <button className="button secondary" type="button" onClick={onClose}>
+          取消
+        </button>
+        <button className="button primary" type="button" onClick={onCreate}>
+          {materialIcon('group_add')}创建群聊
+        </button>
       </div>
     </Modal>
   );
 }
 
+function TaskPicker({
+  tasks,
+  selectedTaskIds,
+  onToggleTask,
+}: {
+  tasks: Task[];
+  selectedTaskIds: string[];
+  onToggleTask: (id: string) => void;
+}) {
+  if (!tasks.length) {
+    return <div className="member-picker-empty">暂无可关联任务</div>;
+  }
+
+  return (
+    <div className="task-picker">
+      {tasks.map((task) => {
+        const active = selectedTaskIds.includes(task.id);
+        const status = statusStyle(task.status);
+        return (
+          <button
+            className={active ? 'task-option active' : 'task-option'}
+            key={task.id}
+            type="button"
+            onClick={() => onToggleTask(task.id)}
+          >
+            <span className="task-option-main">
+              <strong>{task.title}</strong>
+              <em>{task.srcLabel}</em>
+            </span>
+            <span
+              className="status-pill"
+              style={{ background: status.background, color: status.color }}
+            >
+              {task.status}
+            </span>
+            {materialIcon(active ? 'check_circle' : 'radio_button_unchecked')}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function GroupMembersModal({
+  title,
+  description,
+  agents,
+  selectedMembers,
+  submitLabel,
+  emptyText,
+  onToggleMember,
+  onClose,
+  onSubmit,
+}: {
+  title: string;
+  description: string;
+  agents: Agent[];
+  selectedMembers: string[];
+  submitLabel: string;
+  emptyText: string;
+  onToggleMember: (id: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal title={title} description={description} width={620} onClose={onClose}>
+      <FieldLabel>选择成员</FieldLabel>
+      <MemberPicker
+        agents={agents}
+        selectedMembers={selectedMembers}
+        emptyText={emptyText}
+        onToggleMember={onToggleMember}
+      />
+
+      <div className="modal-actions">
+        <button className="button secondary" type="button" onClick={onClose}>
+          取消
+        </button>
+        <button className="button primary" type="button" onClick={onSubmit}>
+          {materialIcon('person_add')}
+          {submitLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function MemberPicker({
+  agents,
+  selectedMembers,
+  emptyText = '暂无可选员工',
+  onToggleMember,
+}: {
+  agents: Agent[];
+  selectedMembers: string[];
+  emptyText?: string;
+  onToggleMember: (id: string) => void;
+}) {
+  if (!agents.length) {
+    return <div className="member-picker-empty">{emptyText}</div>;
+  }
+
+  return (
+    <div className="member-picker">
+      {agents.map((agent) => {
+        const active = selectedMembers.includes(agent.id);
+        return (
+          <button
+            className={active ? 'member-option active' : 'member-option'}
+            key={agent.id}
+            type="button"
+            onClick={() => onToggleMember(agent.id)}
+          >
+            <span
+              className="tiny-avatar"
+              style={{ background: avatarColor(agent) }}
+            >
+              {avatarText(agent.name)}
+            </span>
+            <span>
+              <strong>{agent.name}</strong>
+              <em>
+                {agent.role} · {agent.dept}
+              </em>
+            </span>
+            {materialIcon(active ? 'check_circle' : 'radio_button_unchecked')}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function OnboardingModal({
   step,
-  selectedRoles,
-  onToggleRole,
+  templates,
   onNext,
   onFinish,
 }: {
   step: number;
-  selectedRoles: number[];
-  onToggleRole: (index: number) => void;
+  templates: HireTemplate[];
   onNext: () => void;
   onFinish: () => void;
 }) {
+  const featuredTemplates = templates.slice(0, 4);
+
   return (
     <>
       <div className="overlay blur" />
-      <section className="onboarding-modal">
+      <section className="onboarding-modal" aria-label="新手引导">
         {step === 0 && (
           <div className="onboarding-content centered">
-            <div className="onboarding-logo">✦</div>
-            <h2>欢迎，老板</h2>
+            <div className="onboarding-logo big">✦</div>
+            <h2>欢迎来到 AgentPulse</h2>
             <p>
-              这不是又一个聊天机器人。
-              <br />
-              这里是你的公司 —— 一个人当老板，AI 员工替你干活。
+              这里不是聊天 Demo，而是你的 AI 公司工作台。第一版已经接入账号、组织、员工和真实 LLM 调用链。
             </p>
             <div className="onboarding-feature-grid">
               <OnboardingFeature
-                icon="person_add"
-                title="招聘 AI 员工"
-                text="绑定 Prompt、Skill、MCP 工具，按部门组队"
-              />
-              <OnboardingFeature
                 icon="forum"
-                title="拉群协作"
-                text="有事拉个群，讨论和执行结果全部沉淀在群里"
+                title="从消息开始"
+                text="默认进入小秘私聊，把想法直接丢进来。"
               />
               <OnboardingFeature
-                icon="front_hand"
-                title="你只负责拍板"
-                text="关键决定员工会 @你，任务结束由你确认"
+                icon="storefront"
+                title="人才市场"
+                text="按岗位招募 AI 员工，入职后进入组织。"
+              />
+              <OnboardingFeature
+                icon="account_tree"
+                title="组织协作"
+                text="创建群聊，用 @ 点名具体员工推进。"
               />
             </div>
           </div>
@@ -2822,33 +3351,22 @@ function OnboardingModal({
 
         {step === 1 && (
           <div className="onboarding-content">
-            <h2>招聘你的首批员工</h2>
-            <p>先挑几个角色模板，入职后随时可以调整赋能配置</p>
+            <div className="onboarding-logo">✦</div>
+            <h2>先认识你的第一批员工</h2>
+            <p>小秘已经就位。你可以继续从人才市场招募这些角色，让一人公司开始分工。</p>
             <div className="role-grid">
-              {hireTemplates.map((template, index) => {
-                const selected = selectedRoles.includes(index);
-                return (
-                  <button
-                    className={selected ? 'role-option active' : 'role-option'}
-                    key={template.name}
-                    type="button"
-                    onClick={() => onToggleRole(index)}
-                  >
-                    <div
-                      style={{
-                        background: `oklch(0.55 0.11 ${hueCycle[index % hueCycle.length]})`,
-                      }}
-                    >
-                      {glyphCycle[index % glyphCycle.length]}
-                    </div>
-                    <span>
-                      <strong>{template.name}</strong>
-                      <em>{template.desc}</em>
-                    </span>
-                    {materialIcon('check_circle')}
-                  </button>
-                );
-              })}
+              {featuredTemplates.map((template, index) => (
+                <div className="role-option active" key={template.id}>
+                  <div style={{ background: `oklch(0.55 0.11 ${220 + index * 35})` }}>
+                    {['◆', '●', '▲', '■'][index % 4]}
+                  </div>
+                  <span>
+                    <strong>{template.name}</strong>
+                    <em>{template.dept}</em>
+                  </span>
+                  {materialIcon('check_circle')}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -2856,14 +3374,13 @@ function OnboardingModal({
         {step === 2 && (
           <div className="onboarding-content centered">
             <div className="onboarding-logo big">✦</div>
-            <h2>这是小秘，你的秘书</h2>
+            <h2>从给小秘发消息开始</h2>
             <p>
-              有任何想法、任务、还没想清楚的事，直接丢给小秘。
-              <br />
-              TA 会帮你创建任务、招聘员工、拉群分配 —— 你只需要在关键时刻拍板。
+              你可以说“帮我把 AgentPulse 第一版拆成今天能做的任务”，小秘会用后端真实模型返回下一步。
             </p>
             <div className="try-chip">
-              {materialIcon('chat')}试试对小秘说：「我想做一次老客户回访」
+              {materialIcon('chat')}
+              试试：今天我们先推进什么？
             </div>
           </div>
         )}
@@ -2871,22 +3388,20 @@ function OnboardingModal({
         <footer className="onboarding-footer">
           <div className="step-dots">
             {[0, 1, 2].map((item) => (
-              <i className={step >= item ? 'active' : ''} key={item} />
+              <i className={step === item ? 'active' : ''} key={item} />
             ))}
           </div>
           <span />
           <button className="skip-button" type="button" onClick={onFinish}>
-            跳过引导
+            跳过
           </button>
-          {step < 2 ? (
-            <button className="button primary" type="button" onClick={onNext}>
-              下一步
-            </button>
-          ) : (
-            <button className="button primary" type="button" onClick={onFinish}>
-              进入工作台
-            </button>
-          )}
+          <button
+            className="button primary"
+            type="button"
+            onClick={step >= 2 ? onFinish : onNext}
+          >
+            {step >= 2 ? '开始使用' : '下一步'}
+          </button>
         </footer>
       </section>
     </>
@@ -2912,31 +3427,57 @@ function OnboardingFeature({
 }
 
 function Modal({
-  children,
-  onClose,
+  title,
+  description,
   width,
+  onClose,
+  children,
 }: {
-  children: React.ReactNode;
-  onClose: () => void;
+  title: string;
+  description: string;
   width: number;
+  onClose: () => void;
+  children: ReactNode;
 }) {
   return (
     <>
-      <button
-        className="overlay"
-        aria-label="关闭弹窗"
-        type="button"
-        onClick={onClose}
-      />
-      <section className="modal" style={{ width }}>
-        {children}
+      <div className="overlay blur" onClick={onClose} />
+      <section className="modal" style={{ width }} aria-label={title}>
+        <header className="modal-header">
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </header>
+        <div className="modal-body">{children}</div>
       </section>
     </>
   );
 }
 
-function FieldLabel({ children }: { children: string }) {
+function FieldLabel({ children }: { children: ReactNode }) {
   return <div className="field-label">{children}</div>;
+}
+
+function ChipList({
+  items,
+  emptyText,
+  muted = false,
+}: {
+  items: string[];
+  emptyText: string;
+  muted?: boolean;
+}) {
+  if (!items.length) return <EmptyState>{emptyText}</EmptyState>;
+
+  return (
+    <div className="chip-list">
+      {items.map((item) => (
+        <span className={muted ? 'chip muted' : 'chip'} key={item}>
+          {muted ? materialIcon('extension') : materialIcon('bolt')}
+          {item}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 createRoot(document.getElementById('root')!).render(
