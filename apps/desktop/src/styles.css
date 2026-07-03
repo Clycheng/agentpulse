@@ -1028,6 +1028,88 @@ button {
   text-align: center;
 }
 
+.chat-approval {
+  flex-shrink: 0;
+  overflow: hidden;
+  margin: 6px 0;
+  border: 1px solid #f2d9ae;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.chat-approval header {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 13px 14px 10px;
+}
+
+.chat-approval .material-symbol {
+  color: var(--warning);
+  font-variation-settings: 'FILL' 1;
+}
+
+.chat-approval header span {
+  min-width: 0;
+}
+
+.chat-approval strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.chat-approval em {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.6;
+}
+
+.chat-approval-risk {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(224, 168, 86, 0.16);
+  color: var(--warning);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.chat-approval footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+
+.chat-approval-link {
+  overflow: hidden;
+  max-width: 45%;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-approval-link:hover {
+  color: var(--text-strong);
+  text-decoration: underline;
+}
+
+.chat-approval-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .message-row {
   display: flex;
   padding: 9px 0;

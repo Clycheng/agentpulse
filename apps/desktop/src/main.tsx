@@ -1469,6 +1469,17 @@ function App() {
   const relatedTasks = activeChat
     ? tasks.filter((task) => task.src === activeChat.id)
     : [];
+  const activeChatApprovals = activeChat
+    ? tasks
+        .flatMap((task) =>
+          task.approvals.map((approval) => ({ approval, task })),
+        )
+        .filter(
+          ({ approval }) =>
+            approval.status === 'pending' &&
+            approval.conversationId === activeChat.id,
+        )
+    : [];
   const scopedChat = taskScopeChatId
     ? chats.find((chat) => chat.id === taskScopeChatId)
     : null;
@@ -1553,6 +1564,7 @@ function App() {
             members={chatMembers}
             messages={messagesByChat[activeChat.id] ?? []}
             agents={agents}
+            approvals={activeChatApprovals}
             relatedTaskCount={relatedTasks.length}
             draft={draft}
             placeholder={
@@ -1565,6 +1577,8 @@ function App() {
             onDraftChange={setDraft}
             onSend={send}
             onOpenTasks={openRelatedTasks}
+            onResolveApproval={resolveApproval}
+            onOpenTask={(taskId) => setTaskDetailId(taskId)}
             onInviteMembers={
               activeChat.kind === 'group' ? openInviteMembers : undefined
             }
@@ -2243,6 +2257,7 @@ function ChatView({
   members,
   messages,
   agents,
+  approvals,
   relatedTaskCount,
   draft,
   placeholder,
@@ -2251,6 +2266,8 @@ function ChatView({
   onDraftChange,
   onSend,
   onOpenTasks,
+  onResolveApproval,
+  onOpenTask,
   onInviteMembers,
   onOpenAgent,
 }: {
@@ -2259,6 +2276,7 @@ function ChatView({
   members: string[];
   messages: Message[];
   agents: Agent[];
+  approvals: Array<{ approval: Approval; task: Task }>;
   relatedTaskCount: number;
   draft: string;
   placeholder: string;
@@ -2267,6 +2285,11 @@ function ChatView({
   onDraftChange: (draft: string) => void;
   onSend: () => void;
   onOpenTasks: () => void;
+  onResolveApproval: (
+    approval: Approval,
+    status: 'approved' | 'rejected',
+  ) => void;
+  onOpenTask: (taskId: string) => void;
   onInviteMembers?: () => void;
   onOpenAgent: (id: string) => void;
 }) {
@@ -2390,6 +2413,49 @@ function ChatView({
             agents={agents}
           />
         ))}
+        {approvals.map(({ approval, task }) => {
+          const owner = task.owner ? agentById(task.owner) : undefined;
+          return (
+            <article className="chat-approval" key={approval.id}>
+              <header>
+                {materialIcon('approval', 'warning')}
+                <span>
+                  <strong>待你拍板 · {approval.title}</strong>
+                  <em>{approval.description}</em>
+                </span>
+                {approval.riskLevel && (
+                  <span className="chat-approval-risk">{approval.riskLevel}</span>
+                )}
+              </header>
+              <footer>
+                <button
+                  className="chat-approval-link"
+                  type="button"
+                  onClick={() => onOpenTask(task.id)}
+                >
+                  {task.title}
+                  {owner ? ` · ${owner.name}` : ''}
+                </button>
+                <div className="chat-approval-actions">
+                  <button
+                    className="button secondary"
+                    type="button"
+                    onClick={() => onResolveApproval(approval, 'rejected')}
+                  >
+                    驳回
+                  </button>
+                  <button
+                    className="button primary"
+                    type="button"
+                    onClick={() => onResolveApproval(approval, 'approved')}
+                  >
+                    确认通过
+                  </button>
+                </div>
+              </footer>
+            </article>
+          );
+        })}
         {typingName && (
           <div className="typing-line">
             <i />
