@@ -1565,6 +1565,7 @@ function App() {
             messages={messagesByChat[activeChat.id] ?? []}
             agents={agents}
             approvals={activeChatApprovals}
+            relatedTasks={relatedTasks}
             relatedTaskCount={relatedTasks.length}
             draft={draft}
             placeholder={
@@ -2258,6 +2259,7 @@ function ChatView({
   messages,
   agents,
   approvals,
+  relatedTasks,
   relatedTaskCount,
   draft,
   placeholder,
@@ -2277,6 +2279,7 @@ function ChatView({
   messages: Message[];
   agents: Agent[];
   approvals: Array<{ approval: Approval; task: Task }>;
+  relatedTasks: Task[];
   relatedTaskCount: number;
   draft: string;
   placeholder: string;
@@ -2402,6 +2405,35 @@ function ChatView({
           {relatedTaskCount ? `关联任务 ${relatedTaskCount}` : '关联任务'}
         </button>
       </header>
+
+      {relatedTasks.length > 0 && (
+        <div className="chat-task-rail">
+          {relatedTasks.map((task) => {
+            const owner = agentById(task.owner);
+            const status = statusStyle(task.status);
+            return (
+              <button
+                className="chat-task-chip"
+                key={task.id}
+                type="button"
+                title={`${task.title} · ${owner?.name ?? '未分配'} · ${task.progress}%`}
+                onClick={() => onOpenTask(task.id)}
+              >
+                <span className="priority-pill" style={priorityStyle(task.pr)}>
+                  {task.pr}
+                </span>
+                <span className="chat-task-chip-title">{task.title}</span>
+                <span
+                  className="status-pill"
+                  style={{ background: status.background, color: status.color }}
+                >
+                  {task.status}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="messages" ref={messagesRef}>
         {messages.map((message) => (
