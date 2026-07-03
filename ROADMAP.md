@@ -4,6 +4,8 @@
 
 AgentPulse 的第一阶段目标很清楚：做出一个普通人真的能用的 AI 公司工作台。用户不需要理解 Agent、Workflow、Tool Schema、Runtime，只需要像老板一样招聘员工、交代任务、查看进度、拍板关键决策。
 
+> ⚠️ **架构以 [AGENTS.md](AGENTS.md) 和 [docs/decisions/](docs/decisions/) 为准。** 本文件的产品愿景、MVP 边界、执行节奏方法论仍然有效；但「Agent 底层设计」一节中的 Runtime 选型已按 2026-07-03 的架构决策（Hermes 为唯一员工运行时基座，见 [ADR 0001](docs/decisions/0001-hermes-as-agent-runtime.md)）更正，不再是多 CLI 适配方案。
+
 ## 一句话目标
 
 让普通人可以用 AgentPulse 自己搭建一支 AI 员工团队，完成一人公司的日常工作。
@@ -163,17 +165,23 @@ AgentPulse 的第一阶段目标很清楚：做出一个普通人真的能用的
 
 第 15 天：LLM Provider 抽象
 
+> ⚠️ 已被 ADR 0001 取代：不自建 LLM Provider 抽象层，改为对接 Hermes 的 Runs API（见 [ARCHITECTURE.md](docs/ARCHITECTURE.md) §3.4）。
+
 - 定义统一接口：`complete()` 或 `stream()`
 - 先支持一个模型提供方。
 - 配置 API Key 和模型名。
 
 第 16 天：Agent Prompt 组装
 
+> ⚠️ 已被 ADR 0001 取代：系统 Prompt 的组装（人格+记忆+技能+工具）由 Hermes 的 `SOUL.md`/Memory/Skills 承担，AgentPulse 不自建 Prompt 组装逻辑；仍需要的是把"相关任务/最近上下文"这类业务上下文传给 Hermes（作为 Run 的输入）。
+
 - 系统 Prompt = 产品安全规则 + 公司上下文 + 员工职责 + 工具权限 + 输出格式。
 - 用户 Prompt = 当前消息 + 相关任务 + 最近上下文。
 - 输出先用自然语言，后面再加结构化格式。
 
 第 17 天：单 Agent 调用
+
+> ⚠️ 已被 ADR 0001 取代："调 LLM 得到回复"改为"调 Hermes Runs API 驱动对应 profile 执行"。
 
 - `POST /api/runs` 创建一次 Agent 执行。
 - Runner 加载 Agent、消息上下文、任务上下文。
@@ -187,6 +195,8 @@ AgentPulse 的第一阶段目标很清楚：做出一个普通人真的能用的
 - 每一步写日志，但不要暴露太多技术细节给普通用户。
 
 第 19 天：工具调用 Broker 雏形
+
+> ⚠️ 已被 ADR 0001 取代：不自建 Tool Broker，工具执行与风险分级由 Hermes 的 toolsets/skills 承担，AgentPulse 只需配置员工的工具权限并接住 Hermes 抛出的 `approval_required` 事件。
 
 - 定义 Tool Registry。
 - 第一批工具只做安全的本地工具：读资料库、写草稿、生成任务。
@@ -378,10 +388,8 @@ Agent 调用不是前端直接请求模型，而是后端创建一次 `Run`。
 -> 后端保存 Message
 -> Router 判断要不要触发 Agent
 -> 创建 Task 或 Run
--> Runner 加载 Agent 配置
--> PromptBuilder 组装上下文
--> LLMProvider 调模型
--> ToolBroker 处理工具调用
+-> Runner 通过 Hermes Runs API 驱动对应员工的 Hermes profile 执行
+   （人格组装/技能检索/工具调用都是 Hermes 内部完成，AgentPulse 不自建）
 -> 写入 RunStep
 -> 产出 Message / Task / Artifact
 -> WebSocket 推送给前端
@@ -397,6 +405,8 @@ GET  /api/runs/{id}/steps
 POST /api/approvals/{id}/approve
 POST /api/approvals/{id}/reject
 ```
+
+> 见 [ADR 0001](docs/decisions/0001-hermes-as-agent-runtime.md)：`Runner` 内部调用的是 Hermes 的 **Runs API**（`POST /v1/runs` → SSE `/events` → `/approval`）。
 
 ### 调用链路示例
 
@@ -414,8 +424,8 @@ POST /api/approvals/{id}/reject
 3. AgentRouter 选中 agent=阿澜
 4. TaskService 可选生成任务
 5. RunService 创建 run
-6. Runner 加载阿澜的 Prompt、部门、工具权限、最近消息
-7. LLMProvider 调用模型
+6. RunService 调用阿澜对应的 **Hermes profile**（其 SOUL.md 人格、Skills 技能、Memory 记忆已内置）
+7. 通过 Hermes Runs API 驱动执行，流式获取思考/工具调用/结果事件
 8. 返回投放计划
 9. MessageService 写入阿澜回复
 10. EventBus 推送给桌面端
@@ -424,99 +434,56 @@ POST /api/approvals/{id}/reject
 如果 Agent 想调用危险工具，例如“发送邮件”：
 
 ```text
-1. ToolBroker 识别工具风险等级为 high
-2. 创建 Approval
+1. Hermes 识别工具风险等级为 high，抛出 approval_required 事件（session/request_permission）
+2. AgentPulse 后端据此创建 Approval
 3. Run 状态变成 waiting_user
 4. 前端显示待拍板卡片
-5. 用户同意后继续执行
-6. 用户拒绝后 Agent 生成替代方案
+5. 用户同意后，后端调 Hermes 的 approval 接口放行继续执行
+6. 用户拒绝后，Agent 生成替代方案
 ```
 
-### Multica 的底层实现结论
+### Runtime = Hermes（已定案，见 ADR 0001）
 
-Multica 的核心思路不是自研一个“大脑”，而是把产品层 Agent 和底层运行时分开：
+> 本节原先参照 Multica 的"Server + 本地 Daemon + 多 CLI Backend Adapter"模式，规划了 Codex/Claude/Kimi/Hermes 多 Runtime 适配、分阶段接入的路线。**2026-07-03 已改为单一 Hermes 基座**，不做多 CLI 适配层——理由和完整调研见 [ADR 0001](docs/decisions/0001-hermes-as-agent-runtime.md) 与 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §3。Multica 的分层思路（Server 管状态/队列、执行细节下沉到运行时、统一事件流回传）仍有参考价值，但"多 CLI 适配"这部分不再适用于 AgentPulse。
+
+结论：
 
 ```text
-Server 负责任务队列
--> 本机 Daemon 注册可用 Runtime
--> Daemon 按 runtime_id 拉取任务
--> 准备隔离工作目录和上下文文件
--> 通过统一 Backend 接口启动不同 CLI/协议
--> 把流式消息、工具调用、最终结果回传 Server
+AgentPulse 自建的是 Orchestrator（协作编排层：群讨论、Task/Run/RunStep/Approval），
+不自建 Agent 协议 / 工具系统 / 多 Runtime 适配层。
+唯一的员工运行时是 Hermes：每个员工 = 一个 Hermes profile。
 ```
 
-它的关键点：
+原因：
 
-- `Agent` 是产品层身份：名字、职责、Prompt、Skills、MCP、模型配置。
-- `Runtime` 是执行能力：这台机器上可用的 `codex`、`claude`、`kimi`、`hermes` 等。
-- `Backend Adapter` 是适配器：把不同 CLI/协议统一成 `Execute(prompt, options) -> messages + result`。
-- `Daemon` 是本地执行器：负责拉任务、控并发、准备目录、注入环境变量、启动进程、回传结果。
-- `ExecEnv` 是隔离环境：每次任务有自己的 workdir、上下文文件、临时配置和技能文件。
-
-Multica 支持多种运行方式：
-
-```text
-codex      -> codex app-server --listen stdio://，走 Codex 自己的 JSON-RPC
-claude     -> claude --output-format stream-json，读 stdout 流式 JSON
-hermes     -> hermes acp，走 ACP JSON-RPC
-kimi       -> kimi acp，复用 ACP 协议
-opencode   -> opencode run --format json
-cursor 等  -> 各自 CLI 的流式/协议模式
-```
-
-所以 AgentPulse 不应该一开始“自建 Hermes”。更稳的路线是：自建编排层和适配层，底层先代理成熟 API/CLI。
-
-### AgentPulse 的 Runtime 取舍
-
-AgentPulse 的目标用户是普通人和一人公司，不是只做代码任务。所以底层要分两类 Runtime：
-
-| Runtime 类型 | 适合任务                     | 技术方案                               | 是否 MVP |
-| ------------ | ---------------------------- | -------------------------------------- | -------- |
-| `llm_api`    | 文案、运营、客服、销售、总结 | 后端直接调用 OpenAI-compatible API     | 必做     |
-| `local_cli`  | 写代码、改文件、跑命令       | 本机 daemon 代理 Codex/Kimi/Claude CLI | 第二阶段 |
-| `acp_cli`    | 标准化 CLI Agent 协议        | 适配 `hermes acp` / `kimi acp`         | 第二阶段 |
-| `browser`    | 网页操作、采集、后台录入     | Playwright/Browser automation          | 后置     |
-| `workflow`   | 固定流程自动化               | 自建 tool + approval 编排              | 后置     |
-
-推荐决策：
-
-```text
-第一阶段：不要自建 Hermes，也不要把 Codex CLI 当唯一底座
-第二阶段：实现自己的 Agent Runtime Adapter 接口
-第三阶段：增加本机 Daemon，优先接 Codex CLI 和 Kimi ACP
-第四阶段：再兼容 Claude Code、Hermes ACP、OpenCode 等
-```
-
-原因很简单：
-
-- 普通业务 Agent 用 API 更可控，成本、速度、上下文、权限都好管理。
-- Codex CLI/Claude Code 适合“能操作项目和文件”的执行型员工，但不适合作为所有业务员工的唯一运行时。
-- Hermes/ACP 的协议形态更干净，但生态和稳定性不应该成为 MVP 的前置依赖。
-- 自研 Hermes 等于同时做 Agent 协议、工具系统、会话系统、权限系统、模型适配，太重，会拖慢产品闭环。
+- 目标用户是普通人/一人公司（文案、运营、客服、销售…），不是写代码，工程师型 CLI（Codex/Claude Code）不是合适的默认基座。
+- Hermes 原生已具备本项目需要的能力：人格(SOUL.md)、技能(Skills)、记忆与学习循环、多模态路由、7×24 daemon、多实例(profiles)、跨实例编排(kanban)——不用我们逐个造。
+- 单基座让适配层从"养多个 CLI"简化为"对接一个 Hermes"，大幅降低复杂度。
 
 ### 建议的底层架构
 
-产品层不要直接绑定某个 CLI，而是拆成四层：
+产品层不直接绑定某个 CLI，拆成四层：
 
 ```text
 Agent Product Layer
   Agent / Department / Prompt / Skills / Tool Permissions
 
-Orchestration Layer
-  Task / Run / RunStep / Approval / Memory / Router
+Orchestration Layer（AgentPulse 自研）
+  群讨论协议 / Task / Run / RunStep / Approval / Router
 
-Runtime Adapter Layer
-  LLMBackend / CodexCLIBackend / ACPBackend / ClaudeCodeBackend
+Runtime Layer
+  HermesBackend（唯一运行时，通过 Hermes Runs API / ACP 驱动）
 
 Execution Layer
-  API call / local daemon / spawned CLI process / workdir / env / logs
+  Hermes gateway 进程（服务器常驻 daemon）/ profile 隔离 / HERMES_HOME
 ```
 
-核心抽象：
+核心抽象（对接 Hermes 而非自建多后端）：
 
 ```python
-class AgentBackend:
+class HermesBackend:
     async def run(self, context: RunContext) -> AsyncIterator[AgentEvent]:
+        # 内部：POST /v1/runs -> SSE GET /v1/runs/{id}/events -> 解析为 AgentEvent
         ...
 ```
 
@@ -525,35 +492,29 @@ class AgentBackend:
 ```text
 run_id
 workspace_id
-agent_id
+agent_id          # 对应哪个 Hermes profile
 conversation_id
 task_id
 prompt
-system_prompt
-model
-cwd
-tools
-mcp_config
 timeout
 resume_session_id
-env
 ```
 
-`AgentEvent` 至少包含：
+`AgentEvent` 至少包含（直接映射 Hermes Runs API / ACP 的事件语义）：
 
 ```text
 message
 thinking
 tool_call
 tool_result
-approval_required
+approval_required   # 对应 Hermes 的 session/request_permission
 status
 error
 final
 usage
 ```
 
-后端只认识统一事件，不关心底层是 OpenAI API、Codex CLI、Kimi ACP 还是 Claude Code。
+后端只认识这一套统一事件，因为底层永远是 Hermes——不再需要"不关心底层是哪个 CLI"这层抽象，因为已经没有多个 CLI 要抽象。
 
 ### Agent 如何创建到运行
 
@@ -572,74 +533,47 @@ usage
 用户发消息
 -> AgentRouter 选中 Agent
 -> RunService 创建 Run
--> RuntimeResolver 根据 agent.runtime_profile 选择 Backend
--> PromptBuilder 组装上下文
--> Backend.run() 产生事件流
+-> RuntimeResolver 根据 agent.runtime_profile 解析出对应的 Hermes profile
+-> HermesBackend.run() 驱动该 profile 执行，产生事件流（内部已含人格组装/工具调用）
 -> RunStepService 保存过程
 -> MessageService 写回结果
 ```
 
-`runtime_profile` 可以这样设计：
+`runtime_profile` 记录的是"这个员工对应哪个 Hermes profile、用什么模型"：
 
 ```json
 {
-  "id": "runtime_api_default",
-  "type": "llm_api",
-  "provider": "openai_compatible",
-  "model": "gpt-4.1-mini",
+  "id": "runtime_hermes_default",
+  "type": "hermes_profile",
+  "hermes_profile": "muobai",
+  "model": "deepseek-v3",
   "config": {
-    "base_url": "https://api.openai.com/v1"
+    "hermes_base_url": "http://hermes-gateway:8642"
   }
 }
 ```
 
-后面接 CLI 时再加：
+### Hermes 部署在哪里（见 ADR 0003）
 
-```json
-{
-  "id": "runtime_codex_local",
-  "type": "local_cli",
-  "provider": "codex",
-  "command": "codex",
-  "args": ["app-server", "--listen", "stdio://"],
-  "workdir_policy": "isolated"
-}
-```
+Hermes **不是"检测用户本机装了哪些 CLI"的本地 daemon**，而是**常驻在 AgentPulse 后端服务器上的 daemon**（Docker/systemd，headless）。后端 / 官网 / 后台 / 客户端可以分处不同机器，通过 API 互联；客户端只是窗口，关不关机不影响服务器上员工的工作。
 
-### 本机 Daemon 什么时候做
+后端负责：
 
-MVP 可以先不做 daemon，先让后端直接跑 `llm_api`。等产品主流程能跑通后，再做 daemon。
+- 为每个新员工创建一个 Hermes **profile**（独立 HERMES_HOME：人格/技能/记忆/模型隔离）。
+- 通过 Hermes 的 **Runs API** 驱动对应 profile 执行、接收流式事件、解审批门。
+- 用 **cron** 给员工编排"空闲即思考/学技能"（idea 中心，见 [ADR 0003](docs/decisions/0003-server-side-24x7-idea-center.md)），以及定时/常驻任务。
+- 需要多员工协同时，用 **`hermes kanban`** 做跨 profile 编排。
 
-Daemon 应该负责：
+不需要"检测本机 CLI、启动子进程、解析 stdout 协议"这类本地 daemon 逻辑——Hermes 自己就是一个可远程调用的服务。
 
-- 检测本机是否安装 `codex`、`kimi`、`claude`、`hermes`。
-- 注册本机 Runtime 能力。
-- 从后端领取 `cli` 类型任务。
-- 创建隔离 workdir。
-- 注入 `AGENTS.md`、`.agent_context`、环境变量和临时配置。
-- 启动 CLI 子进程。
-- 解析 stdout/stdin 协议或 JSON 流。
-- 回传消息、工具调用、结果、错误和 token 使用量。
-- 处理取消、超时、无响应 watchdog。
+### Runtime 集成优先级
 
-第一版 daemon 可以用 Python 实现，和当前 FastAPI 技术栈保持一致；等稳定后再考虑 Go/Rust。Python 足够做 subprocess、asyncio、WebSocket、JSON-RPC，开发速度更适合现在。
+建议按这个顺序做（取代原先的多 CLI 优先级列表）：
 
-### Runtime 优先级
-
-建议按这个顺序做：
-
-1. `LLMApiBackend`：普通业务员工先跑起来。
-2. `ToolBroker`：让 Agent 能创建任务、写资料库、生成交付物。
-3. `CodexCLIBackend`：给“技术员工/工程师员工”操作本地项目。
-4. `ACPBackend`：复用 `kimi acp` / `hermes acp` 这种更标准的协议。
-5. `ClaudeCodeBackend`：作为高级本地执行能力，但不要做成唯一依赖。
-
-结论：
-
-```text
-AgentPulse 自建的是 Orchestrator，不是自建 Hermes。
-底层运行时采用 Adapter 架构，先 API，后 CLI，最终多 Runtime 可插拔。
-```
+1. **Hermes 地基验证**：本机装 Hermes，建 2 个 profile，从后端用 HTTP Runs API 跑通"后端 → Hermes → 流式事件 → 审批 → 写回"。
+2. **群讨论协议**（AgentPulse 自研，照 AutoGen 骨架，见 [ADR 0002](docs/decisions/0002-self-built-group-discussion.md)）：拉群、发言路由、对齐门、共识 brief。
+3. **7×24 / idea 中心**：cron 编排空闲思考、kanban 编排多员工协同。
+4. **多模态**：按需给员工配 `auxiliary.vision` / STT，见 [ADR 0004](docs/decisions/0004-multimodal-via-hermes.md)。
 
 ### 后端模块建议
 
@@ -676,13 +610,13 @@ services/api/app/
     task_service.py
     run_service.py
   runtime/
-    router.py
-    runner.py
-    prompt_builder.py
-    llm_provider.py
-    tool_broker.py
+    router.py          # 决定这条消息该由哪个员工(profile)处理
+    runner.py          # 创建 Run，驱动对应 Hermes profile 执行
+    hermes_client.py   # 对接 Hermes Runs API(POST /v1/runs、SSE /events、/approval)
     approvals.py
 ```
+
+> 不再需要自建 `prompt_builder.py` / `llm_provider.py` / `tool_broker.py`——人格组装、模型调用、工具执行都由 Hermes 承担（见 [ADR 0001](docs/decisions/0001-hermes-as-agent-runtime.md)）。
 
 ### 第一版 Agent Runtime 不要做太复杂
 
@@ -706,6 +640,8 @@ Run queued
 - 队列和并发控制
 
 ## 数据模型草案
+
+> 注：`Agent` 这里的 `system_prompt`/`skills`/`tool_permissions` 是产品层展示用的元数据；实际专业能力由对应 **Hermes profile** 的 `SOUL.md`/Skills/toolsets 承载（见 [ADR 0001](docs/decisions/0001-hermes-as-agent-runtime.md)），落地时需加一个 `hermes_profile_id` 之类的字段做关联。
 
 ### Agent
 
@@ -755,11 +691,11 @@ Run queued
 
 ## 近期最重要的 5 个任务
 
-1. 桌面端消息和任务联动。
+1. 桌面端消息和任务联动。（已完成初版：审批卡片内联聊天 + 关联任务栏，见 CHANGELOG）
 2. 后端 Agent/Message/Task 数据模型。
 3. 从人才市场招募 Agent 的 API。
 4. 自定义创建 Agent 的 API。
-5. 单 Agent 真实调用模型并写回消息。
+5. ~~单 Agent 真实调用模型并写回消息~~ → **Hermes 地基验证**：本机 Hermes + 后端 HTTP Runs API 跑通"驱动 → 流式事件 → 审批 → 写回"（见 [ADR 0001](docs/decisions/0001-hermes-as-agent-runtime.md)）。
 
 ## 每周复盘模板
 
