@@ -96,6 +96,13 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 3. **相关文档过时了** → 同步更新(尤其本文件 §2/§3/§4)。
 4. **声明"完成"前先验证**：跑起来看真实行为(build/测试/截图)，别空口说做完了。
 
+### 文档如何随项目生长（对齐 AGENTS.md / Claude Code 官方实践）
+- **本文件保持精简可扫(目标 <200 行)**，是"入口 + 规则 + 索引"；厚重内容放 `docs/`。
+- **子项目专属规范** → 在该目录放**嵌套 `AGENTS.md`**(agents 就近读取，最近的生效)，如 `apps/desktop/AGENTS.md`、`services/api/AGENTS.md`、未来的 Hermes 集成目录。
+- **按文件类型/路径的专项规则** → 放 `.claude/rules/*.md`，可加 `paths:` frontmatter 只在动相关文件时加载(注：`.claude/` 已 gitignore，需要团队共享的规则要调整忽略策略)。
+- **可复用的多步流程** → 做成 skill 按需加载，而不是塞进本文件。
+- 目的：靠"就近嵌套 + 路径域规则 + skills"控制上下文，别把根 AGENTS.md 堆大。
+
 ---
 
 ## 6. 文档索引
