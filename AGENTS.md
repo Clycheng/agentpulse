@@ -74,7 +74,7 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 | 群讨论协议 | ❌ 未实现 | 自研(照 AutoGen) |
 | Hermes 集成 | 🟡 本机地基验证已完成(2026-07-05)：多 profile 隔离、HTTP Runs API + SSE 流式全链路跑通；发现 2 个必须处理的坑，见 [ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md) | 接入 `services/api`，成为真正的员工运行时 |
 
-**下一步**：把 ADR 0005 的两条硬需求(workdir 必须绝对路径隔离、讨论对齐门必须编排层强制而非 SOUL.md 自觉)落进 `services/api` 的 `Runner`/`HermesBackend` 实现里，再接入真实后端。
+**下一步（已认可的具体计划见 [ADR 0006](docs/decisions/0006-group-discussion-v1-first-slice.md)）**：先做**群讨论协议第一片**——讨论态状态机 + 共识 brief 数据对象 + **Task 创建强制携带 consensus_brief 的门控**（移除现有正则自动建任务），对齐判定 v1 用人工确认。这一片刻意不碰 Hermes、全在 `services/api` 内，可继续在当前临时执行层上建骨架。**动手前先看 ADR 0006 的"待解决"清单**（consensus_brief schema、编排模块位置、对齐信号形式等，须与项目所有者敲定，别猜）。之后再叠加多 agent 发言路由、以及接 Hermes 真执行（那一步须遵循 §5 隔离规矩另开会话）。
 
 ---
 
