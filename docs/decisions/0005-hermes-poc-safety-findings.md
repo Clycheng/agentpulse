@@ -10,6 +10,12 @@
 
 验证中发生了一起真实事故：测试"小秘遇到背景模糊的任务会不会反问"时（故意问了一句模糊的"帮我搞一下下个月的推广"），Hermes **没有反问，而是编造了一个不存在的"房产中介行业"背景，自己生成了 10 个文件，并把它们真实写进了 `/Users/liuxiajiang/Desktop/unitpulse`（另一个真实项目 UnitPulse 的主仓库根目录，不是本次验证用的隔离沙盒）**。已确认这些文件此前从未存在于 git 历史（`??` 全新未跟踪），已全部删除，UnitPulse 仓库恢复干净；本次事故未波及任何 AgentPulse 相关目录。
 
+## ⚠️ 最重要的一条：AgentPulse 与 UnitPulse 必须零关联，这不是"技术小问题"
+
+项目所有者对这次事故的定性很明确："这个 agentpulse 跟 unitpulse 没有一丁点关系，他们可千万不能互相扯到一起。" **这不能被简化成"Hermes 有个配置默认值不安全，改一下就好"——根本问题是：做本次验证的会话，其执行环境（shell 的当前工作目录）本身就位于 UnitPulse 的一个 git worktree 里。** 只要 AgentPulse 相关的真实进程/文件系统操作是在这种环境里跑的，无论具体是哪个工具、哪个配置项出问题，两个项目就有物理上被扯到一起的风险——Hermes 的 `terminal.working_dir` 只是这次具体暴露风险的那个点，不是风险的全部。
+
+**结论**：以后任何会真实执行进程、真实写文件系统的 AgentPulse 相关操作（起 Hermes、装依赖、跑测试脚本等），执行时的 ambient 工作目录绝不能位于 UnitPulse 仓库/worktree 内——理想情况下应该在 cwd 直接锚定在 AgentPulse 自己目录（`/Users/liuxiajiang/Desktop/code/agentpulse`）的会话里做。这是比下面"设置绝对路径 workdir"更高优先级、更不可妥协的一条原则。
+
 ## 发现一：Hermes 的 `terminal.working_dir` 默认是相对路径 `.`，不能信任
 
 `hermes config show` 显示 `Terminal → Working dir: .`——这是相对路径，实际解析依赖**调用 Hermes 进程时的操作系统当前工作目录**，而不是一个声明式的、与调用环境无关的绝对路径。当后台/编程化方式驱动 Hermes（尤其是异步/后台执行）时，这个"环境当前目录"完全可能不是调用方以为的那个目录——本次事故就是因为如此，导致 agent 的文件写入工具在错误的真实项目目录里执行。

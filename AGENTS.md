@@ -86,6 +86,11 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 - 在 `main` 分支上开发(项目所有者指定)。
 - commit message 用**英文**、祈使句(与现有历史一致)。
 
+### 与 UnitPulse 零关联 —— ⚠️ 硬性原则，不是配置细节
+- **AgentPulse 和 UnitPulse(本机另一个真实项目)必须零关联**——不只是 git 身份，执行环境、文件系统操作也不能有任何交集。项目所有者原话："他们可千万不能互相扯到一起。"
+- **任何会真实执行进程/写文件系统的操作**(起 Hermes、装依赖、跑测试脚本…)，执行时的 ambient 工作目录**绝不能位于 UnitPulse 仓库/worktree 内**——参见 [ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md)：2026-07-05 曾因会话 cwd 在 UnitPulse worktree 里，导致 Hermes 把测试文件写进了 UnitPulse 主仓库(已清理，无损失，但被定性为不可接受的结构性风险，不是"下次小心点"能揭过的)。
+- 理想做法：这类操作应在 cwd 直接锚定在 `/Users/liuxiajiang/Desktop/code/agentpulse` 的会话里做；任何第三方 agent runtime 的 workdir 配置必须显式设为绝对路径，不能信任默认相对路径。
+
 ### 动手前
 - 读 `AGENTS.md` + `docs/ARCHITECTURE.md` + `docs/decisions/`。
 - 任何偏离 §1/§2 方向的想法，**先跟项目所有者确认再动手**。
