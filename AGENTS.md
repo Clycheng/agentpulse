@@ -72,9 +72,9 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 | `services/api` | 直连 DeepSeek 回消息 + 正则建任务 + 任务记账(**套皮聊天，非真 agent**) | 协作编排层 + 调 Hermes profile 执行 |
 | `apps/desktop` | 单文件原型(聊天/员工/任务/审批 UI，已接后端) | 保留，渐进接入群讨论 + Hermes |
 | 群讨论协议 | ❌ 未实现 | 自研(照 AutoGen) |
-| Hermes 集成 | ❌ 未开始 | 员工运行时 |
+| Hermes 集成 | 🟡 本机地基验证已完成(2026-07-05)：多 profile 隔离、HTTP Runs API + SSE 流式全链路跑通；发现 2 个必须处理的坑，见 [ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md) | 接入 `services/api`，成为真正的员工运行时 |
 
-**建议的第一步(地基验证)**：本机装 Hermes → 建 2 个 profile → 从后端用 HTTP Runs API 跑通「后端 → Hermes → 流式事件 → 审批 → 写回」。这条链路通了，整个路线才算落地。
+**下一步**：把 ADR 0005 的两条硬需求(workdir 必须绝对路径隔离、讨论对齐门必须编排层强制而非 SOUL.md 自觉)落进 `services/api` 的 `Runner`/`HermesBackend` 实现里，再接入真实后端。
 
 ---
 

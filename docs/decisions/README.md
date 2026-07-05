@@ -39,3 +39,4 @@
 - [0002](0002-self-built-group-discussion.md) — 自研群讨论协作层（照 AutoGen 骨架）
 - [0003](0003-server-side-24x7-idea-center.md) — 服务端 7×24 部署 + 无 idle + idea 中心
 - [0004](0004-multimodal-via-hermes.md) — 多模态经 Hermes 辅助模型处理（DeepSeek 文本主模型）
+- [0005](0005-hermes-poc-safety-findings.md) — Hermes 地基验证发现：workdir 隔离是硬需求，讨论对齐门不能只靠人格指令

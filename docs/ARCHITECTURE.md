@@ -99,6 +99,14 @@ Hermes 能力感知**自动路由**：主模型能看图就原生看；主模型
 - 服务端设计：官方 Docker 镜像 `nousresearch/hermes-agent`，$5 VPS 起，headless Linux，远程可达(消息平台 / API 端口，用 `API_SERVER_KEY` 保护)。
 - 单实例footprint：约 1 vCPU/1GB 起(无浏览器)，推荐 2 vCPU/2–4GB。LLM 是远程调用。多实例受 RAM/CPU + 速率限制约束。
 
+### 3.10 地基验证结论（实测于 2026-07-05，见 [ADR 0005](decisions/0005-hermes-poc-safety-findings.md)）
+本机跑通了 pip 装 Hermes → 建多个 profile → HTTP Runs API(`POST /v1/runs` → SSE `/events` → `run.completed`)驱动的完整链路，DeepSeek 作主模型正常工作，不同 profile 的 SOUL.md 人格互相隔离生效。同时发现两条必须遵守的硬性要求：
+
+- **⚠️ `terminal.working_dir` 默认是相对路径 `.`，绝不能信任默认值。** 编程化/后台驱动 Hermes 时，必须显式把它设成绝对路径的隔离目录(如 `<server_data_root>/runs/<run_id>/`)，否则 agent 的文件操作可能落到调用方进程当时的任意 cwd 上——实测中曾因此把生成内容写进了一个完全无关的真实项目仓库。启动任何 Run 前，创建并绑定绝对路径 workdir 是不可跳过的前置步骤。
+- **⚠️ SOUL.md 里的硬性规则不保证被遵守。** 实测中"背景不清楚必须先反问"这条规则被完全无视，agent 编造背景直接开工。这不是 bug，是"人格指令是引导不是强制"的固有性质(与 CLAUDE.md/AGENTS.md 对 Claude 的效力一样)。**结论：§4 群讨论协议的"讨论对齐后才能建 Task/Run"必须是编排层的结构性强制(如 Task/Run 创建 API 要求携带已确认的共识 brief，缺失即拒绝)，不能只在 SOUL.md 里写一条规则指望 agent 自觉。**
+
+审批门(`approval_required` / `/v1/runs/{id}/approval`)本轮未触发验证——本地文件写入默认未被 Hermes 归为高风险，需要接一个明确高风险的工具才能验证这条链路，留作后续。
+
 ## 4. 群讨论协议（自研 · 照 AutoGen 骨架）
 
 Hermes 不做多 agent 围坐讨论；Multica 的"协作"只是 leader 派活(delegation)。**所以群讨论是 AgentPulse 自研的核心。** AutoGen 已验证需要哪些零件：
