@@ -9,6 +9,7 @@
 1. 三个仓库里有 **两个已经自带官方 Hermes 集成**（`HKUDS/CLI-Anything` 的 `hermes-skill`、`msitarzewski/agency-agents` 的 `integrations/hermes/`），说明这条"给 Hermes 员工接第三方能力"的路子在社区已经跑通，不是我们要发明新协议。
 2. 三个仓库分别对应三种不同的集成方式，不能一刀切：**CLI-Anything → 工具接入**（让员工现学现用外部软件）；**agency-agents → 人格/技能素材**（生成 SOUL.md 和 SKILL.md 的原料）；**anbeime/skill → 仅作发现索引**，因为授权状态不清晰，不能整仓库拉取。
 3. 本文是**调研记录，不是架构决策**——不新增 ADR，待真正着手实现某一条时再决定是否需要 ADR（例如"是否引入 CLI-Anything 作为标准工具"可能够格立一条 ADR）。
+4. **2026-07-04 项目所有者拍板：暂不集成 `anbeime/skill`**（原因见下方该仓库小节：授权状态不清晰）。当前只推进 CLI-Anything 和 agency-agents 两条。若后续想引用它里面的单个技能（如 Anthropic 原生 docx/xlsx/pdf/pptx），需重新评估并单独审计对应子技能的 LICENSE，而不是恢复整体集成。
 
 ## 一、HKUDS/CLI-Anything —— ⭐ 强推荐，已有官方 Hermes 集成
 
@@ -63,6 +64,8 @@
 
 ## 三、anbeime/skill —— 🟡 谨慎使用，仅做"发现索引"，不整体采纳
 
+> ⚠️ **2026-07-04 已拍板暂不集成**（见文首结论 4）。以下分析保留供以后需要单独引用某个子技能时参考，不代表当前推进计划的一部分。
+
 **是什么**：一个 AI Agent 技能聚合站/商店（"技能商店"），Python 爬虫每 24 小时从上游 `VoltAgent/awesome-agent-skills` 拉取同步、发布到 Vercel 站点。243 个技能：182 个"官方"（纯元数据/链接，指向 Anthropic/Vercel/Cloudflare/Stripe 等上游）+ 61 个"本地"（仓库里真的 vendor 了内容）。
 
 **格式**：抽查过的两个 SKILL.md 样本确实是 agentskills.io 风格（frontmatter + 任务目标/操作步骤），但字段命名有出入（`allowed-tools` 而非标准的 `triggers`，多了个非标准 `dependency` 块），且未逐一确认 61 个本地技能是否都有 `pitfalls`/`verification` 部分——这是引入前要补的缺口，不能假设都齐全。
@@ -87,8 +90,8 @@
 
 **(B) 技能包（SKILL.md）—— 教会员工标准作业流程**
 - [ ] 装 `cli-hub-meta-skill`（发现/安装/preflight 循环）
-- [ ] 从 anbeime/skill 里逐一审计后单独 fork：Anthropic 原生 `pptx`/`xlsx`/`pdf`/`docx`、`paper-analysis-assistant`、`stock-analysis`
 - [ ] 从 agency-agents 拆出各角色的"核心能力/框架/checklist"部分，转成对应员工的 SKILL.md（如 CFO 年度规划、销售 MEDDPICC 流程）
+- ~~从 anbeime/skill 里逐一审计后单独 fork~~ —— 暂不推进（见文首结论 4），需要文档/研究类技能时再重新评估
 
 **(C) 人格素材 —— SOUL.md 生成参考**
 - [ ] 老板秘书 SOUL.md ← `agency-agents: specialized-chief-of-staff.md`
@@ -103,7 +106,7 @@
 1. **CLI-Anything 的 `cli-hub` 工具接入**——ROI 最高、集成成本最低（对方已做好 Hermes 集成），一次接入立刻获得约 150 项能力。
 2. **agency-agents 人格素材 → SOUL.md**——直接提升"招募员工"时生成的人格质量，老板秘书/财务/销售这几个角色现成度很高，能明显加速。
 3. **agency-agents 的角色能力 → SKILL.md 拆分**——需要人工拆分身份/流程，工作量更大，放第二批。
-4. **anbeime/skill 的逐一审计式引用**——优先级最低，且每次引入都要过 license/schema 审查，量力而行，不追求覆盖它的全部 61 个本地技能。
+4. ~~anbeime/skill 的逐一审计式引用~~——暂不推进（2026-07-04 拍板，见文首结论 4）。
 
 ## 风险和待验证项
 
