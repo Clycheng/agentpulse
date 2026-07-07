@@ -309,6 +309,25 @@ def init_postgres(conn: Database) -> None:
           created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS consensus_briefs (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          discussion_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'confirmed', 'rejected', 'superseded')),
+          goal TEXT NOT NULL,
+          scope TEXT NOT NULL DEFAULT '',
+          constraints TEXT NOT NULL DEFAULT '',
+          success_criteria TEXT NOT NULL DEFAULT '',
+          owner_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          participant_agent_ids_json TEXT NOT NULL DEFAULT '[]',
+          created_by_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          supersedes_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
+          derived_from_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL,
+          confirmed_at TEXT,
+          confirmed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
+        );
+
         CREATE TABLE IF NOT EXISTS runs (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -331,6 +350,8 @@ def init_postgres(conn: Database) -> None:
     ensure_column(conn, "tasks", "description", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "tasks", "due_date", "TEXT")
     ensure_column(conn, "tasks", "parent_task_id", "TEXT REFERENCES tasks(id) ON DELETE SET NULL")
+    ensure_column(conn, "tasks", "consensus_brief_id", "TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL")
+    ensure_column(conn, "conversations", "discussion_status", "TEXT NOT NULL DEFAULT 'discussing' CHECK(discussion_status IN ('discussing', 'aligned'))")
 
 
 def init_sqlite(conn: Database) -> None:
@@ -512,6 +533,25 @@ def init_sqlite(conn: Database) -> None:
           created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS consensus_briefs (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          discussion_conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'confirmed', 'rejected', 'superseded')),
+          goal TEXT NOT NULL,
+          scope TEXT NOT NULL DEFAULT '',
+          constraints TEXT NOT NULL DEFAULT '',
+          success_criteria TEXT NOT NULL DEFAULT '',
+          owner_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          participant_agent_ids_json TEXT NOT NULL DEFAULT '[]',
+          created_by_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          supersedes_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
+          derived_from_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL,
+          confirmed_at TEXT,
+          confirmed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
+        );
+
         CREATE TABLE IF NOT EXISTS runs (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -534,6 +574,8 @@ def init_sqlite(conn: Database) -> None:
     ensure_column(conn, "tasks", "description", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "tasks", "due_date", "TEXT")
     ensure_column(conn, "tasks", "parent_task_id", "TEXT REFERENCES tasks(id) ON DELETE SET NULL")
+    ensure_column(conn, "tasks", "consensus_brief_id", "TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL")
+    ensure_column(conn, "conversations", "discussion_status", "TEXT NOT NULL DEFAULT 'discussing' CHECK(discussion_status IN ('discussing', 'aligned'))")
 
 
 def ensure_column(

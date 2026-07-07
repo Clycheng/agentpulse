@@ -1147,6 +1147,82 @@ button {
   gap: 8px;
 }
 
+/* Brief card styles (ADR 0006) */
+.brief-card {
+  flex-shrink: 0;
+  overflow: hidden;
+  margin: 8px 0;
+  border: 1px solid #3b82f6;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.brief-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.brief-card-icon {
+  font-size: 18px;
+}
+
+.brief-card header strong {
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.brief-card-body {
+  padding: 12px 14px;
+}
+
+.brief-card-body section {
+  margin-bottom: 10px;
+}
+
+.brief-card-body section:last-child {
+  margin-bottom: 0;
+}
+
+.brief-card-body section strong {
+  display: inline;
+  color: var(--muted);
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+.brief-card-body section p {
+  display: inline;
+  color: var(--text-strong);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.brief-card-owner {
+  border: none;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.brief-card-owner:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.brief-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
 .message-row {
   display: flex;
   padding: 9px 0;

@@ -39,7 +39,6 @@ from app.services.workspace import (
     create_task,
     ensure_department,
     extract_recruit_intent,
-    extract_task_intent,
     get_bootstrap,
     get_workspace_for_user,
     load_knowledge_context,
@@ -322,6 +321,7 @@ def create_workspace_task(
             conversation_id=payload.conversation_id,
             due_date=payload.due_date,
             parent_task_id=payload.parent_task_id,
+            consensus_brief_id=payload.consensus_brief_id,  # Gate condition
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -442,29 +442,9 @@ async def send_message(
                 f"{recruit_intent['department_name']}。你可以在员工列表或私聊里继续配置他。"
             ),
         )
-    task_intent = None if recruit_intent is not None else extract_task_intent(payload.content)
-    if task_intent is not None:
-        created_task = create_task(
-            conn,
-            workspace_id=workspace["id"],
-            title=task_intent["title"],
-            description=task_intent["description"],
-            priority=task_intent["priority"],
-            owner_agent_id=task_owner["id"],
-            conversation_id=conversation_id,
-            status="进行中",
-            progress=10,
-        )
-        add_task_event(
-            conn,
-            workspace_id=workspace["id"],
-            task_id=created_task["id"],
-            kind="task_created_from_chat",
-            title="由聊天自动生成",
-            content=payload.content,
-            conversation_id=conversation_id,
-            agent_id=task_owner["id"],
-        )
+    # NOTE: Auto-task creation from chat intent has been removed.
+    # Task creation now requires a confirmed consensus_brief (see ADR 0006).
+    created_task = None
     agent_messages = []
     for agent in reply_agents:
         try:

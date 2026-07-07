@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.admin import router as admin_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.briefs import router as briefs_router
 from app.api.routes.health import router as health_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.workspace import router as workspace_router
@@ -25,6 +26,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix="/api")
     app.include_router(admin_router, prefix="/api")
     app.include_router(workspace_router, prefix="/api")
+    app.include_router(briefs_router, prefix="/api")
     app.include_router(runs_router, prefix="/api")
 
     @app.on_event("startup")

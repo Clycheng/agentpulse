@@ -37,6 +37,34 @@ def register_user(client: TestClient) -> dict:
     return response.json()
 
 
+def create_confirmed_brief(
+    client: TestClient,
+    token: str,
+    conversation_id: str,
+    agent_id: str,
+    goal: str,
+) -> dict:
+    """Helper: create a draft brief and confirm it for task creation."""
+    brief = client.post(
+        "/api/briefs",
+        headers=auth_header(token),
+        json={
+            "discussion_conversation_id": conversation_id,
+            "goal": goal,
+            "created_by_agent_id": agent_id,
+        },
+    )
+    assert brief.status_code == 200
+    brief_id = brief.json()["id"]
+
+    confirmed = client.post(
+        f"/api/briefs/{brief_id}/confirm",
+        headers=auth_header(token),
+    )
+    assert confirmed.status_code == 200
+    return confirmed.json()
+
+
 def test_register_bootstrap_creates_real_workspace_foundation(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
 
@@ -104,8 +132,8 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
     async def fake_complete(self, payload):
         assert payload.agent.name == "小秘"
         assert payload.messages[-1].content == "帮我拆一下今天的推进计划"
-        assert payload.related_tasks
-        assert payload.related_tasks[0].title == "拆一下今天的推进计划"
+        # NOTE: Auto-task creation has been removed (ADR 0006)
+        # related_tasks is now empty unless explicitly created
         return LlmChatResponse(
             reply="先做三件事：确认目标、拆任务、安排负责人。",
             provider="deepseek",
@@ -130,6 +158,7 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
 
     bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
     secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]  # 小秘
     send = client.post(
         f"/api/conversations/{secretary_chat['id']}/messages",
         headers=auth_header(token),
@@ -142,24 +171,18 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
     assert payload["agent_message"]["content"] == "先做三件事：确认目标、拆任务、安排负责人。"
     assert payload["agent_message"]["provider"] == "deepseek"
     assert payload["agent_message"]["model"] == "deepseek-v4-flash"
-    assert payload["created_task"]["title"] == "拆一下今天的推进计划"
+    # NOTE: Auto-task creation removed (ADR 0006) - created_task is now None
+    assert payload["created_task"] is None
 
     reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
     messages = reloaded["messages_by_conversation"][secretary_chat["id"]]
     assert [message["sender_type"] for message in messages] == [
         "agent",
         "user",
-        "system",
         "agent",
     ]
-    assert "已创建任务：拆一下今天的推进计划" in messages[2]["content"]
     assert messages[-1]["provider"] == "deepseek"
     assert messages[-1]["model"] == "deepseek-v4-flash"
-    task = reloaded["tasks"][0]
-    assert task["title"] == "拆一下今天的推进计划"
-    assert task["conversation_id"] == secretary_chat["id"]
-    events = reloaded["task_events_by_task"][task["id"]]
-    assert any(event["kind"] == "task_created_from_chat" for event in events)
 
 
 def test_knowledge_source_is_injected_into_agent_context(tmp_path, monkeypatch):
@@ -426,6 +449,15 @@ def test_group_chat_returns_multiple_agent_replies_when_not_mentioned(
             "prompt": "你负责把需求转成内容选题和文案计划。",
         },
     ).json()
+
+    # Create brief first (ADR 0006 gate)
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]
+    brief = create_confirmed_brief(
+        client, token, secretary_chat["id"], secretary_agent["id"], "本周增长打法"
+    )
+
     task = client.post(
         "/api/tasks",
         headers=auth_header(token),
@@ -436,6 +468,7 @@ def test_group_chat_returns_multiple_agent_replies_when_not_mentioned(
             "owner_agent_id": analyst["id"],
             "status": "进行中",
             "progress": 20,
+            "consensus_brief_id": brief["id"],
         },
     ).json()
     group = client.post(
@@ -532,6 +565,13 @@ def test_task_api_updates_and_injects_related_context(tmp_path, monkeypatch):
         for chat in bootstrap["conversations"]
         if chat["kind"] == "dm" and chat["agent_id"] == agent["id"]
     )
+    secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]
+
+    # Create brief first (ADR 0006 gate)
+    brief = create_confirmed_brief(
+        client, token, secretary_chat["id"], secretary_agent["id"], "官网首屏文案"
+    )
 
     task = client.post(
         "/api/tasks",
@@ -544,6 +584,7 @@ def test_task_api_updates_and_injects_related_context(tmp_path, monkeypatch):
             "conversation_id": dm_chat["id"],
             "status": "进行中",
             "progress": 20,
+            "consensus_brief_id": brief["id"],
         },
     )
     assert task.status_code == 200
@@ -645,6 +686,14 @@ def test_rejected_approval_creates_agent_lesson_experience(tmp_path, monkeypatch
         for chat in bootstrap["conversations"]
         if chat["kind"] == "dm" and chat["agent_id"] == agent["id"]
     )
+    secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]
+
+    # Create brief first (ADR 0006 gate)
+    brief = create_confirmed_brief(
+        client, token, secretary_chat["id"], secretary_agent["id"], "整理报价策略"
+    )
+
     task = client.post(
         "/api/tasks",
         headers=auth_header(token),
@@ -656,6 +705,7 @@ def test_rejected_approval_creates_agent_lesson_experience(tmp_path, monkeypatch
             "conversation_id": dm_chat["id"],
             "status": "进行中",
             "progress": 40,
+            "consensus_brief_id": brief["id"],
         },
     )
     assert task.status_code == 200
@@ -704,6 +754,15 @@ def test_unassigned_task_enters_pool_and_can_be_claimed(tmp_path, monkeypatch):
         },
     ).json()
 
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]
+
+    # Create brief first (ADR 0006 gate)
+    brief = create_confirmed_brief(
+        client, token, secretary_chat["id"], secretary_agent["id"], "整理本周运营事项"
+    )
+
     task = client.post(
         "/api/tasks",
         headers=auth_header(token),
@@ -713,6 +772,7 @@ def test_unassigned_task_enters_pool_and_can_be_claimed(tmp_path, monkeypatch):
             "priority": "P2",
             "status": "进行中",
             "progress": 10,
+            "consensus_brief_id": brief["id"],
         },
     )
     assert task.status_code == 200
@@ -763,6 +823,15 @@ def test_task_pool_suggests_matching_agent_for_unassigned_task(tmp_path, monkeyp
         },
     )
 
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]
+
+    # Create brief first (ADR 0006 gate)
+    brief = create_confirmed_brief(
+        client, token, secretary_chat["id"], secretary_agent["id"], "写官网首页文案"
+    )
+
     task = client.post(
         "/api/tasks",
         headers=auth_header(token),
@@ -770,6 +839,7 @@ def test_task_pool_suggests_matching_agent_for_unassigned_task(tmp_path, monkeyp
             "title": "写官网首页文案",
             "description": "输出一版官网首屏内容和价值主张。",
             "priority": "P1",
+            "consensus_brief_id": brief["id"],
         },
     ).json()
     reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()

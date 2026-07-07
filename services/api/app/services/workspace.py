@@ -12,10 +12,10 @@ from app.services.templates import get_template, list_agent_templates, list_tale
 DEFAULT_DEPARTMENTS = ["老板办公室"]
 HUES = [262, 230, 300, 140, 55, 20, 330]
 GLYPHS = ["✦", "▲", "◆", "◗", "✱", "◍", "◉"]
-TASK_INTENT_PATTERNS = [
-    r"^(帮我|请你|麻烦|安排|创建任务|新建任务|给我)(.+)",
-    r"(制定|生成|整理|写|做|分析|准备|规划|拆解)(.+)",
-]
+
+# NOTE: TASK_INTENT_PATTERNS and extract_task_intent have been removed.
+# Task creation now requires a confirmed consensus_brief (see ADR 0006).
+# Auto-task creation from chat intent is no longer supported.
 
 RECRUIT_INTENT_PATTERNS = [
     r"(?:帮我|给我|请你|麻烦)?(?:招|招聘|创建|新建|配置|生成)(?:一个|一名|个)?(?P<role>[^，。！？\n]{2,30}?)(?:员工|智能体|agent|Agent)?$",
@@ -641,7 +641,24 @@ def create_task(
     conversation_id: str | None = None,
     due_date: str | None = None,
     parent_task_id: str | None = None,
+    consensus_brief_id: str | None = None,  # Gate condition
 ) -> Row:
+    from app.orchestration.gate import (
+        validate_task_creation_gate,
+        TaskCreationGateError,
+    )
+
+    # Gate validation: must have confirmed brief (unless sub-task inherits from parent)
+    try:
+        validate_task_creation_gate(
+            conn,
+            workspace_id=workspace_id,
+            consensus_brief_id=consensus_brief_id,
+            parent_task_id=parent_task_id,
+        )
+    except TaskCreationGateError as e:
+        raise ValueError(str(e))
+
     normalized_status = normalize_task_status(status)
     if not owner_agent_id and status == "进行中":
         normalized_status = "待认领"
@@ -659,9 +676,9 @@ def create_task(
         INSERT INTO tasks (
           id, workspace_id, title, description, priority, owner_agent_id,
           status, progress, conversation_id, due_date, parent_task_id,
-          created_at, updated_at
+          consensus_brief_id, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             task_id,
@@ -675,6 +692,7 @@ def create_task(
             conversation_id,
             due_date,
             parent_task_id,
+            consensus_brief_id,
             created_at,
             created_at,
         ),
@@ -993,44 +1011,8 @@ def progress_for_status(status: str, progress: int) -> int:
     return bounded
 
 
-def extract_task_intent(content: str) -> dict | None:
-    text = " ".join(content.strip().split())
-    if len(text) < 6:
-        return None
-    if text.startswith("/task "):
-        title = text.removeprefix("/task ").strip()
-        return task_intent_payload(title, content)
-    if text.startswith("创建任务：") or text.startswith("创建任务:"):
-        title = re.sub(r"^创建任务[：:]\s*", "", text).strip()
-        return task_intent_payload(title, content)
-
-    has_task_word = any(
-        keyword in text
-        for keyword in [
-            "帮我",
-            "请你",
-            "安排",
-            "创建任务",
-            "新建任务",
-            "制定",
-            "生成",
-            "整理",
-            "分析",
-            "准备",
-            "规划",
-            "拆解",
-        ]
-    )
-    if not has_task_word:
-        return None
-    if text.endswith("吗") or text.endswith("？") or text.endswith("?"):
-        return None
-
-    for pattern in TASK_INTENT_PATTERNS:
-        if re.search(pattern, text):
-            return task_intent_payload(text, content)
-    return None
-
+# NOTE: extract_task_intent has been removed (see ADR 0006).
+# Task creation now requires a confirmed consensus_brief.
 
 def extract_recruit_intent(content: str) -> dict | None:
     text = content.strip()
@@ -1095,18 +1077,7 @@ def extract_recruit_intent(content: str) -> dict | None:
     }
 
 
-def task_intent_payload(title: str, original_content: str) -> dict | None:
-    normalized = re.sub(r"^(帮我|请你|麻烦|给我|安排一下|安排|创建任务|新建任务)[，,\s]*", "", title)
-    normalized = normalized.strip(" ：:，,。")
-    if len(normalized) < 4:
-        return None
-    if len(normalized) > 80:
-        normalized = f"{normalized[:77]}..."
-    return {
-        "title": normalized,
-        "description": original_content.strip(),
-        "priority": "P1" if any(word in original_content for word in ["紧急", "马上", "今天", "尽快"]) else "P2",
-    }
+# NOTE: task_intent_payload has been removed (see ADR 0006).
 
 
 def get_bootstrap(conn: Database, workspace_id: str) -> dict:

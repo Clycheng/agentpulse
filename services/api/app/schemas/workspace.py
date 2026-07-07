@@ -209,6 +209,7 @@ class CreateTaskRequest(BaseModel):
     conversation_id: str | None = None
     due_date: str | None = Field(default=None, max_length=40)
     parent_task_id: str | None = None
+    consensus_brief_id: str | None = None  # Gate condition: must be confirmed brief
 
 
 class UpdateTaskRequest(BaseModel):

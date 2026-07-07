@@ -898,6 +898,74 @@ function App() {
     }
   };
 
+  // Brief API handlers (ADR 0006)
+  const confirmBrief = async (briefId: string): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      const confirmed = await apiRequest<{
+        id: string;
+        status: string;
+        goal: string;
+      }>(`/briefs/${briefId}/confirm`, {
+        token,
+        method: 'POST',
+      });
+      showToast(`已确认共识：${confirmed.goal}`);
+      await loadBootstrap();
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '确认失败');
+      return false;
+    }
+  };
+
+  const rejectBrief = async (briefId: string): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      const rejected = await apiRequest<{
+        id: string;
+        status: string;
+        goal: string;
+      }>(`/briefs/${briefId}/reject`, {
+        token,
+        method: 'POST',
+      });
+      showToast(`已拒绝，继续讨论：${rejected.goal}`);
+      await loadBootstrap();
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '拒绝失败');
+      return false;
+    }
+  };
+
+  const createTaskFromBrief = async (
+    briefId: string,
+    title: string,
+    ownerId?: string,
+  ): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      const task = await apiRequest<{ id: string; title: string }>(`/tasks`, {
+        token,
+        method: 'POST',
+        body: JSON.stringify({
+          title,
+          consensus_brief_id: briefId,
+          owner_agent_id: ownerId ?? null,
+          status: '进行中',
+          progress: 10,
+        }),
+      });
+      showToast(`已创建任务：${task.title}`);
+      await loadBootstrap();
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '创建任务失败');
+      return false;
+    }
+  };
+
   useEffect(() => {
     localStorage.setItem('agentpulse_theme_mode', themeMode);
   }, [themeMode]);
@@ -1584,6 +1652,9 @@ function App() {
               activeChat.kind === 'group' ? openInviteMembers : undefined
             }
             onOpenAgent={(id) => setDetailId(id)}
+            onConfirmBrief={confirmBrief}
+            onRejectBrief={rejectBrief}
+            onCreateTaskFromBrief={createTaskFromBrief}
           />
         )}
 
@@ -2272,6 +2343,9 @@ function ChatView({
   onOpenTask,
   onInviteMembers,
   onOpenAgent,
+  onConfirmBrief,
+  onRejectBrief,
+  onCreateTaskFromBrief,
 }: {
   title: string;
   meta: string;
@@ -2295,6 +2369,13 @@ function ChatView({
   onOpenTask: (taskId: string) => void;
   onInviteMembers?: () => void;
   onOpenAgent: (id: string) => void;
+  onConfirmBrief?: (briefId: string) => Promise<boolean>;
+  onRejectBrief?: (briefId: string) => Promise<boolean>;
+  onCreateTaskFromBrief?: (
+    briefId: string,
+    title: string,
+    ownerId?: string,
+  ) => Promise<boolean>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -2443,6 +2524,9 @@ function ChatView({
             agent={agentById(message.from)}
             onOpenAgent={onOpenAgent}
             agents={agents}
+            onConfirmBrief={onConfirmBrief}
+            onRejectBrief={onRejectBrief}
+            onCreateTaskFromBrief={onCreateTaskFromBrief}
           />
         ))}
         {approvals.map(({ approval, task }) => {
@@ -2598,12 +2682,119 @@ function MessageItem({
   agent,
   agents,
   onOpenAgent,
+  onConfirmBrief,
+  onRejectBrief,
+  onCreateTaskFromBrief,
 }: {
   message: Message;
   agent?: Agent;
   agents: Agent[];
   onOpenAgent: (id: string) => void;
+  onConfirmBrief?: (briefId: string) => Promise<boolean>;
+  onRejectBrief?: (briefId: string) => Promise<boolean>;
+  onCreateTaskFromBrief?: (
+    briefId: string,
+    title: string,
+    ownerId?: string,
+  ) => Promise<boolean>;
 }) {
+  // Check for BRIEF_CARD message type
+  if (message.type === 'system' && message.text.startsWith('BRIEF_CARD:')) {
+    const briefJson = message.text.slice('BRIEF_CARD:'.length);
+    let briefData: {
+      id: string;
+      status: string;
+      goal: string;
+      scope?: string;
+      constraints?: string;
+      success_criteria?: string;
+      owner_agent_id?: string;
+    };
+    try {
+      briefData = JSON.parse(briefJson);
+    } catch {
+      return <div className="system-message">{message.text}</div>;
+    }
+
+    const ownerAgent = briefData.owner_agent_id
+      ? agents.find((a) => a.id === briefData.owner_agent_id)
+      : undefined;
+
+    const handleConfirm = async () => {
+      if (!onConfirmBrief || !onCreateTaskFromBrief) return;
+      const confirmed = await onConfirmBrief(briefData.id);
+      if (confirmed) {
+        await onCreateTaskFromBrief(briefData.id, briefData.goal, briefData.owner_agent_id);
+      }
+    };
+
+    const handleReject = async () => {
+      if (!onRejectBrief) return;
+      await onRejectBrief(briefData.id);
+    };
+
+    return (
+      <article className="brief-card">
+        <header>
+          <span className="brief-card-icon">📋</span>
+          <strong>共识纪要（待确认）</strong>
+        </header>
+        <div className="brief-card-body">
+          <section>
+            <strong>目标：</strong>
+            <p>{briefData.goal}</p>
+          </section>
+          {briefData.scope && (
+            <section>
+              <strong>范围：</strong>
+              <p>{briefData.scope}</p>
+            </section>
+          )}
+          {briefData.constraints && (
+            <section>
+              <strong>约束：</strong>
+              <p>{briefData.constraints}</p>
+            </section>
+          )}
+          {briefData.success_criteria && (
+            <section>
+              <strong>成功标准：</strong>
+              <p>{briefData.success_criteria}</p>
+            </section>
+          )}
+          {ownerAgent && (
+            <section>
+              <strong>负责人：</strong>
+              <button
+                type="button"
+                className="brief-card-owner"
+                onClick={() => onOpenAgent(ownerAgent.id)}
+              >
+                {ownerAgent.name}
+              </button>
+            </section>
+          )}
+        </div>
+        <footer className="brief-card-footer">
+          <button
+            type="button"
+            className="button primary green"
+            onClick={handleConfirm}
+          >
+            确认并创建任务
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={handleReject}
+          >
+            不对，继续讨论
+          </button>
+        </footer>
+      </article>
+    );
+  }
+
   if (message.type === 'system') {
     return <div className="system-message">{message.text}</div>;
   }
