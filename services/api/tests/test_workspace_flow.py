@@ -848,3 +848,81 @@ def test_task_pool_suggests_matching_agent_for_unassigned_task(tmp_path, monkeyp
     assert matched_task["status"] == "待认领"
     assert matched_task["suggested_agent_id"] == writer["id"]
     assert matched_task["suggested_agent_reason"]
+
+
+def test_discussion_status_changes_on_brief_lifecycle(tmp_path, monkeypatch):
+    """Test that discussion_status updates correctly on brief confirm/reject.
+
+    TD-01-T1: brief confirm/reject 接线讨论态状态机 (G3)
+    - create_brief → discussion_status = 'discussing'
+    - confirm_brief → discussion_status = 'aligned'
+    - reject_brief → discussion_status = 'discussing'
+    """
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]
+
+    # Initial status should be 'discussing'
+    assert secretary_chat["discussion_status"] == "discussing"
+
+    # Create a brief draft
+    brief = client.post(
+        "/api/briefs",
+        headers=auth_header(token),
+        json={
+            "discussion_conversation_id": secretary_chat["id"],
+            "goal": "本周增长打法",
+            "created_by_agent_id": secretary_agent["id"],
+        },
+    )
+    assert brief.status_code == 200
+
+    # After creating brief, status should still be 'discussing'
+    reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    chat_after_create = next(
+        c for c in reloaded["conversations"] if c["id"] == secretary_chat["id"]
+    )
+    assert chat_after_create["discussion_status"] == "discussing"
+
+    # Reject the brief
+    rejected = client.post(
+        f"/api/briefs/{brief.json()['id']}/reject",
+        headers=auth_header(token),
+    )
+    assert rejected.status_code == 200
+
+    # After reject, status should still be 'discussing'
+    reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    chat_after_reject = next(
+        c for c in reloaded["conversations"] if c["id"] == secretary_chat["id"]
+    )
+    assert chat_after_reject["discussion_status"] == "discussing"
+
+    # Create another brief and confirm it
+    brief2 = client.post(
+        "/api/briefs",
+        headers=auth_header(token),
+        json={
+            "discussion_conversation_id": secretary_chat["id"],
+            "goal": "官网改版计划",
+            "created_by_agent_id": secretary_agent["id"],
+        },
+    )
+    assert brief2.status_code == 200
+
+    confirmed = client.post(
+        f"/api/briefs/{brief2.json()['id']}/confirm",
+        headers=auth_header(token),
+    )
+    assert confirmed.status_code == 200
+
+    # After confirm, status should be 'aligned'
+    reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    chat_after_confirm = next(
+        c for c in reloaded["conversations"] if c["id"] == secretary_chat["id"]
+    )
+    assert chat_after_confirm["discussion_status"] == "aligned"

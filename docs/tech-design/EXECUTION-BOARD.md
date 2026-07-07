@@ -8,7 +8,7 @@
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
 | 1 | [PLAYBOOK V1–V7](HERMES-VERIFICATION-PLAYBOOK.md) | 实测清掉全部〔待核〕并回填 DATA-MODEL/TD-03/TD-04/TD-05 | **必须 agentpulse 锚定会话** | ✅ 完成(验证报告已生成，回填待后续) |
-| 2 | [TD-01-T1](TD-01-verify-and-harden-slice-1.md) | brief confirm/reject 接线讨论态状态机(G3) | 任意 | ⚪ 待领 |
+| 2 | [TD-01-T1](TD-01-verify-and-harden-slice-1.md) | brief confirm/reject 接线讨论态状态机(G3) | 任意 | ✅ 完成(待测) |
 | 3 | [TD-01-T1b](TD-01-verify-and-harden-slice-1.md) | TaskOut 补 consensus_brief_id(G2) | 任意 | ⚪ 待领 |
 | 4 | [TD-05-T1](TD-05-capability-catalog.md) | capability_catalog 模块+校验+合并(risk 只升不降) | 任意 | ⚪ 待领 |
 | 5 | [TD-04-T1](TD-04-agent-provisioning.md) | agent_specs/agent_capabilities 建表+DTO(⚠️双 schema) | 任意 | ⚪ 待领 |

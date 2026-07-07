@@ -34,6 +34,7 @@ class ConversationOut(BaseModel):
     member_ids: list[str]
     unread: int
     updated_at: str
+    discussion_status: str = "discussing"
 
 
 class MessageOut(BaseModel):

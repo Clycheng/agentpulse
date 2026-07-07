@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from app.core.database import Database
+from app.orchestration.discussion import DiscussionStatus, set_discussion_status
 
 
 class BriefStatus:
@@ -197,6 +198,10 @@ def create_brief(
         brief_data,
     )
 
+    # Set conversation discussion status to 'discussing'
+    # (new brief draft means discussion is still ongoing)
+    set_discussion_status(conn, discussion_conversation_id, DiscussionStatus.DISCUSSING)
+
     return brief_data
 
 
@@ -251,6 +256,10 @@ def confirm_brief(
         (BriefStatus.CONFIRMED, confirmed_at, confirmed_by_user_id, brief_id, workspace_id),
     )
 
+    # Set conversation discussion status to 'aligned'
+    # (confirmed brief means consensus reached)
+    set_discussion_status(conn, brief["discussion_conversation_id"], DiscussionStatus.ALIGNED)
+
     return serialize_brief(
         conn.execute(
             "SELECT * FROM consensus_briefs WHERE id = ?", (brief_id,)
@@ -300,6 +309,10 @@ def reject_brief(
         """,
         (BriefStatus.REJECTED, confirmed_at, confirmed_by_user_id, brief_id, workspace_id),
     )
+
+    # Keep conversation in 'discussing' status
+    # (rejected brief means discussion should continue)
+    set_discussion_status(conn, brief["discussion_conversation_id"], DiscussionStatus.DISCUSSING)
 
     return serialize_brief(
         conn.execute(

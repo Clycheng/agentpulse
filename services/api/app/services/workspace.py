@@ -303,6 +303,7 @@ def serialize_conversation(row: Row, member_ids: list[str]) -> dict:
         "member_ids": member_ids,
         "unread": row["unread"],
         "updated_at": row["updated_at"],
+        "discussion_status": row["discussion_status"] or "discussing",
     }
 
 
