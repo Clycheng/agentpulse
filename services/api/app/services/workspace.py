@@ -334,6 +334,7 @@ def serialize_task(row: Row, suggestion: dict | None = None) -> dict:
         "conversation_id": row["conversation_id"],
         "due_date": row["due_date"],
         "parent_task_id": row["parent_task_id"],
+        "consensus_brief_id": row["consensus_brief_id"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

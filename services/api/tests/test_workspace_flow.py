@@ -926,3 +926,47 @@ def test_discussion_status_changes_on_brief_lifecycle(tmp_path, monkeypatch):
         c for c in reloaded["conversations"] if c["id"] == secretary_chat["id"]
     )
     assert chat_after_confirm["discussion_status"] == "aligned"
+
+
+def test_task_out_includes_consensus_brief_id(tmp_path, monkeypatch):
+    """Test that TaskOut includes consensus_brief_id field.
+
+    TD-01-T1b: TaskOut 补 consensus_brief_id (G2)
+    - Task created with consensus_brief_id should return it
+    - bootstrap should include consensus_brief_id in task data
+    """
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]
+
+    # Create and confirm a brief
+    brief = create_confirmed_brief(
+        client, token, secretary_chat["id"], secretary_agent["id"], "官网改版"
+    )
+
+    # Create task with consensus_brief_id
+    task = client.post(
+        "/api/tasks",
+        headers=auth_header(token),
+        json={
+            "title": "官网改版执行",
+            "description": "执行官网改版计划",
+            "priority": "P1",
+            "owner_agent_id": secretary_agent["id"],
+            "consensus_brief_id": brief["id"],
+        },
+    )
+    assert task.status_code == 200
+    task_data = task.json()
+    assert task_data["consensus_brief_id"] == brief["id"]
+
+    # bootstrap should also include consensus_brief_id
+    reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    task_in_bootstrap = next(
+        t for t in reloaded["tasks"] if t["id"] == task_data["id"]
+    )
+    assert task_in_bootstrap["consensus_brief_id"] == brief["id"]

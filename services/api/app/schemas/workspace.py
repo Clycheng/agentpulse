@@ -61,6 +61,7 @@ class TaskOut(BaseModel):
     conversation_id: str | None
     due_date: str | None = None
     parent_task_id: str | None = None
+    consensus_brief_id: str | None = None
     created_at: str
     updated_at: str
 
