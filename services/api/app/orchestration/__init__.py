@@ -5,6 +5,7 @@ This module implements the core orchestration logic for AgentPulse:
 - Consensus brief management
 - Task creation gate (must have confirmed brief)
 - Capability catalog (system-level static asset)
+- Provisioning orchestration (role_spec drafting + SOUL generation)
 
 See ADR 0006 for design details.
 """
@@ -32,6 +33,13 @@ from app.orchestration.gate import (
     validate_task_creation_gate,
     TaskCreationGateError,
 )
+from app.orchestration.provisioning import (
+    RoleSpecDraft,
+    build_role_spec_prompt,
+    build_soul_md_prompt,
+    draft_role_spec,
+    draft_soul_md,
+)
 
 __all__ = [
     "create_brief",
@@ -49,4 +57,9 @@ __all__ = [
     "get_capability",
     "resolve_bundle",
     "validate_capability_keys",
+    "RoleSpecDraft",
+    "build_role_spec_prompt",
+    "build_soul_md_prompt",
+    "draft_role_spec",
+    "draft_soul_md",
 ]

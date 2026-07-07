@@ -7,12 +7,7 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | [PLAYBOOK V1–V7](HERMES-VERIFICATION-PLAYBOOK.md) | 实测清掉全部〔待核〕并回填 DATA-MODEL/TD-03/TD-04/TD-05 | **必须 agentpulse 锚定会话** | ✅ 完成(验证报告已生成，回填待后续) |
-| 2 | [TD-01-T1](TD-01-verify-and-harden-slice-1.md) | brief confirm/reject 接线讨论态状态机(G3) | 任意 | ✅ 完成(待测) |
-| 3 | [TD-01-T1b](TD-01-verify-and-harden-slice-1.md) | TaskOut 补 consensus_brief_id(G2) | 任意 | ✅ 完成(待测) |
-| 4 | [TD-05-T1](TD-05-capability-catalog.md) | capability_catalog 模块+校验+合并(risk 只升不降) | 任意 | ✅ 完成(待测) |
-| 5 | [TD-04-T1](TD-04-agent-provisioning.md) | agent_specs/agent_capabilities 建表+DTO(⚠️双 schema) | 任意 | ✅ 完成(待测) |
-| 6 | [TD-04-T2](TD-04-agent-provisioning.md) | ProfileProvisioner 接口+RecordOnly 实现 | 任意 | ✅ 完成(待测) |
+| 7 | [TD-04-T3](TD-04-agent-provisioning.md) | role_spec 起草+SOUL 生成(LLM+硬校验) | 任意 | ✅ 完成(待测) |
 
 注：1 与 2–6 **可由不同 AI 并行**；2–6 之间按序（5 依赖 4，6 无依赖可与 4/5 并行）。
 
@@ -32,6 +27,12 @@
 
 | 任务 | commit |
 |---|---|
+| PLAYBOOK V1–V7(验证报告) | `19c209b` |
+| TD-01-T1(讨论态接线) | `a9b2b06` |
+| TD-01-T1b(TaskOut consensus_brief_id) | `0c745b0` |
+| TD-05-T1(capability_catalog) | `dd595de` |
+| TD-04-T1(agent_specs/capabilities 建表+DTO) | `cd52af8` |
+| TD-04-T2(ProfileProvisioner+RecordOnly) | `0ed930d` |
 | 群讨论第一片(ADR 0006 实现) | `c2054bf` |
 | 全部设计文档(架构/DATA-MODEL/TD-01~05/剧本/本看板) | 见 CHANGELOG 2026-07-03~08 |
 
