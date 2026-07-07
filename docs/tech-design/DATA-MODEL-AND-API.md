@@ -193,3 +193,63 @@ class HermesBackend:
 Hermes `approval_required` → 建现有 `approvals` 行（§1 的 ApprovalOut 结构）+ Run→`waiting_user` → 前端复用**已有的内联审批卡片**（首个会话所建）。老板批准 → 调 `.../approval` 续跑。
 
 开放项（见 [TD-03](TD-03-hermes-execution.md) §开放问题）：单网关多 profile vs 一 profile 一进程、进程管理、审批粒度用哪个高风险工具验证。**定了回填本文件。**
+
+---
+
+## 6. 【目标】Agent 供给（NL→定制员工，TD-04/TD-05）
+
+对应 [ARCHITECTURE-DETAILED.md](ARCHITECTURE-DETAILED.md) §4.1/§5.1 与 [agent-model-and-capabilities.md](agent-model-and-capabilities.md) §3。本节为权威 schema。
+
+### 6.1 `agent_specs` 新表（一个员工一行：用户期望 + 供给状态）
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PK | `spec_xxx` |
+| `agent_id` | TEXT | NOT NULL, FK→agents ON DELETE CASCADE, UNIQUE | 一对一 |
+| `workspace_id` | TEXT | NOT NULL, FK→workspaces CASCADE | |
+| `role_name` | TEXT | NOT NULL | 如"前端工程师"，API 限长 ≤80 |
+| `source_request` | TEXT | NOT NULL DEFAULT `''` | 用户原始 NL 需求，≤2000 |
+| `responsibilities_json` | TEXT | NOT NULL DEFAULT `'[]'` | 职责数组(API 字段 `responsibilities: list[str]`，≤12 条，每条 ≤200) |
+| `hermes_profile` | TEXT | 可空 | 对应 Hermes profile 名。命名规则〔待核〕，建议 `wk<workspace短id>-<agent短id>` 防跨 workspace 撞名 |
+| `status` | TEXT | NOT NULL DEFAULT `'draft'`, CHECK IN (`draft`,`provisioning`,`blocked_on_credentials`,`ready`,`failed`) | 供给状态机：draft→provisioning→(blocked_on_credentials⇄)→ready；任一步失败→failed |
+| `created_at` / `updated_at` | TEXT | NOT NULL | |
+
+### 6.2 `agent_capabilities` 新表（员工被授予的每项能力一行）
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PK | `cap_xxx` |
+| `agent_id` | TEXT | NOT NULL, FK→agents CASCADE | |
+| `workspace_id` | TEXT | NOT NULL, FK→workspaces CASCADE | |
+| `capability_key` | TEXT | NOT NULL | catalog 主键，如 `write_code`/`run_tests`/`git_push`/`deploy_preview`/`deploy_prod`/`domain_register`/`seo_audit`/`social_content`。同一 agent 内 UNIQUE(agent_id, capability_key) |
+| `skill_refs_json` | TEXT | NOT NULL DEFAULT `'[]'` | SKILL 名数组 |
+| `toolset_refs_json` | TEXT | NOT NULL DEFAULT `'[]'` | Hermes toolset 名数组〔具体合法值待核〕 |
+| `mcp_refs_json` | TEXT | NOT NULL DEFAULT `'[]'` | MCP server 名数组〔配置语法待核〕 |
+| `required_credentials_json` | TEXT | NOT NULL DEFAULT `'[]'` | 凭证名数组，如 `["GITHUB_TOKEN"]` |
+| `risk_gate` | TEXT | NOT NULL DEFAULT `'auto'`, CHECK IN (`auto`,`approval`,`prohibited_auto`) | auto=直接干；approval=弹审批卡片；prohibited_auto=永远人工(花钱/不可逆) |
+| `status` | TEXT | NOT NULL DEFAULT `'pending'`, CHECK IN (`pending`,`credential_missing`,`enabled`,`disabled`) | |
+| `created_at` / `updated_at` | TEXT | NOT NULL | |
+
+### 6.3 capability_catalog（能力映射表——系统静态资产，不建表）
+实现为代码内常量 `services/api/app/orchestration/capability_catalog.py`〔本项目新增〕：`dict[capability_key] -> {"skills":[...],"toolsets":[...],"mcp":[...],"required_credentials":[...],"risk_gate":"auto|approval|prohibited_auto","description":str}`。初始条目按 [agent-model-and-capabilities.md](agent-model-and-capabilities.md) §4 表。改 catalog = 改代码 + 本文件同步。种子(v1)：
+```
+write_code      → toolsets[terminal,files]                                    risk=auto
+run_tests       → toolsets[terminal]                                          risk=auto
+git_push        → toolsets[terminal] + mcp[github] + creds[GITHUB_TOKEN]      risk=approval
+deploy_preview  → toolsets[terminal] + creds[平台token]                        risk=auto
+deploy_prod     → toolsets[terminal] + creds[平台token]                        risk=approval
+domain_register → (API 包装工具) + creds[注册商key+付费方式]                    risk=prohibited_auto
+seo_audit       → toolsets[terminal(lighthouse),web]                          risk=auto
+social_content  → toolsets[web,多模态] (发布环节人工，见能力文档 §5)             risk=approval
+```
+
+### 6.4 新增 API 契约
+| 接口 | 请求体 | 响应 | 错误 |
+|---|---|---|---|
+| `POST /api/agents`（扩展现有） | 现有字段 + 可选 `role_spec: {role_name, source_request?, responsibilities[], capability_keys[]}` | 现有 AgentOut + `spec: AgentSpecOut` | 未知 capability_key→400 |
+| `GET /api/agents/{id}/spec` | — | `AgentSpecOut`（含 `capabilities: list[AgentCapabilityOut]`） | 404 |
+| `POST /api/agents/{id}/credentials` | `{"credential_name":"GITHUB_TOKEN","value":"..."}` | 更新后的 `AgentSpecOut` | 该 agent 无此凭证需求→400 |
+| `POST /api/agents/{id}/provision` | 空体（幂等，重试供给） | `AgentSpecOut` | spec 不存在→404 |
+
+**AgentSpecOut**：§6.1 字段(json 列 → 数组字段，去 `_json` 后缀)。**AgentCapabilityOut**：§6.2 同理。
+**凭证安全**：`value` 不落业务 DB——直接写入 `profiles/<hermes_profile>/.env`，DB 只把对应 capability `status: credential_missing→enabled`。支付/域名类凭证不走此接口（prohibited_auto，人工在自己设备上操作）。
+
+双 schema 提醒：§6.1/§6.2 建表须同时加进 `init_postgres()` 和 `init_sqlite()`（§0 G4）。

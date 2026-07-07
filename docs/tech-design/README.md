@@ -6,13 +6,14 @@
 - **Tech-Design（本目录）** 回答"具体怎么实现"：数据模型、API 契约、模块边界、时序流程，以及拆成哪些 task。
 - 一个 tech-design 文件（`TD-NN-<slug>.md`）= 一个可独立推进的**阶段**，内含两段：`## 技术设计` + `## Tech-Tasks`（编号 `TD-NN-Tk`，各带验收标准/依赖/是否需 agentpulse 会话）。
 
-## 先读这两份（理解 + 规格）
+## 阅读顺序（理解 → 架构 → 规格 → 任务）
 
 | 文件 | 作用 |
 |---|---|
-| [the-loop.md](the-loop.md) | **闭环走查锚文档**：一个具体场景把"目标→讨论→brief→建任务→执行→回写"整条闭环走一遍(带真实数据)，先懂闭环再看任务 |
-| [DATA-MODEL-AND-API.md](DATA-MODEL-AND-API.md) | **唯一真相源**：所有表/字段/接口/错误码的精确规格 + 已知不对齐项(G1–G5)。写代码前先查这里，别照 ADR 里的初稿建表 |
-| [agent-model-and-capabilities.md](agent-model-and-capabilities.md) | **agent 到底怎么"有本事"**：agent=底座+人格+技能+工具/MCP+凭证+模型；小秘书凭什么特殊；一句话→自动生成 agent 的数据流；各工种(前端工程师/小红书运营)能力逐条落地(哪个能力=哪个技能+工具/MCP+凭证+审批门)+现成开源程度+诚实边界 |
+| [the-loop.md](the-loop.md) | **① 闭环走查锚文档**：一个具体场景把"目标→讨论→brief→建任务→执行→回写"整条闭环走一遍(带真实数据)，先懂闭环再看任务 |
+| [ARCHITECTURE-DETAILED.md](ARCHITECTURE-DETAILED.md) | **② 实现级系统架构(脊梁)**：组件全景/部署拓扑/分层模块职责+接口/核心时序(NL→agent 供给、讨论→任务、任务→Hermes 执行)/横切关注点/Hermes 边界契约/各组件深化索引 |
+| [DATA-MODEL-AND-API.md](DATA-MODEL-AND-API.md) | **③ 唯一真相源**：所有表/字段/接口/错误码的精确规格(§6 含 agent 供给新表+capability catalog) + 已知不对齐项(G1–G5)。写代码前先查这里，别照 ADR 里的初稿建表 |
+| [agent-model-and-capabilities.md](agent-model-and-capabilities.md) | **④ agent 能力模型**：agent=底座+人格+技能+工具/MCP+凭证+模型；小秘书凭什么特殊；各工种能力逐条落地+现成开源程度+诚实边界 |
 
 ## 当前目标弧（从"第一片已完成"到"第一个真正可用的垂直闭环")
 
