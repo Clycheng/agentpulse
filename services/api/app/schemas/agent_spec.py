@@ -51,3 +51,10 @@ class AgentSpecOut(BaseModel):
     capabilities: list[AgentCapabilityOut] = Field(default_factory=list)
     created_at: str
     updated_at: str
+
+
+class CredentialRequest(BaseModel):
+    """Input for providing a credential value."""
+
+    credential_name: str = Field(..., min_length=1, max_length=120)
+    value: str = Field(..., min_length=1, max_length=10000)

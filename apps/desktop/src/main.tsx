@@ -830,6 +830,7 @@ function App() {
   const [createDesc, setCreateDesc] = useState('');
   const [createDept, setCreateDept] = useState('');
   const [createPrompt, setCreatePrompt] = useState('');
+  const [createCapKeys, setCreateCapKeys] = useState<string[]>([]);
   const [groupName, setGroupName] = useState('');
   const [groupMembers, setGroupMembers] = useState<string[]>([]);
   const [groupTaskIds, setGroupTaskIds] = useState<string[]>([]);
@@ -1077,6 +1078,7 @@ function App() {
     setCreateDesc('');
     setCreateDept('');
     setCreatePrompt('');
+    setCreateCapKeys([]);
     setCreateOpen(true);
   };
 
@@ -1279,15 +1281,23 @@ function App() {
       return;
     }
     try {
+      const body: Record<string, unknown> = {
+        name,
+        description: createDesc.trim(),
+        department_name: departmentName,
+        prompt,
+      };
+      if (createCapKeys.length > 0) {
+        body.role_spec = {
+          role_name: name,
+          source_request: createDesc.trim() || name,
+          capability_keys: createCapKeys,
+        };
+      }
       await apiRequest('/agents', {
         method: 'POST',
         token,
-        body: JSON.stringify({
-          name,
-          description: createDesc.trim(),
-          department_name: departmentName,
-          prompt,
-        }),
+        body: JSON.stringify(body),
       });
       await loadBootstrap(token);
       setCreateOpen(false);
@@ -1771,10 +1781,12 @@ function App() {
           createDesc={createDesc}
           createDept={createDept}
           createPrompt={createPrompt}
+          createCapKeys={createCapKeys}
           onNameChange={setCreateName}
           onDescChange={setCreateDesc}
           onDeptChange={setCreateDept}
           onPromptChange={setCreatePrompt}
+          onCapKeysChange={setCreateCapKeys}
           onClose={() => setCreateOpen(false)}
           onSubmit={submitCreateAgent}
         />
@@ -4108,16 +4120,35 @@ function CreateTaskModal({
   );
 }
 
+const CAPABILITY_OPTIONS = [
+  { key: 'write_code', label: '编写代码', desc: '编写、修改代码文件', risk: 'auto' },
+  { key: 'run_tests', label: '运行测试', desc: '运行测试套件并收集结果', risk: 'auto' },
+  { key: 'git_push', label: '推送代码', desc: '推送代码到远程仓库（需审批）', risk: 'approval' },
+  { key: 'deploy_preview', label: '部署预览', desc: '部署到预览/测试环境', risk: 'auto' },
+  { key: 'deploy_prod', label: '部署生产', desc: '部署到生产环境（需审批）', risk: 'approval' },
+  { key: 'domain_register', label: '域名管理', desc: '注册/续费域名（必须人工操作）', risk: 'prohibited_auto' },
+  { key: 'seo_audit', label: 'SEO 审计', desc: '执行 SEO 审计', risk: 'auto' },
+  { key: 'social_content', label: '社媒内容', desc: '生成社交媒体内容（发布需审批）', risk: 'approval' },
+] as const;
+
+const RISK_BADGE: Record<string, { label: string; color: string }> = {
+  auto: { label: '自动', color: '#4caf50' },
+  approval: { label: '需审批', color: '#ff9800' },
+  prohibited_auto: { label: '仅人工', color: '#f44336' },
+};
+
 function CreateAgentModal({
   departments,
   createName,
   createDesc,
   createDept,
   createPrompt,
+  createCapKeys,
   onNameChange,
   onDescChange,
   onDeptChange,
   onPromptChange,
+  onCapKeysChange,
   onClose,
   onSubmit,
 }: {
@@ -4126,18 +4157,28 @@ function CreateAgentModal({
   createDesc: string;
   createDept: string;
   createPrompt: string;
+  createCapKeys: string[];
   onNameChange: (value: string) => void;
   onDescChange: (value: string) => void;
   onDeptChange: (value: string) => void;
   onPromptChange: (value: string) => void;
+  onCapKeysChange: (value: string[]) => void;
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const toggleCap = (key: string) => {
+    onCapKeysChange(
+      createCapKeys.includes(key)
+        ? createCapKeys.filter((k) => k !== key)
+        : [...createCapKeys, key],
+    );
+  };
+
   return (
     <Modal
       title="创建新员工"
-      description="自定义员工名称、描述、部门和工作职责 Prompt。"
-      width={680}
+      description="自定义员工名称、描述、部门、能力和工作职责。"
+      width={720}
       onClose={onClose}
     >
       <div className="form-grid even">
@@ -4171,6 +4212,47 @@ function CreateAgentModal({
         placeholder="一句话说明他擅长什么"
         onChange={(event) => onDescChange(event.currentTarget.value)}
       />
+
+      <FieldLabel>能力配置</FieldLabel>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+        {CAPABILITY_OPTIONS.map((cap) => {
+          const selected = createCapKeys.includes(cap.key);
+          const badge = RISK_BADGE[cap.risk];
+          return (
+            <button
+              key={cap.key}
+              type="button"
+              title={cap.desc}
+              onClick={() => toggleCap(cap.key)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 6,
+                border: `1.5px solid ${selected ? '#6c5ce7' : '#ddd'}`,
+                background: selected ? '#f0edff' : '#fff',
+                cursor: 'pointer',
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <span style={{ fontWeight: selected ? 600 : 400 }}>{cap.label}</span>
+              <span
+                style={{
+                  fontSize: 10,
+                  padding: '1px 5px',
+                  borderRadius: 4,
+                  background: badge.color + '22',
+                  color: badge.color,
+                  fontWeight: 600,
+                }}
+              >
+                {badge.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
       <FieldLabel>工作职责 Prompt</FieldLabel>
       <textarea

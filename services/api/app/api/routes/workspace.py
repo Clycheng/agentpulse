@@ -27,6 +27,7 @@ from app.schemas.workspace import (
     TaskOut,
     UpdateTaskRequest,
 )
+from app.schemas.agent_spec import AgentSpecOut, CredentialRequest
 from app.services.workspace import (
     add_agent_experience,
     add_message,
@@ -52,6 +53,7 @@ from app.services.workspace import (
     serialize_task,
     update_task,
 )
+from app.orchestration.supply import create_agent_spec, provision, ProvisioningError
 
 router = APIRouter(tags=["workspace"])
 
@@ -92,21 +94,54 @@ def create_custom_agent(
     if workspace is None:
         raise HTTPException(status_code=404, detail="工作区不存在")
     department = ensure_department(conn, workspace["id"], payload.department_name)
+
+    # Collect skills from role_spec capability keys if provided
+    skills: list[str] = []
+    if payload.role_spec and payload.role_spec.capability_keys:
+        from app.orchestration.capability_catalog import get_capability
+        for key in payload.role_spec.capability_keys:
+            try:
+                cap = get_capability(key)
+                skills.extend(cap.skills)
+            except ValueError:
+                pass  # unknown keys silently stripped
+        skills = list(dict.fromkeys(skills))  # deduplicate preserving order
+
     agent_id = create_agent(
         conn,
         workspace_id=workspace["id"],
         department_id=department["id"],
         name=payload.name,
-        role=payload.description or "自定义员工",
+        role=payload.role_spec.role_name if payload.role_spec else (payload.description or "自定义员工"),
         description=payload.description,
         prompt=payload.prompt,
-        skills=[],
+        skills=skills,
         mcps=[],
         source="custom",
     )
     create_dm_conversation(conn, workspace["id"], agent_id)
     agent = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
-    return serialize_agent(agent)
+
+    result = serialize_agent(agent)
+
+    # If role_spec provided, create agent_spec + provision
+    if payload.role_spec:
+        try:
+            spec = create_agent_spec(
+                conn,
+                agent_id=agent_id,
+                workspace_id=workspace["id"],
+                role_name=payload.role_spec.role_name,
+                source_request=payload.role_spec.source_request,
+                responsibilities=payload.role_spec.responsibilities,
+                capability_keys=payload.role_spec.capability_keys,
+            )
+            spec = provision(conn, agent_id)
+            result["spec"] = spec
+        except (ValueError, ProvisioningError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return result
 
 
 @router.post("/agents/recruit")
@@ -128,6 +163,171 @@ def recruit_agent(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return serialize_agent(agent)
+
+
+@router.get("/agents/{agent_id}/spec", response_model=AgentSpecOut)
+def get_agent_spec(
+    agent_id: str,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    # Verify agent belongs to workspace
+    agent = conn.execute(
+        "SELECT id FROM agents WHERE id = ? AND workspace_id = ?",
+        (agent_id, workspace["id"]),
+    ).fetchone()
+    if agent is None:
+        raise HTTPException(status_code=404, detail="员工不存在")
+    spec = conn.execute(
+        "SELECT * FROM agent_specs WHERE agent_id = ?", (agent_id,)
+    ).fetchone()
+    if spec is None:
+        raise HTTPException(status_code=404, detail="该员工尚未配置角色规格")
+    return _serialize_spec_from_row(conn, spec)
+
+
+@router.post("/agents/{agent_id}/credentials", response_model=AgentSpecOut)
+def provide_credential(
+    agent_id: str,
+    payload: CredentialRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    agent = conn.execute(
+        "SELECT id FROM agents WHERE id = ? AND workspace_id = ?",
+        (agent_id, workspace["id"]),
+    ).fetchone()
+    if agent is None:
+        raise HTTPException(status_code=404, detail="员工不存在")
+
+    spec = conn.execute(
+        "SELECT * FROM agent_specs WHERE agent_id = ?", (agent_id,)
+    ).fetchone()
+    if spec is None:
+        raise HTTPException(status_code=404, detail="该员工尚未配置角色规格")
+
+    # Find capability that requires this credential
+    caps = conn.execute(
+        "SELECT * FROM agent_capabilities WHERE agent_id = ?",
+        (agent_id,),
+    ).fetchall()
+    matching_cap = None
+    for cap in caps:
+        import json as _json
+        required = _json.loads(cap["required_credentials_json"] or "[]")
+        if payload.credential_name in required:
+            matching_cap = cap
+            break
+    if matching_cap is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"该员工不需要凭证 {payload.credential_name}",
+        )
+
+    # Security: credential value is NOT stored in DB.
+    # It would go to ProfileProvisioner.write_credentials in production.
+    # For v1 (RecordOnlyProvisioner), we just mark the capability as enabled.
+    now = now_iso()
+
+    # If this capability was credential_missing, mark as enabled
+    if matching_cap["status"] == "credential_missing":
+        conn.execute(
+            "UPDATE agent_capabilities SET status = 'enabled', updated_at = ? WHERE id = ?",
+            (now, matching_cap["id"]),
+        )
+
+    # Check if all capabilities are now enabled → update spec status
+    _refresh_spec_status(conn, spec["id"])
+
+    updated_spec = conn.execute(
+        "SELECT * FROM agent_specs WHERE id = ?", (spec["id"],)
+    ).fetchone()
+    return _serialize_spec_from_row(conn, updated_spec)
+
+
+@router.post("/agents/{agent_id}/provision", response_model=AgentSpecOut)
+def provision_agent(
+    agent_id: str,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    agent = conn.execute(
+        "SELECT id FROM agents WHERE id = ? AND workspace_id = ?",
+        (agent_id, workspace["id"]),
+    ).fetchone()
+    if agent is None:
+        raise HTTPException(status_code=404, detail="员工不存在")
+    try:
+        spec = provision(conn, agent_id)
+    except ProvisioningError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return spec
+
+
+def _serialize_spec_from_row(conn: Database, spec: Row) -> dict:
+    """Serialize an agent_spec row with its capabilities."""
+    import json as _json
+    capabilities = conn.execute(
+        "SELECT * FROM agent_capabilities WHERE agent_id = ? ORDER BY created_at",
+        (spec["agent_id"],),
+    ).fetchall()
+    return {
+        "id": spec["id"],
+        "agent_id": spec["agent_id"],
+        "workspace_id": spec["workspace_id"],
+        "role_name": spec["role_name"],
+        "source_request": spec["source_request"],
+        "responsibilities": _json.loads(spec["responsibilities_json"] or "[]"),
+        "hermes_profile": spec["hermes_profile"],
+        "status": spec["status"],
+        "capabilities": [
+            {
+                "id": cap["id"],
+                "agent_id": cap["agent_id"],
+                "capability_key": cap["capability_key"],
+                "skill_refs": _json.loads(cap["skill_refs_json"] or "[]"),
+                "toolset_refs": _json.loads(cap["toolset_refs_json"] or "[]"),
+                "mcp_refs": _json.loads(cap["mcp_refs_json"] or "[]"),
+                "required_credentials": _json.loads(cap["required_credentials_json"] or "[]"),
+                "risk_gate": cap["risk_gate"],
+                "status": cap["status"],
+                "created_at": cap["created_at"],
+                "updated_at": cap["updated_at"],
+            }
+            for cap in capabilities
+        ],
+        "created_at": spec["created_at"],
+        "updated_at": spec["updated_at"],
+    }
+
+
+def _refresh_spec_status(conn: Database, spec_id: str) -> None:
+    """Check capabilities and update spec status if all enabled."""
+    spec = conn.execute(
+        "SELECT * FROM agent_specs WHERE id = ?", (spec_id,)
+    ).fetchone()
+    if spec is None:
+        return
+    caps = conn.execute(
+        "SELECT status FROM agent_capabilities WHERE agent_id = ?",
+        (spec["agent_id"],),
+    ).fetchall()
+    if not caps:
+        return
+    all_enabled = all(cap["status"] == "enabled" for cap in caps)
+    if all_enabled and spec["status"] == "blocked_on_credentials":
+        # All capabilities enabled → provision to ready
+        from app.orchestration.supply import provision as _provision
+        _provision(conn, spec["agent_id"])
 
 
 @router.post("/knowledge-sources")

@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.agent_spec import AgentSpecOut, RoleSpecIn
+
 
 class DepartmentOut(BaseModel):
     id: str
@@ -178,6 +180,7 @@ class CreateAgentRequest(BaseModel):
     description: str = Field(default="", max_length=255)
     department_name: str = Field(min_length=1, max_length=120)
     prompt: str = Field(min_length=1, max_length=12000)
+    role_spec: RoleSpecIn | None = None
 
 
 class RecruitAgentRequest(BaseModel):

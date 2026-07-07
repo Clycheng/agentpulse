@@ -7,7 +7,8 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 8 | [TD-04-T4](TD-04-agent-provisioning.md) | 供给编排+状态机(provision幂等) | 任意 | ✅ 完成(待测) |
+| 9 | [TD-01-T2/T3](TD-01-group-discussion-v1.md) | 端到端手测群讨论第一片 | **agentpulse** | ⚪ 待领 |
+| 10 | [TD-04-T6](TD-04-agent-provisioning.md) | LocalHermesProvisioner 真实现 | **agentpulse** | ⚪ 待领 |
 
 注：1 与 2–6 **可由不同 AI 并行**；2–6 之间按序（5 依赖 4，6 无依赖可与 4/5 并行）。
 
@@ -15,24 +16,22 @@
 
 | 任务 | 等什么 | 会话要求 |
 |---|---|---|
-| TD-04-T3(role_spec 起草+SOUL 生成) | TD-05-T1 | 任意 |
-| TD-04-T4(供给编排+状态机) | T1,T2,T3 | 任意 |
-| TD-04-T5(API+前端最小闭环) | T4 | 手测时 agentpulse |
-| TD-01-T2/T3(端到端手测第一片) | TD-01-T1/T1b | **agentpulse** |
 | TD-02 全部(多 agent 讨论) | TD-01-T1(讨论态接线) | 任意(手测除外) |
-| TD-04-T6(LocalHermesProvisioner 真实现) | PLAYBOOK V2/V3/V6 回填 + T4 | **agentpulse** |
 | TD-03 全部(接 Hermes 执行) | PLAYBOOK V4/V5/V7 回填；T1 可先行 | T2 起 **agentpulse** |
 
 ## 已完成
 
 | 任务 | commit |
 |---|---|
-| PLAYBOOK V1–V7(验证报告) | `19c209b` |
-| TD-01-T1(讨论态接线) | `a9b2b06` |
-| TD-01-T1b(TaskOut consensus_brief_id) | `0c745b0` |
-| TD-05-T1(capability_catalog) | `dd595de` |
-| TD-04-T1(agent_specs/capabilities 建表+DTO) | `cd52af8` |
+| TD-04-T5(API+前端最小闭环) | 待提交 |
+| TD-04-T4(供给编排+状态机) | 待提交 |
+| TD-04-T3(role_spec 起草+SOUL 生成) | 待提交 |
 | TD-04-T2(ProfileProvisioner+RecordOnly) | `0ed930d` |
+| TD-04-T1(agent_specs/capabilities 建表+DTO) | `cd52af8` |
+| TD-05-T1(capability_catalog) | `dd595de` |
+| TD-01-T1b(TaskOut consensus_brief_id) | `0c745b0` |
+| TD-01-T1(讨论态接线) | `a9b2b06` |
+| PLAYBOOK V1–V7(验证报告) | `19c209b` |
 | 群讨论第一片(ADR 0006 实现) | `c2054bf` |
 | 全部设计文档(架构/DATA-MODEL/TD-01~05/剧本/本看板) | 见 CHANGELOG 2026-07-03~08 |
 
