@@ -5,6 +5,9 @@
 
 ## [Unreleased]
 
+### 2026-07-08（四）
+- **docs(readme)**: README 全面重写——修掉 ADR 0001 之前的过时内容(旧 mermaid 里的 Local Runtime/Tool Broker/多 LLM Provider、Roadmap Phase 3 的 provider adapters、"Agent runtime: Planned" 状态)，对齐当前架构(自研编排层 + Hermes 每员工一 profile)与真实进度(群讨论第一片✅、Hermes PoC✅)。SEO/GEO 优化：双语定义句前置 + 英文 Overview、徽章、三方对比表(vs 聊天机器人 vs 自动化平台)、FAQ 问答区(6 问，LLM 引用友好)、关键词/Topics 区、按读者分流的文档导航表、精简 Quick Start。
+
 ### 2026-07-08（三）
 - **docs(tech-design)**: 新增 [EXECUTION-BOARD.md](docs/tech-design/EXECUTION-BOARD.md)——唯一任务状态源，让任何 AI 冷启动读仓库即知"下一步做什么"(现在就做队列/依赖阻塞表/已完成表/认领锁规则：开工第一动作=改看板为进行中并 push)，不再需要人类口头派单。AGENTS.md §4"下一步"改为第一跳指看板；执行协议第 2/5 条改为"领任务/完成都在看板标状态"(TD 文件不标，防两处漂移)。
 
