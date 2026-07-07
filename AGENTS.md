@@ -69,12 +69,15 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 
 | 模块 | 现状 | 目标 |
 |---|---|---|
-| `services/api` | 直连 DeepSeek 回消息 + 正则建任务 + 任务记账(**套皮聊天，非真 agent**) | 协作编排层 + 调 Hermes profile 执行 |
-| `apps/desktop` | 单文件原型(聊天/员工/任务/审批 UI，已接后端) | 保留，渐进接入群讨论 + Hermes |
-| 群讨论协议 | ❌ 未实现 | 自研(照 AutoGen) |
+| `services/api` | FastAPI + PostgreSQL；已有 workspace/task/审批/会话 + **群讨论编排层(`orchestration/`)**；执行仍是临时的直连 DeepSeek(**尚非真 agent**) | 协作编排层 + 调 Hermes profile 执行 |
+| `apps/desktop` | 单文件原型(聊天/员工/任务/审批/**共识纪要卡片** UI，已接后端) | 保留，渐进接入群讨论 + Hermes |
+| 群讨论协议 | 🟢 **第一片已实现并通过测试**(2026-07-07, commit `c2054bf`, 14 tests)：讨论态状态机 + 共识 brief + **Task 创建强制门控**(已移除正则自动建任务)，对齐用人工确认。见 [ADR 0006](docs/decisions/0006-group-discussion-v1-first-slice.md)。⚠️ 仅通过单测，**尚未在跑起来的应用里端到端手测过 UI 流程** | 叠加多 agent 发言路由(完整 AutoGen 骨架) |
 | Hermes 集成 | 🟡 本机地基验证已完成(2026-07-05)：多 profile 隔离、HTTP Runs API + SSE 流式全链路跑通；发现 2 个必须处理的坑，见 [ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md) | 接入 `services/api`，成为真正的员工运行时 |
 
-**下一步（已认可的具体计划见 [ADR 0006](docs/decisions/0006-group-discussion-v1-first-slice.md)）**：先做**群讨论协议第一片**——讨论态状态机 + 共识 brief 数据对象 + **Task 创建强制携带 consensus_brief 的门控**（移除现有正则自动建任务），对齐判定 v1 用人工确认。这一片刻意不碰 Hermes、全在 `services/api` 内，可继续在当前临时执行层上建骨架。**动手前先看 ADR 0006 的"待解决"清单**（consensus_brief schema、编排模块位置、对齐信号形式等，须与项目所有者敲定，别猜）。之后再叠加多 agent 发言路由、以及接 Hermes 真执行（那一步须遵循 §5 隔离规矩另开会话）。
+**下一步（群讨论第一片已完成，见上）**：以下三项，优先级请项目所有者定——
+1. **端到端手测第一片**：跑起后端+桌面端，真实走一遍「员工发 brief 草稿 → 老板确认 → 建任务 / 拒绝 → 继续讨论」，确认 UI 流程真的通(目前只有单测)。**须遵循 §5 隔离规矩，在 cwd 锚定于 agentpulse 的会话里做，不要在 UnitPulse worktree 会话里起服务。**
+2. **多 agent 发言路由**：在第一片之上叠加完整 AutoGen 骨架(SelectorGroupChat 那套)，让多个员工在群里真正接力讨论(纯 `services/api` 逻辑，暂不碰 Hermes)。
+3. **接 Hermes 真执行**：定义 Run 表 + `HermesBackend`，把执行层从"直连 DeepSeek"换成"调 Hermes profile"，落地 [ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md) 的 workdir 绝对路径隔离。**这一步会真起 Hermes 进程，必须遵循 §5 隔离规矩，在 agentpulse 锚定的会话里做。**
 
 ---
 
