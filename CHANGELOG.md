@@ -5,6 +5,9 @@
 
 ## [Unreleased]
 
+### 2026-07-08（二）
+- **docs(tech-design)**: 分工定版——本侧只产设计文档，实现由 worker AI 执行。为此补齐三块：① [HERMES-VERIFICATION-PLAYBOOK](docs/tech-design/HERMES-VERIFICATION-PLAYBOOK.md)(把清〔待核〕变成可执行剧本 V1–V7：toolsets 真名/MCP 语法/技能安装/单网关多 profile/审批触发/打包分发/workdir 语义，含硬性安全前置与回填清单)；② TD-03 加深到字段级(SSE事件→run_steps 映射表、RunService 签名、v1 前端轮询决策、**发现并补上 `approvals.run_id` schema 缺口**——没它批准后找不到该恢复哪个 Run，已进 DATA-MODEL §5.1)；③ TD-02 加深到字段级(send_message 接线点、配置常量、发言人选择严格 JSON 契约+降级、收敛判定契约、prompt 约束、防刷屏)。README 新增 V 线(建议最先执行)与"Worker AI 执行协议"6 条。
+
 ### 2026-07-08
 - **docs(tech-design)**: 新增 [TD-05](docs/tech-design/TD-05-capability-catalog.md)(能力映射表：代码常量模块+resolve_bundle 合并规则+risk_gate 只升不降+domain_register 永远 prohibited_auto) 与 [TD-04](docs/tech-design/TD-04-agent-provisioning.md)(Agent 供给完整详细设计：v1 入口=创建员工表单而非聊天以解耦 TD-02；供给分逻辑/物理两段，`ProfileProvisioner` 接口把接缝正好切在〔待核〕Hermes 边界上，RecordOnly 实现让 T1–T5 全部可先做可测；role_spec LLM 起草+代码硬校验；SOUL 生成；凭证不落库直写 profile .env；供给状态机+幂等重试；6 个 task 中仅 T6 需 agentpulse 锚定会话)。阶段表新增 D 线(与 B/C 可并行)。
 

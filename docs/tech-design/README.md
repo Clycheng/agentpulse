@@ -27,6 +27,16 @@
 | B | [TD-02](TD-02-multi-agent-discussion.md) | 多 agent 真正在群里接力讨论（照 AutoGen 骨架） | 否（纯 `services/api` 逻辑，暂不碰 Hermes） | 中大 |
 | C | [TD-03](TD-03-hermes-execution.md) | 执行层从"直连 DeepSeek"换成"调 Hermes profile"(Run/RunStep + HermesBackend) | **是**（会真起 Hermes 进程，[ADR 0005](../decisions/0005-hermes-poc-safety-findings.md) 隔离规矩） | 大 |
 | D | [TD-05](TD-05-capability-catalog.md) → [TD-04](TD-04-agent-provisioning.md) | 能力映射表 + Agent 供给(一句话→定制员工)。与 B/C 可并行；仅 TD-04-T6 需 agentpulse 会话 | 大部分否 | 中 |
+| V | [HERMES-VERIFICATION-PLAYBOOK](HERMES-VERIFICATION-PLAYBOOK.md) | **验证剧本**：一次实测清掉全部〔待核〕(V1–V7)并回填各文档。建议最先执行——之后 C/D 的 T6 类任务零猜测 | **是** | 小 |
+
+## Worker AI 执行协议（领任务前必读）
+
+1. **读**：AGENTS.md → the-loop → ARCHITECTURE-DETAILED → DATA-MODEL(查你要动的表/接口) → 你领的 TD。
+2. **领**：一次领一个 `TD-NN-Tk`，先确认其"依赖"已完成、"需 agentpulse 会话"与你当前会话匹配(不匹配就别做，尤其起 Hermes 的任务——ADR 0005)。
+3. **做**：schema/接口以 [DATA-MODEL-AND-API.md](DATA-MODEL-AND-API.md) 为准，与 TD 冲突时以 DATA-MODEL 为准并上报；建表/加列必须双 schema(init_postgres+init_sqlite)都改。
+4. **验**：按 task 的验收标准逐条自证(跑测试/截图/记录响应)；"声明完成前先验证"(AGENTS.md §5)。
+5. **记**：更新 CHANGELOG；把 task 在 TD 文件里标 ✅ 并注 commit；实测出的〔待核〕真相**必须回填** DATA-MODEL/相关 TD；过时文档同步。
+6. **禁**：不改 `docs/decisions/` 已有 ADR(要变新开)；不放宽任何 risk_gate；不在 UnitPulse 环境起进程。
 
 **推荐顺序 A → B → C**：A 先确认前一片没白做（便宜、低风险）；B 是产品灵魂"先讨论"、且在任何会话做都安全；C 价值最大但工程量最大、且必须另开 agentpulse 锚定会话。B/C 的先后可调，但 A 应最先。
 

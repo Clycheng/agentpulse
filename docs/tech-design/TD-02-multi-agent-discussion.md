@@ -28,6 +28,27 @@
 - **执行层暂不变**：仍走 `complete_agent_reply` → DeepSeek。多 agent 只是"多次调用不同人格的临时执行层"，等 TD-03 再把这层换成 Hermes。
 - 群成员发言不能无限互相刷屏：加"连续 agent 发言不超过 M 条就必须停下等老板"或"每轮上限 N"。
 
+### 字段级细化（worker AI 直接照此实现）
+
+**接线点**：`workspace.py::send_message`——群聊(kind='group')且 `discussion_status='discussing'` 时，把现有"逐个 reply agents 调 `complete_agent_reply`"替换为一次 `run_discussion_round(...)`；DM(kind='dm')保持现状不动。
+
+**配置常量**（`orchestration/discussion.py` 顶部，可被 `core/config.py` 环境变量覆盖）：
+```python
+MAX_AGENT_TURNS_PER_ROUND = 4      # 一条老板消息最多触发几条 agent 发言
+TRANSCRIPT_WINDOW = 30             # 组 prompt 用最近 N 条消息
+MODERATOR_IS_DEFAULT_SECRETARY = True  # v1 主持人固定=小秘(source='secretary' 的 agent)
+```
+
+**发言人选择**（`select_next_speaker`）：① 最后一条老板消息有 `@员工` → 直接选它（复用 send_message 现有 mention 解析）；② 否则主持人 LLM 选：prompt 输入=transcript 窗口 + 各群成员 `{name, role, description}`，**强制输出严格 JSON** `{"next_speaker": "<agent_id>|NONE", "reason": "..."}`，解析失败/非法 id → 降级为轮询下一个未发言成员；返回 `None`=该停下等人。
+
+**收敛判定**（`check_convergence(conn, conversation_id) -> dict`〔新增〕）：主持人 LLM，输入=transcript 窗口，输出严格 JSON `{"converged": bool, "missing": ["还缺什么背景", ...]}`；`converged=true` → 主持人再走一次 LLM 起草 brief 字段并**服务内直调** `orchestration.brief.create_brief(...)`（不绕 HTTP）；到 `MAX_AGENT_TURNS_PER_ROUND` 上限仍未收敛 → 也强制起草一版（`missing` 写进 brief 的 `constraints` 或说明），交老板定夺。
+
+**每条 agent 发言的 prompt 组装**（复用现有 `complete_agent_reply` 的上下文机制，追加两段系统约束）：
+- "当前处于**讨论阶段**：只允许讨论/提问/补充背景，不允许宣称已执行任何动作"（transition 约束的 prompt 侧；硬保障仍是 gate）。
+- "你是 <name>（<role>）,发言保持角色视角,不重复别人已说的"。
+
+**防刷屏**：`run_discussion_round` 内部计数,连续 agent 发言达 `MAX_AGENT_TURNS_PER_ROUND` 即停;下一条老板消息才开启新一轮。
+
 ### 开放问题（实现前定，别猜）
 1. 主持人角色固定是"小秘"，还是每个群可配？v1 建议固定小秘，可后续放开。
 2. 发言人选择用 LLM 判断，成本/延迟可接受吗？还是先用更简单规则（轮询群成员一圈）？建议 v1 先 LLM 选、但带轮次上限兜底。

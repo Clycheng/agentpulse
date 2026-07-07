@@ -39,11 +39,35 @@ Task(已过 brief 门控) → RunService 建 Run(queued) → 建绝对路径 wor
    └─ final → 写回 agent 消息 + 更新 Task 产出/进度，Run=completed
 ```
 
-### 开放问题（实现前定，别猜）
-1. **Hermes 进程怎么起/怎么管**：本机验证时是 `hermes -p <profile> gateway run` 起 HTTP API(:8642)。本阶段先"后端启动时拉起 N 个 profile 的 gateway"还是"按需拉起"？建议本机阶段先手动/脚本拉起固定几个，管理策略留到远程部署阶段。
-2. **一个 gateway 多 profile vs 一 profile 一 gateway**：验证时是 `-p muobai gateway run` 单 profile。多员工时是多进程多端口，还是 Hermes 支持单网关多 profile 路由？需查/实测确认（本机验证只跑了单 profile 网关）。
-3. **模型名**：本机实测 DeepSeek 侧可用名是 `deepseek-v4-flash`/`deepseek-v4-pro`（不是 `deepseek-chat`），profile config 要配对。
-4. **审批粒度**：本机验证时"本地写文件"默认没触发 `approval_required`——需要给员工挂一个明确高风险的工具（如"发送"类）才验证得了审批链路；本阶段要选一个高风险工具接进来做端到端。
+### 字段级细化（worker AI 直接照此实现）
+
+**SSE 事件 → run_steps 映射表**（`runner.py` 的核心 switch，事件形状为实测所得）：
+| Hermes SSE `event` | AgentEvent.type | run_steps 落法 | 其他动作 |
+|---|---|---|---|
+| `message.delta` | `message` | **缓冲不逐条落**；聚合到 turn 结束落 1 行(type=message, payload=全文) | 逐 delta 推前端 |
+| `reasoning.available` | `thinking` | 1 行(payload=text) | 仅任务详情展示 |
+| `tool.started` | `tool_call` | 1 行(title=tool 名, payload=preview) | 推前端 |
+| `tool.completed` | `tool_result` | 1 行(payload=duration/error) | 推前端 |
+| `approval_required`〔触发条件待核 V5〕 | `approval_required` | 1 行 | **建 `approvals` 行(带 run_id) + `runs.status=waiting_user` + 停止消费 SSE** |
+| `run.completed` | `final` | 1 行(payload=output/usage) | 写回 agent 消息 + 更新 task + `runs.status=completed` |
+| (连接错误/超时) | `error` | 1 行 | `runs.status=failed` + `runs.error` |
+
+**RunService 签名**（`runtime/runner.py`〔新增〕）：
+```python
+async def start_run(conn, *, task_id: str, agent_id: str, prompt: str) -> str  # 返回 run_id
+    # 建 runs(queued) → mkdir workdir(绝对,V7 定语义) → status=running → 消费 HermesBackend.run(ctx)
+async def resume_after_approval(conn, *, approval_id: str, decision: Literal["approved","rejected"]) -> None
+    # 经 approvals.run_id 找 runs.hermes_run_id → POST {hermes}/v1/runs/{id}/approval → 继续消费 SSE
+```
+
+**前端拿进度（v1 决策：轮询，不建 WS）**：新增 `GET /api/runs/{run_id}` 与 `GET /api/runs/{run_id}/steps?after=<step_id>`（增量拉取）；桌面端任务详情 2s 轮询。WebSocket/SSE 推送留到体验优化片，避免本片引入新基建。（此两接口回填 DATA-MODEL §5 后为准。）
+
+### 开放问题（**已转入 [HERMES-VERIFICATION-PLAYBOOK](HERMES-VERIFICATION-PLAYBOOK.md)，worker AI 照剧本实测后回填**）
+1. **Hermes 进程怎么起/怎么管**：建议本机阶段先脚本拉起固定几个 profile 的 gateway；管理策略留到远程部署阶段（拓扑见 ARCHITECTURE-DETAILED §2）。
+2. **单网关多 profile vs 一 profile 一进程** → 剧本 **V4**。
+3. **模型名**：已实测钉死 `deepseek-v4-flash`/`deepseek-v4-pro`（不是 `deepseek-chat`）。
+4. **审批触发条件/粒度** → 剧本 **V5**。
+5. **workdir per-Run 还是 per-profile 语义** → 剧本 **V7**。
 
 ## Tech-Tasks
 

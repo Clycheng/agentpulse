@@ -151,7 +151,9 @@ def run_discussion_round(conn, *, workspace_id, conversation_id,
 ## 5. 【目标】TD-03 新增契约（接 Hermes 执行）
 
 ### 5.1 `runs` 扩列（两 schema 都加）
-新增：`task_id TEXT NOT NULL FK→tasks CASCADE`（Run 必属 Task）、`hermes_profile_id TEXT`（对应员工 profile）、`hermes_run_id TEXT`（Hermes 侧 run id）、`workdir TEXT NOT NULL`（**绝对路径**隔离目录）。`status` 状态机扩为 `queued→running→waiting_user→completed|failed`。
+新增：`task_id TEXT NOT NULL FK→tasks CASCADE`（Run 必属 Task）、`hermes_profile_id TEXT`（对应员工 profile）、`hermes_run_id TEXT`（Hermes 侧 run id）、`workdir TEXT NOT NULL`（**绝对路径**隔离目录；per-Run 还是 per-profile 语义待 [验证剧本 V7](HERMES-VERIFICATION-PLAYBOOK.md) 定）。`status` 状态机扩为 `queued→running→waiting_user→completed|failed`。
+
+**`approvals` 扩列（两 schema 都加）**：`run_id TEXT REFERENCES runs(id) ON DELETE SET NULL`（可空——旧的任务状态审批无 run）。**没有它，老板批准后找不到该恢复哪个 Run**（恢复 = 用 `runs.hermes_run_id` 调 Hermes `POST /v1/runs/{hermes_run_id}/approval`）。
 
 ### 5.2 `run_steps` 新表
 | 列 | 类型 | 约束 |
