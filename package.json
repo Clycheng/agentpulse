@@ -9,10 +9,13 @@
     "apps/admin"
   ],
   "scripts": {
+    "dev": "bash scripts/dev.sh",
     "dev:web": "npm run dev --workspace @agentpulse/web",
     "dev:desktop": "npm run dev --workspace @agentpulse/desktop",
     "dev:admin": "npm run dev --workspace @agentpulse/admin",
     "dev:api": "cd services/api && uvicorn app.main:app --reload --port 8000",
+    "dev:db": "docker compose up -d",
+    "dev:db:stop": "docker compose down",
     "build": "npm run build --workspaces",
     "build:web": "npm run build --workspace @agentpulse/web",
     "build:desktop": "npm run build --workspace @agentpulse/desktop",
