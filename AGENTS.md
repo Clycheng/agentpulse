@@ -123,7 +123,7 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 | [AGENTS.md](AGENTS.md) | **本文件**：方向 + 架构 + 规范(接手第一读) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 详细架构 + 调研结论 + 出处。**这就是 `docs/workflow.md`/`docs/backlog.md` 里 Architecture 阶段要产出的那份文档**——两边指的是同一份，只是大小写不同(历史遗留)，不要另建 `docs/architecture.md` |
 | [docs/decisions/](docs/decisions/) | 架构决策记录(ADR)，含决策约定("为什么这么决定") |
-| [docs/tech-design/](docs/tech-design/) | 技术设计 + tech-task 拆解("具体怎么实现")——当前目标弧的 TD-01/02/03，动手直接照做 |
+| [docs/tech-design/](docs/tech-design/) | 技术设计 + tech-task 拆解("具体怎么实现")。**先读 [the-loop.md](docs/tech-design/the-loop.md)(闭环走查) + [DATA-MODEL-AND-API.md](docs/tech-design/DATA-MODEL-AND-API.md)(表/字段/接口唯一真相源)**，再看 TD-01/02/03，动手直接照做 |
 | [docs/research/](docs/research/) | 竞品/开源项目调研(如 `dust.md`、`skill-source-repos.md`)，**已调研但未拍板**——区别于 `docs/decisions/`(已拍板) |
 | [docs/prd.md](docs/prd.md) | MVP 产品需求文档：范围、用户故事、非目标 |
 | [docs/backlog.md](docs/backlog.md) | Epic/Story/Task 拆分、验收标准、依赖图、assignee 建议 |

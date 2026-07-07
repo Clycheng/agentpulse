@@ -27,14 +27,23 @@
 5. 尝试绕过 brief 直接 `POST /api/tasks`（无 `consensus_brief_id`、无 `parent_task_id`）→ 断言：被门控拒绝（400）。
 （每步截图或记录响应，作为"验证过"的证据，遵循 AGENTS.md §5"声明完成前先验证"。）
 
+> 字段/接口/表的权威规格见 [DATA-MODEL-AND-API.md](DATA-MODEL-AND-API.md)；本阶段要修的不对齐项是其 §3 的 G2、G3。
+
 ## Tech-Tasks
 
-### TD-01-T1：接线讨论态状态机到 brief 生命周期
+### TD-01-T1：接线讨论态状态机到 brief 生命周期（修 DATA-MODEL §3 G3）
 - 改动点：`orchestration/brief.py` 的 confirm/reject 里调用 `discussion.set_discussion_status`；新建 brief 草稿或 reject 后回到 `discussing`，confirm 后置 `aligned`。
 - 验收：单测覆盖"confirm→会话 aligned""reject→会话仍 discussing"；`bootstrap`/会话查询能返回 `discussion_status`。
 - 依赖：无（纯 `services/api`）。
 - 需 agentpulse 会话：否（可在任意会话写代码 + 跑单测）。
 - 估算：0.5 天。
+
+### TD-01-T1b：给 `TaskOut` 补 `consensus_brief_id`（修 DATA-MODEL §3 G2）
+- 改动点：`schemas/workspace.py::TaskOut` 加 `consensus_brief_id: str | None = None`；任务查询 SQL / 序列化带出该列；`bootstrap` 返回的任务也带上。
+- 验收：单测——建带 brief 的任务后，`GET`/bootstrap 返回的该任务含正确 `consensus_brief_id`。
+- 依赖：无（纯 `services/api`）。
+- 需 agentpulse 会话：否。
+- 估算：0.3 天。
 
 ### TD-01-T2：端到端手测 + 修 bug
 - 改动点：按上面"端到端手测脚本"实跑，修暴露的接线/前端回调/字段缺失问题。

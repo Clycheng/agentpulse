@@ -40,6 +40,8 @@
 - Task 创建必须关联一个 `confirmed` 状态的 brief
 - 子 Task 可以继承父 Task 的 brief（不需要新 brief）
 
+> 📌 勘误（2026-07-07）：本节下表为设计初稿，实际实现与权威规格以 [tech-design/DATA-MODEL-AND-API.md](../tech-design/DATA-MODEL-AND-API.md) 为准。已知差异：DB 实际列名是 `participant_agent_ids_json`（本节写成了 `participant_agent_ids`，那是 API 字段名）。以 DATA-MODEL 文件为唯一真相源。
+
 **表结构**（`consensus_briefs` 表）：
 
 | 字段 | 类型 | 必填 | 说明 |
