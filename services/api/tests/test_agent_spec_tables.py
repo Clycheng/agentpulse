@@ -57,8 +57,8 @@ def create_workspace_and_agent():
         conn.execute(
             """INSERT INTO agents
             (id, workspace_id, department_id, name, role, description, prompt,
-             hue, glyph, status_kind, status_label, joined, source, skills_json, mcps_json)
-            VALUES (?, ?, ?, 'TestAgent', 'test', 'test', 'test', 0, 'A', 'idle', '', ?, 'custom', '[]', '[]')
+             hue, glyph, status_kind, status_label, joined, source, skills_json, mcps_json, created_at)
+            VALUES (?, ?, ?, 'TestAgent', 'test', 'test', 'test', 0, 'A', 'idle', '', '今天入职', 'custom', '[]', '[]', ?)
             """,
             (agent_id, workspace_id, dept_id, created_at),
         )
@@ -224,17 +224,26 @@ class TestAgentCapabilityConstraints:
         conn = connect()
         try:
             created_at = now_iso()
-            for i in range(2):
+            # First insert succeeds
+            conn.execute(
+                """INSERT INTO agent_capabilities
+                (id, agent_id, workspace_id, capability_key,
+                 risk_gate, status, created_at, updated_at)
+                VALUES (?, ?, ?, 'write_code', 'auto', 'pending', ?, ?)
+                """,
+                (new_id("cap"), agent_id, workspace_id, created_at, created_at),
+            )
+            conn.commit()
+            # Second insert with same (agent_id, capability_key) should fail
+            with pytest.raises(Exception):
                 conn.execute(
                     """INSERT INTO agent_capabilities
                     (id, agent_id, workspace_id, capability_key,
                      risk_gate, status, created_at, updated_at)
                     VALUES (?, ?, ?, 'write_code', 'auto', 'pending', ?, ?)
                     """,
-                    (new_id("cap"), agent_id, workspace_id, created_at, created_at),
+                    (new_id("cap2"), agent_id, workspace_id, created_at, created_at),
                 )
-            with pytest.raises(Exception):
-                conn.commit()
         finally:
             conn.close()
 

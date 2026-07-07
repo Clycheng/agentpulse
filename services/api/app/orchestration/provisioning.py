@@ -27,10 +27,10 @@ from app.orchestration.capability_catalog import (
 _ROLE_SPEC_SYSTEM_PROMPT = """你是一个 AI 员工配置助手。根据用户描述，输出该员工的职责和能力需求。
 
 输出格式（严格 JSON，不要多余文字）：
-{
+{{
   "responsibilities": ["职责1", "职责2", ...],
   "suggested_capability_keys": ["key1", "key2", ...]
-}
+}}
 
 可用能力 key（只从以下选取）：
 {available_keys}
@@ -55,6 +55,12 @@ SOUL.md 是 Hermes Agent 的人格文件，定义了 AI 员工的行为准则。
 
 公司名：{company_name}
 产品：AI 公司工作台（AgentPulse）
+
+员工职责：
+{responsibilities_text}
+
+员工能力：
+{capabilities_text}
 """
 
 
@@ -175,7 +181,11 @@ def build_soul_md_prompt(
     caps_text = "\n".join(cap_descriptions) if cap_descriptions else "无特定能力要求"
     resp_text = "\n".join(f"- {r}" for r in responsibilities) if responsibilities else "待补充"
 
-    return _SOUL_MD_SYSTEM_PROMPT.format(company_name=company_name)
+    return _SOUL_MD_SYSTEM_PROMPT.format(
+        company_name=company_name,
+        responsibilities_text=resp_text,
+        capabilities_text=caps_text,
+    )
 
 
 def draft_soul_md(

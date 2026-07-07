@@ -56,8 +56,8 @@ def create_workspace_and_agent():
         conn.execute(
             """INSERT INTO agents
             (id, workspace_id, department_id, name, role, description, prompt,
-             hue, glyph, status_kind, status_label, joined, source, skills_json, mcps_json)
-            VALUES (?, ?, ?, 'TestAgent', 'test', 'test', 'test', 0, 'A', 'idle', '', ?, 'custom', '[]', '[]')
+             hue, glyph, status_kind, status_label, joined, source, skills_json, mcps_json, created_at)
+            VALUES (?, ?, ?, 'TestAgent', 'test', 'test', 'test', 0, 'A', 'idle', '', '今天入职', 'custom', '[]', '[]', ?)
             """,
             (agent_id, workspace_id, dept_id, created_at),
         )
