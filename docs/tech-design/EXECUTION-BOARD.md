@@ -12,7 +12,7 @@
 | 3 | [TD-01-T1b](TD-01-verify-and-harden-slice-1.md) | TaskOut 补 consensus_brief_id(G2) | 任意 | ✅ 完成(待测) |
 | 4 | [TD-05-T1](TD-05-capability-catalog.md) | capability_catalog 模块+校验+合并(risk 只升不降) | 任意 | ✅ 完成(待测) |
 | 5 | [TD-04-T1](TD-04-agent-provisioning.md) | agent_specs/agent_capabilities 建表+DTO(⚠️双 schema) | 任意 | ✅ 完成(待测) |
-| 6 | [TD-04-T2](TD-04-agent-provisioning.md) | ProfileProvisioner 接口+RecordOnly 实现 | 任意 | ⚪ 待领 |
+| 6 | [TD-04-T2](TD-04-agent-provisioning.md) | ProfileProvisioner 接口+RecordOnly 实现 | 任意 | ✅ 完成(待测) |
 
 注：1 与 2–6 **可由不同 AI 并行**；2–6 之间按序（5 依赖 4，6 无依赖可与 4/5 并行）。
 
