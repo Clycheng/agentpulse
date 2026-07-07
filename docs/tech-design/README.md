@@ -10,6 +10,7 @@
 
 | 文件 | 作用 |
 |---|---|
+| [EXECUTION-BOARD.md](EXECUTION-BOARD.md) | **⓪ 执行看板(唯一任务状态源)**：现在该做什么、顺序/依赖/会话要求/认领规则——冷启动第一跳 |
 | [the-loop.md](the-loop.md) | **① 闭环走查锚文档**：一个具体场景把"目标→讨论→brief→建任务→执行→回写"整条闭环走一遍(带真实数据)，先懂闭环再看任务 |
 | [ARCHITECTURE-DETAILED.md](ARCHITECTURE-DETAILED.md) | **② 实现级系统架构(脊梁)**：组件全景/部署拓扑/分层模块职责+接口/核心时序(NL→agent 供给、讨论→任务、任务→Hermes 执行)/横切关注点/Hermes 边界契约/各组件深化索引 |
 | [DATA-MODEL-AND-API.md](DATA-MODEL-AND-API.md) | **③ 唯一真相源**：所有表/字段/接口/错误码的精确规格(§6 含 agent 供给新表+capability catalog) + 已知不对齐项(G1–G5)。写代码前先查这里，别照 ADR 里的初稿建表 |
@@ -32,10 +33,10 @@
 ## Worker AI 执行协议（领任务前必读）
 
 1. **读**：AGENTS.md → the-loop → ARCHITECTURE-DETAILED → DATA-MODEL(查你要动的表/接口) → 你领的 TD。
-2. **领**：一次领一个 `TD-NN-Tk`，先确认其"依赖"已完成、"需 agentpulse 会话"与你当前会话匹配(不匹配就别做，尤其起 Hermes 的任务——ADR 0005)。
+2. **领**：到 [EXECUTION-BOARD.md](EXECUTION-BOARD.md)(唯一任务状态源)挑「现在就做」里最靠前且会话类型匹配的任务；**开工第一个动作=把看板上该任务改成 🔵 进行中并 commit+push**(认领锁，防多 AI 撞车)。"需 agentpulse 会话"与当前会话不匹配就别领(尤其起 Hermes 的任务——ADR 0005)。
 3. **做**：schema/接口以 [DATA-MODEL-AND-API.md](DATA-MODEL-AND-API.md) 为准，与 TD 冲突时以 DATA-MODEL 为准并上报；建表/加列必须双 schema(init_postgres+init_sqlite)都改。
 4. **验**：按 task 的验收标准逐条自证(跑测试/截图/记录响应)；"声明完成前先验证"(AGENTS.md §5)。
-5. **记**：更新 CHANGELOG；把 task 在 TD 文件里标 ✅ 并注 commit；实测出的〔待核〕真相**必须回填** DATA-MODEL/相关 TD；过时文档同步。
+5. **记**：更新 CHANGELOG；**回看板把任务标 ✅(注 commit) 并 push**(状态只在看板标，TD 文件不标)；实测出的〔待核〕真相**必须回填** DATA-MODEL/相关 TD；过时文档同步。
 6. **禁**：不改 `docs/decisions/` 已有 ADR(要变新开)；不放宽任何 risk_gate；不在 UnitPulse 环境起进程。
 
 **推荐顺序 A → B → C**：A 先确认前一片没白做（便宜、低风险）；B 是产品灵魂"先讨论"、且在任何会话做都安全；C 价值最大但工程量最大、且必须另开 agentpulse 锚定会话。B/C 的先后可调，但 A 应最先。

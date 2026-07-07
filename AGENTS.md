@@ -74,12 +74,7 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 | 群讨论协议 | 🟢 **第一片已实现并通过测试**(2026-07-07, commit `c2054bf`, 14 tests)：讨论态状态机 + 共识 brief + **Task 创建强制门控**(已移除正则自动建任务)，对齐用人工确认。见 [ADR 0006](docs/decisions/0006-group-discussion-v1-first-slice.md)。⚠️ 仅通过单测，**尚未在跑起来的应用里端到端手测过 UI 流程** | 叠加多 agent 发言路由(完整 AutoGen 骨架) |
 | Hermes 集成 | 🟡 本机地基验证已完成(2026-07-05)：多 profile 隔离、HTTP Runs API + SSE 流式全链路跑通；发现 2 个必须处理的坑，见 [ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md) | 接入 `services/api`，成为真正的员工运行时 |
 
-**下一步（群讨论第一片已完成；剩余阶段已拆成 tech-design + tech-task，见 [docs/tech-design/](docs/tech-design/)）**，推荐顺序 A → B → C：
-1. **[TD-01](docs/tech-design/TD-01-verify-and-harden-slice-1.md)（阶段 A，小）**：端到端手测并收尾第一片(讨论态接线 + UI 全流程真实跑通)。**须在 agentpulse 锚定会话做**(起服务)。
-2. **[TD-02](docs/tech-design/TD-02-multi-agent-discussion.md)（阶段 B，中大）**：多 agent 真正在群里接力讨论(照 AutoGen 骨架)。纯 `services/api`，暂不碰 Hermes，任意会话可写代码。
-3. **[TD-03](docs/tech-design/TD-03-hermes-execution.md)（阶段 C，大）**：执行层从直连 DeepSeek 换成真·Hermes(Run/RunStep + HermesBackend + workdir 隔离 + 审批闭环)。**会真起 Hermes 进程，必须在 agentpulse 锚定会话做**([ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md))。
-
-每个 TD 文件内含"技术设计 + 编号 Tech-Task(带验收标准/依赖/是否需 agentpulse 会话)"，动手直接照做。
+**下一步 → 直接看 [docs/tech-design/EXECUTION-BOARD.md](docs/tech-design/EXECUTION-BOARD.md)（执行看板 = 唯一任务状态源）**：它列着"现在就做"的任务队列(带顺序/依赖/会话要求/状态)和认领规则——**AI 不需要人类告诉下一步，读看板即知**。设计文档体系(架构/规格/各 TD)入口见 [docs/tech-design/README.md](docs/tech-design/README.md)。
 
 ---
 
