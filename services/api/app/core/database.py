@@ -343,6 +343,38 @@ def init_postgres(conn: Database) -> None:
           created_at TEXT NOT NULL,
           completed_at TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS agent_specs (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          role_name TEXT NOT NULL,
+          source_request TEXT NOT NULL DEFAULT '',
+          responsibilities_json TEXT NOT NULL DEFAULT '[]',
+          hermes_profile TEXT,
+          status TEXT NOT NULL DEFAULT 'draft'
+            CHECK(status IN ('draft','provisioning','blocked_on_credentials','ready','failed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_capabilities (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          capability_key TEXT NOT NULL,
+          skill_refs_json TEXT NOT NULL DEFAULT '[]',
+          toolset_refs_json TEXT NOT NULL DEFAULT '[]',
+          mcp_refs_json TEXT NOT NULL DEFAULT '[]',
+          required_credentials_json TEXT NOT NULL DEFAULT '[]',
+          risk_gate TEXT NOT NULL DEFAULT 'auto'
+            CHECK(risk_gate IN ('auto','approval','prohibited_auto')),
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending','credential_missing','enabled','disabled')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(agent_id, capability_key)
+        );
         """
     )
     ensure_column(conn, "messages", "provider", "TEXT")
@@ -566,6 +598,38 @@ def init_sqlite(conn: Database) -> None:
           error TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL,
           completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_specs (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          role_name TEXT NOT NULL,
+          source_request TEXT NOT NULL DEFAULT '',
+          responsibilities_json TEXT NOT NULL DEFAULT '[]',
+          hermes_profile TEXT,
+          status TEXT NOT NULL DEFAULT 'draft'
+            CHECK(status IN ('draft','provisioning','blocked_on_credentials','ready','failed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_capabilities (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          capability_key TEXT NOT NULL,
+          skill_refs_json TEXT NOT NULL DEFAULT '[]',
+          toolset_refs_json TEXT NOT NULL DEFAULT '[]',
+          mcp_refs_json TEXT NOT NULL DEFAULT '[]',
+          required_credentials_json TEXT NOT NULL DEFAULT '[]',
+          risk_gate TEXT NOT NULL DEFAULT 'auto'
+            CHECK(risk_gate IN ('auto','approval','prohibited_auto')),
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending','credential_missing','enabled','disabled')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(agent_id, capability_key)
         );
         """
     )
