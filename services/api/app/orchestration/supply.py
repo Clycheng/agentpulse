@@ -1,0 +1,317 @@
+"""Supply state machine and provisioning orchestration (TD-04-T4).
+
+State machine for agent_specs.status:
+  draft → provisioning → (blocked_on_credentials ⇄) → ready
+                         ↓ (any step fails)
+                       failed (retry: provision() is idempotent)
+
+Core function: provision(conn, agent_id, provisioner)
+- Creates agent_capabilities rows from role_spec capability_keys
+- Drives ProfileProvisioner calls
+- Handles credential_missing → blocked_on_credentials
+- Idempotent: re-provisioning only processes pending/failed steps
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+
+from app.core.database import Database
+from app.orchestration.capability_catalog import (
+    CATALOG,
+    get_capability,
+    resolve_bundle,
+    validate_capability_keys,
+)
+from app.runtime.profile_provisioner import ProfileProvisioner, RecordOnlyProvisioner
+
+
+class ProvisioningError(Exception):
+    """Raised when provisioning fails."""
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _new_id(prefix: str) -> str:
+    from uuid import uuid4
+    return f"{prefix}_{uuid4().hex}"
+
+
+def create_agent_spec(
+    conn: Database,
+    *,
+    agent_id: str,
+    workspace_id: str,
+    role_name: str,
+    source_request: str = "",
+    responsibilities: list[str] | None = None,
+    capability_keys: list[str] | None = None,
+) -> dict:
+    """Create an agent_spec row with capabilities from catalog.
+
+    This creates the spec in 'draft' status and populates
+    agent_capabilities rows from the catalog.
+
+    Args:
+        conn: Database connection
+        agent_id: Agent ID (must exist)
+        workspace_id: Workspace ID
+        role_name: Role name
+        source_request: User's NL request
+        responsibilities: List of responsibilities
+        capability_keys: List of validated capability keys
+
+    Returns:
+        Serialized spec dict
+    """
+    spec_id = _new_id("spec")
+    now = _now_iso()
+    resp_json = json.dumps(responsibilities or [], ensure_ascii=False)
+    cap_keys = capability_keys or []
+
+    # Create spec row
+    conn.execute(
+        """INSERT INTO agent_specs
+        (id, agent_id, workspace_id, role_name, source_request,
+         responsibilities_json, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+        """,
+        (spec_id, agent_id, workspace_id, role_name, source_request, resp_json, now, now),
+    )
+
+    # Create capability rows from catalog
+    for key in cap_keys:
+        cap_def = get_capability(key)
+        cap_id = _new_id("cap")
+        conn.execute(
+            """INSERT INTO agent_capabilities
+            (id, agent_id, workspace_id, capability_key,
+             skill_refs_json, toolset_refs_json, mcp_refs_json,
+             required_credentials_json, risk_gate, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cap_id,
+                agent_id,
+                workspace_id,
+                key,
+                json.dumps(sorted(cap_def.skills), ensure_ascii=False),
+                json.dumps(sorted(cap_def.toolsets), ensure_ascii=False),
+                json.dumps(sorted(cap_def.mcp), ensure_ascii=False),
+                json.dumps(sorted(cap_def.required_credentials), ensure_ascii=False),
+                cap_def.risk_gate,
+                "pending",
+                now,
+                now,
+            ),
+        )
+
+    return _serialize_spec(conn, spec_id)
+
+
+def provision(
+    conn: Database,
+    agent_id: str,
+    provisioner: ProfileProvisioner | None = None,
+) -> dict:
+    """Provision an agent — drive the supply state machine.
+
+    Idempotent: only processes capabilities not yet enabled.
+    Steps:
+    1. Set spec status → provisioning
+    2. For each capability:
+       - If no credentials needed → enable
+       - If credentials needed but missing → credential_missing
+       - If prohibited_auto → always credential_missing (manual only)
+    3. Generate hermes_profile name
+    4. Call ProfileProvisioner for enabled capabilities
+    5. If any credential_missing → blocked_on_credentials
+    6. If all enabled → ready
+    7. On error → failed
+
+    Args:
+        conn: Database connection
+        agent_id: Agent ID
+        provisioner: ProfileProvisioner (defaults to RecordOnlyProvisioner)
+
+    Returns:
+        Updated serialized spec dict
+
+    Raises:
+        ProvisioningError: If spec not found or not in provisionable state
+    """
+    if provisioner is None:
+        provisioner = RecordOnlyProvisioner()
+
+    spec = conn.execute(
+        "SELECT * FROM agent_specs WHERE agent_id = ?", (agent_id,)
+    ).fetchone()
+    if spec is None:
+        raise ProvisioningError(f"agent_spec not found for agent {agent_id}")
+
+    spec_id = spec["id"]
+
+    # Only provision from draft or failed states
+    if spec["status"] not in ("draft", "failed", "blocked_on_credentials"):
+        # Already provisioning or ready — return current state
+        return _serialize_spec(conn, spec_id)
+
+    now = _now_iso()
+
+    # Set status → provisioning
+    conn.execute(
+        "UPDATE agent_specs SET status = 'provisioning', updated_at = ? WHERE id = ?",
+        ("provisioning", spec_id),
+    )
+
+    try:
+        # Get capabilities for this agent
+        capabilities = conn.execute(
+            "SELECT * FROM agent_capabilities WHERE agent_id = ? ORDER BY created_at",
+            (agent_id,),
+        ).fetchall()
+
+        # Process each capability
+        any_credential_missing = False
+        for cap_row in capabilities:
+            key = cap_row["capability_key"]
+            cap_status = cap_row["status"]
+
+            # Skip already enabled
+            if cap_status == "enabled":
+                continue
+
+            cap_def = get_capability(key)
+            required_creds = cap_def.required_credentials
+
+            # prohibited_auto: always blocked (manual only)
+            if cap_def.risk_gate == "prohibited_auto":
+                conn.execute(
+                    "UPDATE agent_capabilities SET status = 'credential_missing', updated_at = ? WHERE id = ?",
+                    (now, cap_row["id"]),
+                )
+                any_credential_missing = True
+                continue
+
+            # No credentials needed → enable directly
+            if not required_creds:
+                conn.execute(
+                    "UPDATE agent_capabilities SET status = 'enabled', updated_at = ? WHERE id = ?",
+                    (now, cap_row["id"]),
+                )
+                continue
+
+            # Credentials needed — check if they're provided
+            # For v1: we check if any credentials have been written
+            # by looking at a per-agent credentials store
+            # For now: mark as credential_missing (credentials API is TD-04-T5)
+            conn.execute(
+                "UPDATE agent_capabilities SET status = 'credential_missing', updated_at = ? WHERE id = ?",
+                (now, cap_row["id"]),
+            )
+            any_credential_missing = True
+
+        # Determine final status
+        if any_credential_missing:
+            final_status = "blocked_on_credentials"
+        else:
+            # All capabilities enabled — generate profile and provision
+            profile_name = _generate_profile_name(conn, agent_id, spec["workspace_id"])
+
+            # Build bundle from enabled capabilities
+            enabled_keys = [
+                cap["capability_key"]
+                for cap in conn.execute(
+                    "SELECT capability_key FROM agent_capabilities WHERE agent_id = ? AND status = 'enabled'",
+                    (agent_id,),
+                ).fetchall()
+            ]
+            bundle = resolve_bundle(enabled_keys)
+
+            # Call provisioner
+            provisioner.create_profile(profile_name)
+            provisioner.configure(
+                profile_name,
+                model="deepseek/deepseek-chat",
+                toolsets=bundle["toolsets"],
+                mcp=bundle["mcp"],
+            )
+            if bundle["skills"]:
+                provisioner.install_skills(profile_name, bundle["skills"])
+
+            # Update spec
+            conn.execute(
+                "UPDATE agent_specs SET hermes_profile = ?, status = 'ready', updated_at = ? WHERE id = ?",
+                (profile_name, now, spec_id),
+            )
+            final_status = "ready"
+
+        # Update spec status
+        conn.execute(
+            "UPDATE agent_specs SET status = ?, updated_at = ? WHERE id = ?",
+            (final_status, now, spec_id),
+        )
+
+    except Exception:
+        # On any error → failed
+        conn.execute(
+            "UPDATE agent_specs SET status = 'failed', updated_at = ? WHERE id = ?",
+            (now, spec_id),
+        )
+        raise
+
+    return _serialize_spec(conn, spec_id)
+
+
+def _generate_profile_name(conn: Database, agent_id: str, workspace_id: str) -> str:
+    """Generate a unique Hermes profile name: wk<ws6>-<agent6>."""
+    ws_short = workspace_id.replace("wk_", "")[:6]
+    ag_short = agent_id.replace("agent_", "")[:6]
+    base = f"wk{ws_short}-{ag_short}"
+    return base
+
+
+def _serialize_spec(conn: Database, spec_id: str) -> dict:
+    """Serialize an agent_spec with its capabilities."""
+    spec = conn.execute(
+        "SELECT * FROM agent_specs WHERE id = ?", (spec_id,)
+    ).fetchone()
+    if spec is None:
+        raise ProvisioningError(f"spec {spec_id} not found")
+
+    capabilities = conn.execute(
+        "SELECT * FROM agent_capabilities WHERE agent_id = ? ORDER BY created_at",
+        (spec["agent_id"],),
+    ).fetchall()
+
+    return {
+        "id": spec["id"],
+        "agent_id": spec["agent_id"],
+        "workspace_id": spec["workspace_id"],
+        "role_name": spec["role_name"],
+        "source_request": spec["source_request"],
+        "responsibilities": json.loads(spec["responsibilities_json"] or "[]"),
+        "hermes_profile": spec["hermes_profile"],
+        "status": spec["status"],
+        "capabilities": [
+            {
+                "id": cap["id"],
+                "agent_id": cap["agent_id"],
+                "capability_key": cap["capability_key"],
+                "skill_refs": json.loads(cap["skill_refs_json"] or "[]"),
+                "toolset_refs": json.loads(cap["toolset_refs_json"] or "[]"),
+                "mcp_refs": json.loads(cap["mcp_refs_json"] or "[]"),
+                "required_credentials": json.loads(cap["required_credentials_json"] or "[]"),
+                "risk_gate": cap["risk_gate"],
+                "status": cap["status"],
+                "created_at": cap["created_at"],
+                "updated_at": cap["updated_at"],
+            }
+            for cap in capabilities
+        ],
+        "created_at": spec["created_at"],
+        "updated_at": spec["updated_at"],
+    }

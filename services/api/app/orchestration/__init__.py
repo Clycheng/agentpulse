@@ -40,6 +40,11 @@ from app.orchestration.provisioning import (
     draft_role_spec,
     draft_soul_md,
 )
+from app.orchestration.supply import (
+    ProvisioningError,
+    create_agent_spec,
+    provision,
+)
 
 __all__ = [
     "create_brief",
@@ -62,4 +67,7 @@ __all__ = [
     "build_soul_md_prompt",
     "draft_role_spec",
     "draft_soul_md",
+    "ProvisioningError",
+    "create_agent_spec",
+    "provision",
 ]
