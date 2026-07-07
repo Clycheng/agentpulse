@@ -74,10 +74,12 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 | 群讨论协议 | 🟢 **第一片已实现并通过测试**(2026-07-07, commit `c2054bf`, 14 tests)：讨论态状态机 + 共识 brief + **Task 创建强制门控**(已移除正则自动建任务)，对齐用人工确认。见 [ADR 0006](docs/decisions/0006-group-discussion-v1-first-slice.md)。⚠️ 仅通过单测，**尚未在跑起来的应用里端到端手测过 UI 流程** | 叠加多 agent 发言路由(完整 AutoGen 骨架) |
 | Hermes 集成 | 🟡 本机地基验证已完成(2026-07-05)：多 profile 隔离、HTTP Runs API + SSE 流式全链路跑通；发现 2 个必须处理的坑，见 [ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md) | 接入 `services/api`，成为真正的员工运行时 |
 
-**下一步（群讨论第一片已完成，见上）**：以下三项，优先级请项目所有者定——
-1. **端到端手测第一片**：跑起后端+桌面端，真实走一遍「员工发 brief 草稿 → 老板确认 → 建任务 / 拒绝 → 继续讨论」，确认 UI 流程真的通(目前只有单测)。**须遵循 §5 隔离规矩，在 cwd 锚定于 agentpulse 的会话里做，不要在 UnitPulse worktree 会话里起服务。**
-2. **多 agent 发言路由**：在第一片之上叠加完整 AutoGen 骨架(SelectorGroupChat 那套)，让多个员工在群里真正接力讨论(纯 `services/api` 逻辑，暂不碰 Hermes)。
-3. **接 Hermes 真执行**：定义 Run 表 + `HermesBackend`，把执行层从"直连 DeepSeek"换成"调 Hermes profile"，落地 [ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md) 的 workdir 绝对路径隔离。**这一步会真起 Hermes 进程，必须遵循 §5 隔离规矩，在 agentpulse 锚定的会话里做。**
+**下一步（群讨论第一片已完成；剩余阶段已拆成 tech-design + tech-task，见 [docs/tech-design/](docs/tech-design/)）**，推荐顺序 A → B → C：
+1. **[TD-01](docs/tech-design/TD-01-verify-and-harden-slice-1.md)（阶段 A，小）**：端到端手测并收尾第一片(讨论态接线 + UI 全流程真实跑通)。**须在 agentpulse 锚定会话做**(起服务)。
+2. **[TD-02](docs/tech-design/TD-02-multi-agent-discussion.md)（阶段 B，中大）**：多 agent 真正在群里接力讨论(照 AutoGen 骨架)。纯 `services/api`，暂不碰 Hermes，任意会话可写代码。
+3. **[TD-03](docs/tech-design/TD-03-hermes-execution.md)（阶段 C，大）**：执行层从直连 DeepSeek 换成真·Hermes(Run/RunStep + HermesBackend + workdir 隔离 + 审批闭环)。**会真起 Hermes 进程，必须在 agentpulse 锚定会话做**([ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md))。
+
+每个 TD 文件内含"技术设计 + 编号 Tech-Task(带验收标准/依赖/是否需 agentpulse 会话)"，动手直接照做。
 
 ---
 
@@ -120,7 +122,8 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 | [README.md](README.md) | 产品愿景(高层，稳定) |
 | [AGENTS.md](AGENTS.md) | **本文件**：方向 + 架构 + 规范(接手第一读) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 详细架构 + 调研结论 + 出处。**这就是 `docs/workflow.md`/`docs/backlog.md` 里 Architecture 阶段要产出的那份文档**——两边指的是同一份，只是大小写不同(历史遗留)，不要另建 `docs/architecture.md` |
-| [docs/decisions/](docs/decisions/) | 架构决策记录(ADR)，含决策约定 |
+| [docs/decisions/](docs/decisions/) | 架构决策记录(ADR)，含决策约定("为什么这么决定") |
+| [docs/tech-design/](docs/tech-design/) | 技术设计 + tech-task 拆解("具体怎么实现")——当前目标弧的 TD-01/02/03，动手直接照做 |
 | [docs/research/](docs/research/) | 竞品/开源项目调研(如 `dust.md`、`skill-source-repos.md`)，**已调研但未拍板**——区别于 `docs/decisions/`(已拍板) |
 | [docs/prd.md](docs/prd.md) | MVP 产品需求文档：范围、用户故事、非目标 |
 | [docs/backlog.md](docs/backlog.md) | Epic/Story/Task 拆分、验收标准、依赖图、assignee 建议 |
