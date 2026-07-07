@@ -26,6 +26,7 @@
 | A | [TD-01](TD-01-verify-and-harden-slice-1.md) | 端到端手测并收尾第一片（含讨论态接线） | 是（要起后端+桌面端） | 小 |
 | B | [TD-02](TD-02-multi-agent-discussion.md) | 多 agent 真正在群里接力讨论（照 AutoGen 骨架） | 否（纯 `services/api` 逻辑，暂不碰 Hermes） | 中大 |
 | C | [TD-03](TD-03-hermes-execution.md) | 执行层从"直连 DeepSeek"换成"调 Hermes profile"(Run/RunStep + HermesBackend) | **是**（会真起 Hermes 进程，[ADR 0005](../decisions/0005-hermes-poc-safety-findings.md) 隔离规矩） | 大 |
+| D | [TD-05](TD-05-capability-catalog.md) → [TD-04](TD-04-agent-provisioning.md) | 能力映射表 + Agent 供给(一句话→定制员工)。与 B/C 可并行；仅 TD-04-T6 需 agentpulse 会话 | 大部分否 | 中 |
 
 **推荐顺序 A → B → C**：A 先确认前一片没白做（便宜、低风险）；B 是产品灵魂"先讨论"、且在任何会话做都安全；C 价值最大但工程量最大、且必须另开 agentpulse 锚定会话。B/C 的先后可调，但 A 应最先。
 

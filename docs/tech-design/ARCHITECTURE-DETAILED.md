@@ -134,5 +134,5 @@
 | 群讨论第一片收尾 | [TD-01](TD-01-verify-and-harden-slice-1.md) | 已拆 task，可深化 |
 | 多 agent 讨论编排 | [TD-02](TD-02-multi-agent-discussion.md) | 已拆 task，可深化 |
 | Hermes 执行接入 | [TD-03](TD-03-hermes-execution.md) | 已拆 task，含待核 |
-| agent 供给(NL→agent) | 〔待建 TD-04〕 | 本文 §4.1/§5.1 已给数据模型+时序，可展开 |
-| 能力映射表 capability_catalog | 〔待建 TD-05〕 | 本文 §4.1/§5、能力模型文档已给方向 |
+| agent 供给(NL→agent) | [TD-04](TD-04-agent-provisioning.md) | 已拆 task(逻辑/物理供给分段，ProfileProvisioner 接缝切在待核边界) |
+| 能力映射表 capability_catalog | [TD-05](TD-05-capability-catalog.md) | 已拆 task(代码常量+risk_gate 只升不降) |
