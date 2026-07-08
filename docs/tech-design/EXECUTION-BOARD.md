@@ -20,10 +20,13 @@
 
 | 任务 | 等什么 | 会话要求 |
 |---|---|---|
-| [TD-03-T2](TD-03-hermes-execution.md)(HermesBackend) | TD-03-T1 **且 TD-02-T5**（关键新增依赖，见上） | **agentpulse** |
+| [TD-03-T2](TD-03-hermes-execution.md)(HermesBackend) | TD-03-T1 **且 TD-02-T5** | **agentpulse** |
 | TD-03-T3(RunService+替换执行层) | TD-03-T2 | **agentpulse** |
-| TD-03-T4(Tirith 审批闭环) | TD-03-T3 | **agentpulse** |
+| TD-03-T4(Tirith 审批 + clarification_required) | TD-03-T3 | **agentpulse** |
 | TD-03-T5(员工↔profile 生命周期) | TD-03-T2；可与 TD-04-T6 合并做 | **agentpulse** |
+| [TD-06-T1](TD-06-agent-self-evolution.md)(技能自动沉淀) | TD-03-T3 + TD-04-T6 | **agentpulse** |
+| [TD-06-T2](TD-06-agent-self-evolution.md)(主动能力升级申请) | TD-03-T4 + TD-04-T6 | **agentpulse** |
+| TD-06-T3(SOUL 模板注入 + 成长轨迹 UI) | TD-06-T1 + TD-06-T2 | 否（前端）/ agentpulse（验 SOUL） |
 
 ## 已完成
 
