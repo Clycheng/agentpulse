@@ -95,6 +95,30 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 - 读 `AGENTS.md` + `docs/ARCHITECTURE.md` + `docs/decisions/`。
 - 任何偏离 §1/§2 方向的想法，**先跟项目所有者确认再动手**。
 
+### 架构层界验收（防漂逸 · 完成任何 TD task 前必做）
+
+**单测全过 ≠ 任务完成。** 上一轮 worker AI 就是因为只看单测，实现了功能等效但绕过了架构设计入口的代码（详见 [TD-02 🔴漂逸说明](docs/tech-design/TD-02-multi-agent-discussion.md)）。
+
+完成路由/编排/运行时任何改动后，在 commit 前强制跑以下检查：
+
+```bash
+# 1. 路由层不得有业务循环 / 独立 LLM 选发言人
+grep -rn "for.*turn\|while.*round\|_llm_select\|_extract_mention" services/api/app/api/routes/
+# 结果必须为空，否则不得声明完成
+
+# 2. 生产入口实际调用了编排函数（不是死码）
+grep -n "run_discussion_round\|select_next_speaker" services/api/app/api/routes/workspace.py
+# 必须有调用行出现；若只存在于 tests/ 则是死码
+
+# 3. 编排层不直接访问 HTTP/Hermes（通过 runtime/ 接口）
+grep -rn "httpx\|requests\|hermes_client\|HermesBackend" services/api/app/orchestration/
+# 结果必须为空
+```
+
+commit message 里加一行声明：`Verified: <函数名> called via production path <路由>`，不能空口。
+
+如果只修了 schema / 单测 / 文档 → 此检查跳过，但要说明原因。
+
 ### 做完后必须记录（重要 —— 让下一个 AI 也不跑偏）
 1. **架构/方向级决策** → 在 `docs/decisions/` 新增一条 ADR(见该目录 README 的格式)。
 2. **值得记的改动**(新功能、重构、依赖变化) → 更新 `CHANGELOG.md`。

@@ -15,7 +15,11 @@
 
 ### TD-02-T5：路由归位——消除重复实现，编排逻辑收回 orchestration 层（新增，阻塞 TD-03-T2/T3）
 - 改动点：`send_message` 和 `send_message_stream` 的讨论循环**统一改为调用 `orchestration/discussion.py::run_discussion_round`**（需要给它加流式变体或让路由包一层生成器）；删除路由层的 `_llm_select_speaker`/`_extract_mention_simple`，讨论中的发言人选择唯一入口收敛到 `select_next_speaker`；非流式 `send_message` 若已被前端弃用，评估是否降级为纯 API 兼容层或标记 deprecated（不要直接删，先确认无其他调用方/测试依赖）。
-- 验收：`run_discussion_round`/`select_next_speaker` 在生产路径下真正被调用（可加集成测试断言调用发生，而不仅靠单测）；`workspace.py` 里不再有独立的讨论循环/发言人选择实现；现有 372 行 `test_discussion.py` 保持全过。
+- 验收：
+  1. **架构断言（必须）**：在 `tests/` 新增集成测试，mock `orchestration.discussion.run_discussion_round`，向 `/messages/stream` 发真 HTTP 请求，断言 mock 被调用（验证生产路径真正经过编排入口，而不是单测那种直接 import 调函数的假验收）。
+  2. **禁止模式检查（必须）**：在 commit 前跑 `services/api/AGENTS.md` 里的三条 grep，结果必须干净。
+  3. **单测保持全过**：现有 372 行 `test_discussion.py` 不退步。
+  4. **workspace.py 不再有独立讨论循环/发言人选择**：grep 路由文件无 `_llm_select` / `_extract_mention_simple` 定义。
 - 依赖：无（在现有代码基础上重构）。需 agentpulse 会话：否（重构+单测，手测验证同 TD-01）。
 - 估算：1–1.5 天。
 - **TD-03-T2/T3 在此任务完成前不得开工**（否则会把 Hermes 接到错误的代码路径上）；TD-03-T1（纯 schema）不受影响，可继续。
