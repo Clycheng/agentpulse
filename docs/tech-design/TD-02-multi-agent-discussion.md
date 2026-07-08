@@ -3,6 +3,23 @@
 - 关联 ADR：[0002](../decisions/0002-self-built-group-discussion.md)（自研群讨论，照 AutoGen）、[0006](../decisions/0006-group-discussion-v1-first-slice.md)（第一片，本阶段在其上叠加）
 - ⚠️ 执行会话要求：纯 `services/api` 逻辑，**暂不碰 Hermes**，在任意会话做都安全（写代码 + 单测不起 Hermes 进程）；若要端到端手测则同 TD-01（需 agentpulse 锚定会话起服务）。
 
+## 🔴 2026-07-08 架构复核：实现已落地但发生真实漂移，未完成前不得视为"TD-02 已完成"
+
+对照本设计 (`select_next_speaker`/`run_discussion_round`/`check_convergence` 应放在 `orchestration/discussion.py`，路由层只负责调用) 复核实际代码，发现结构性偏离：
+
+1. **`run_discussion_round`（本设计的核心编排函数）在生产环境是死代码。** 它写在 `orchestration/discussion.py` 里，`orchestration/__init__.py` 导出，`api/routes/workspace.py` 也 `import` 了它——**但路由函数体内从未调用它**。唯一调用方是 `tests/test_discussion.py`。也就是说：**它的单测全过，给出"TD-02 已完成"的假象，但真实请求完全不经过它。**
+2. **路由层里另起了两份重复的讨论循环**：`send_message`（非流式）和 `send_message_stream`（流式，**桌面端现在唯一在用的入口**）里各自手写了一遍"选发言人→组 prompt→拿回复→判断是否继续"的循环，逻辑基本同构但物理复制成两份。这直接违反 [ARCHITECTURE-DETAILED.md](ARCHITECTURE-DETAILED.md) §3.1 的边界层职责("**不写业务逻辑**")。
+3. **发言人选择被另起了一套 `_llm_select_speaker`**（定义在 `workspace.py` 里，含自己的 `_extract_mention_simple`、自己的 transcript 加载），路由**先试 `_llm_select_speaker`，失败才 fallback 到本设计的 `select_next_speaker`**——优先级和本设计（① @提及 → ② 主持人 LLM → 降级轮询，单一入口）相反，等于多了一条平行路径。`build_speaker_selection_prompt`（prompt 构造）倒是复用了编排层的，没有重复，这块是对的。
+
+**为什么这必须在 TD-03 之前修**：TD-03-T3 原计划"替换 `complete_agent_reply` 的执行部分"——但 `complete_agent_reply` 只被非流式 `send_message` 调用，前端已经**只走** `/messages/stream`（`_stream_agent_reply`）。如果 worker AI 照原计划做，会把 Hermes 接到一条用户实际走不到的死路径上，端到端手测时才会发现"接了 Hermes 但界面没变化"。
+
+### TD-02-T5：路由归位——消除重复实现，编排逻辑收回 orchestration 层（新增，阻塞 TD-03-T2/T3）
+- 改动点：`send_message` 和 `send_message_stream` 的讨论循环**统一改为调用 `orchestration/discussion.py::run_discussion_round`**（需要给它加流式变体或让路由包一层生成器）；删除路由层的 `_llm_select_speaker`/`_extract_mention_simple`，讨论中的发言人选择唯一入口收敛到 `select_next_speaker`；非流式 `send_message` 若已被前端弃用，评估是否降级为纯 API 兼容层或标记 deprecated（不要直接删，先确认无其他调用方/测试依赖）。
+- 验收：`run_discussion_round`/`select_next_speaker` 在生产路径下真正被调用（可加集成测试断言调用发生，而不仅靠单测）；`workspace.py` 里不再有独立的讨论循环/发言人选择实现；现有 372 行 `test_discussion.py` 保持全过。
+- 依赖：无（在现有代码基础上重构）。需 agentpulse 会话：否（重构+单测，手测验证同 TD-01）。
+- 估算：1–1.5 天。
+- **TD-03-T2/T3 在此任务完成前不得开工**（否则会把 Hermes 接到错误的代码路径上）；TD-03-T1（纯 schema）不受影响，可继续。
+
 ## 技术设计
 
 ### 目标

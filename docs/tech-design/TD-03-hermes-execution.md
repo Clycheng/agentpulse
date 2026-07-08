@@ -14,9 +14,9 @@
 
 ### 现状与要替换的东西
 - 现有 `runs` 表：`id/workspace_id/conversation_id/agent_id/status/input_message_id/output_message_id/provider/model/usage_json/error/created_at/completed_at`——是"一次 LLM 调用日志"，**无 run_steps、无分步生命周期**。
-- 现有执行入口：`workspace.py::complete_agent_reply` → `DeepSeekChatClient().complete()`。**TD-03 用 `HermesBackend` 替换这里的执行部分**，但 Run 记账/写回消息的骨架可复用。
-- ⚠️ **2026-07-08 复核发现的漂移**：`complete_agent_reply` 自本设计写成后新增了 `discussion_context: str = ""` 参数（TD-02 加的，携带讨论轮次上下文）。**TD-03-T3 替换执行部分时，`RunContext.prompt` 的组装必须把 `discussion_context` 拼进去**（附加在原 prompt 后或作为独立系统段落），否则接了 Hermes 反而丢失讨论上下文，体验倒退。原 §"RunContext 至少含" 的 `prompt` 字段隐含此要求，此处显式标出防漏。
-- ✅ 复核确认接线点其余部分未漂移：`agents` 表本身不挂 `hermes_profile`（这是对的，它挂在 `agent_specs.hermes_profile`，两处 schema 都已建好），`runs` 表当前仍是 TD-03-T1 要扩的旧结构（同步 INSERT，`status='completed'`，无生命周期）——TD-03-T1 的扩列范围仍然准确，可直接开工。
+- 现有执行入口（⚠️ **2026-07-08 复核已更正，比初版设计的更复杂，见 [TD-02 🔴 章节](TD-02-multi-agent-discussion.md)**）：真正的生产入口是 `workspace.py::send_message_stream`（`/messages/stream`，前端唯一在用）里内联的讨论循环 + `_stream_agent_reply`，**不是**本文最初设想的 `complete_agent_reply`（那条路径已基本是死码，只被已弃用的非流式 `/messages` 调用）。**TD-03-T2/T3 必须等 [TD-02-T5](TD-02-multi-agent-discussion.md#td-02-t5) 把路由层的重复实现收回 `orchestration/discussion.py` 之后才能开工**——先把"回复从哪产生"这件事收敛成一个入口（`run_discussion_round`），HermesBackend 只需要替换这一个入口内部的模型调用，而不是要在两三处重复代码里各接一遍。
+- `complete_agent_reply` 新增了 `discussion_context: str = ""` 参数（TD-02 加的，携带讨论轮次上下文），TD-02-T5 收敛后这个参数应该只存在于唯一的编排入口里；**无论最终入口是谁，`RunContext.prompt` 的组装都必须把 discussion_context 拼进去**，否则接了 Hermes 反而丢失讨论上下文，体验倒退。
+- ✅ 复核确认未漂移：`agents` 表本身不挂 `hermes_profile`（挂在 `agent_specs.hermes_profile`，两处 schema 都已建好）；`runs` 表当前仍是 TD-03-T1 要扩的旧结构（同步 INSERT，`status='completed'`，无生命周期）——**TD-03-T1 的扩列范围不受本次发现影响，可以直接开工**，只有 T2 起需要等 TD-02-T5。
 
 ### 数据模型
 - **扩 `runs`**：加 `hermes_profile_id`（对应哪个员工的 profile）、`hermes_run_id`（Hermes 侧的 run id，用于关联/续跑）、`workdir`（本次 Run 的绝对路径隔离目录）、`task_id`（Run 必关联 Task，见 ADR 0006 §4）。状态机扩成 `queued → running → waiting_user(审批) → completed/failed`。

@@ -5,8 +5,13 @@
 
 ## [Unreleased]
 
-### 2026-07-08（TD-03 预检）
-- **docs**: TD-03 开工前预检——核对设计假设与最新代码（TD-02 落地后 `workspace.py`/`discussion.py` 变动较大）。发现真实漂移：`complete_agent_reply` 新增了 `discussion_context` 参数(TD-02 加的)，TD-03 原设计未覆盖，若直接替换执行层会丢失讨论上下文；已在 [TD-03](docs/tech-design/TD-03-hermes-execution.md) 标注修正，`RunContext.prompt` 组装须拼入该参数。确认其余接线点未漂移(`hermes_profile` 正确挂在 `agent_specs` 非 `agents`；`runs` 扩列范围仍准确)，TD-03-T1 可直接开工。
+### 2026-07-08（架构复核：发现真实漂移）
+- **docs(architecture-audit)**: 用户直接质问"AI 干的活方向有没有飘"，做了一次彻底代码复核（不只是接口签名，而是追调用链），确认**是，且是结构性漂移，需要纠正**：
+  - `orchestration/discussion.py::run_discussion_round`(TD-02 设计的核心编排入口)在生产环境是**死代码**——只被单测调用，`api/routes/workspace.py` 的 `send_message`/`send_message_stream` 从未真正调用它。372 行单测全过，但只测了一个生产请求走不到的函数，给出"TD-02 已完成"的假象。
+  - 路由层里独立写了**两份重复的讨论循环**(非流式/流式各一份)，外加一套单独的 `_llm_select_speaker`+`_extract_mention_simple`(跟编排层的 `select_next_speaker` 功能重叠、优先级还反过来)，直接违反 ARCHITECTURE-DETAILED.md §3.1 的边界层职责("不写业务逻辑")。
+  - 风险点：TD-03-T3 原计划替换 `complete_agent_reply` 的执行部分，但该函数只被前端已弃用的非流式 `/messages` 调用；前端现在只走 `/messages/stream`(`_stream_agent_reply`)。若不纠正直接做 TD-03，会把 Hermes 接到用户实际走不到的死路径。
+  - **纠正**：新增 [TD-02-T5](docs/tech-design/TD-02-multi-agent-discussion.md#td-02-t5)（路由归位：重复实现收回 orchestration 层，唯一化发言人选择入口），列为看板最高优先级，**TD-03-T2 及以后新增依赖 TD-02-T5**（TD-03-T1 纯 schema 不受影响）。TD-03 设计文档同步更正真实执行入口。看板"已完成"表补注该风险，避免误读为"TD-02 已可靠交付"。
+  - 未直接修改代码（分工：本侧只出设计/纠正，实现交给 worker AI）。
 
 ### 2026-07-08（架构侧收尾）
 - **docs(backfill)**: 完成验证报告(`19c209b`)遗留的回填义务——V1–V7 实测事实写入 DATA-MODEL §5.3(Runs API 真实请求体/Tirith 审批配置/一 profile 一 gateway 一端口/MCP·skills·profile 打包命令/25 个 toolset 真名)；§6.3 catalog 种子改用真名(`file` 不是 `files`)；TD-03 开放问题全关(含 **workdir 架构决策**：Runs API 无 per-run cwd → profile 级绝对 work root + 每 Run 子目录约定，硬边界在员工 work root)；TD-04-T6/TD-05/ARCHITECTURE/agent-model 的〔待核〕全部替换为实测事实。
