@@ -27,6 +27,14 @@
 | [TD-06-T1](TD-06-agent-self-evolution.md)(技能自动沉淀) | TD-03-T3 + TD-04-T6 | **agentpulse** |
 | [TD-06-T2](TD-06-agent-self-evolution.md)(主动能力升级申请) | TD-03-T4 + TD-04-T6 | **agentpulse** |
 | TD-06-T3(SOUL 模板注入 + 成长轨迹 UI) | TD-06-T1 + TD-06-T2 | 否（前端）/ agentpulse（验 SOUL） |
+| [TD-07-T1](TD-07-business-capability-catalog.md)(业务能力目录扩展) | TD-05-T1（已完成） | 否 |
+| TD-07-T2(角色 Bundle + UI) | TD-07-T1 + TD-04-T5 | 否 |
+| [TD-08-T1](TD-08-idea-center.md)(ideas 表 + API) | 无 | 否 |
+| TD-08-T2(IdleThinkService + cron) | TD-03-T2 + TD-04-T6 | **agentpulse** |
+| TD-08-T3(Idea 中心前端) | TD-08-T1 + TD-08-T2 | 否 |
+| [TD-09-T1](TD-09-channel-adapters.md)(channel_configs 表 + Router) | 无 | 否 |
+| TD-09-T2(Webhook 端点 + 渠道 API) | TD-09-T1 | 否 |
+| TD-09-T3(ChannelReply + 网页 Widget) | TD-09-T2 | 否 |
 
 ## 已完成
 

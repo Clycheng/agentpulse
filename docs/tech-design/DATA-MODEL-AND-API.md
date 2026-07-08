@@ -344,3 +344,56 @@ def reload_gateway(self, profile_name: str) -> None:
 | `POST /api/agents/{id}/reflect` | 空体（调试用，手动触发反思） | `{"skills_added": int, "skill_names": list[str]}` | spec 不存在/profile 未就绪→400 |
 
 审批答复（能力升级分支）：复用现有 `POST /api/approvals/{id}/answer`，body `{"decision":"approved","payload":{"approved_capability_key":"git_push"}}`；后端按 `approvals.type='capability_upgrade'` 分发到 `UpgradeService.execute_upgrade()`。
+
+---
+
+## 8. 【目标】Idea 中心（TD-08）
+
+### 8.1 `ideas` 新表
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PK | `idea_xxx` |
+| `workspace_id` | TEXT | NOT NULL FK→workspaces CASCADE | |
+| `source_agent_id` | TEXT | NOT NULL FK→agents CASCADE | |
+| `title` | TEXT | NOT NULL | ≤120 |
+| `description` | TEXT | NOT NULL | ≤1000 |
+| `category` | TEXT | NOT NULL CHECK IN (`improvement`,`opportunity`,`risk`,`learning`) | |
+| `status` | TEXT | NOT NULL DEFAULT `'new'` CHECK IN (`new`,`reviewed`,`accepted`,`dismissed`,`converted`) | |
+| `converted_brief_id` | TEXT | 可空 FK→consensus_briefs SET NULL | |
+| `created_at` / `reviewed_at` | TEXT | reviewed_at 可空 | |
+
+`agent_specs` 扩列（TD-08，双 schema）：`last_idle_think_at TEXT 可空` / `idle_think_interval_hours INTEGER NOT NULL DEFAULT 6` / `idle_thinking_enabled BOOLEAN NOT NULL DEFAULT TRUE`。
+
+`conversations` 扩列（TD-08，双 schema）：`idea_id TEXT 可空 FK→ideas SET NULL`（追溯从哪个 idea 转化来的会话）。
+
+### 8.2 TD-08 API 见 [TD-08-idea-center.md](TD-08-idea-center.md)
+
+---
+
+## 9. 【目标】外部渠道接入（TD-09）
+
+### 9.1 `channel_configs` 新表
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PK | `chan_xxx` |
+| `workspace_id` | TEXT | NOT NULL FK→workspaces CASCADE | |
+| `channel_type` | TEXT | NOT NULL CHECK IN (`wechat`,`email`,`web_widget`,`generic_webhook`) | |
+| `name` | TEXT | NOT NULL | 渠道别名，如"官网客服入口" |
+| `token` | TEXT | NOT NULL UNIQUE | webhook URL token，随机生成 |
+| `config_json` | TEXT | NOT NULL DEFAULT `'{}'` | 渠道配置（见 TD-09 §各渠道字段） |
+| `target_agent_id` | TEXT | 可空 FK→agents SET NULL | 默认分配员工 |
+| `target_conversation_id` | TEXT | 可空 FK→conversations SET NULL | 固定目标群（如客服总群） |
+| `active` | BOOLEAN NOT NULL DEFAULT TRUE | | |
+| `created_at` | TEXT | NOT NULL | |
+
+`conversations` 扩列（TD-09，双 schema）：
+- `source_channel TEXT 可空`（`wechat`/`email`/`web_widget`/`generic_webhook`/null）
+- `external_conversation_id TEXT 可空`（外部用户标识，用于同一用户消息归同一会话）
+
+`messages` 扩列（TD-09，双 schema）：
+- `external_message_id TEXT 可空`（外部消息唯一 ID，去重用）
+
+### 9.2 Webhook 端点（公开，无 JWT，靠 token + 渠道签名验证）
+`POST /webhooks/{channel_type}/{token}` — 各渠道 inbound webhook 统一入口。
+
+### 9.3 渠道管理 API 见 [TD-09-channel-adapters.md](TD-09-channel-adapters.md)
