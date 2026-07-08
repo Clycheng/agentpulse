@@ -128,9 +128,5 @@
 
 ---
 
-## 待核清单(编码前必须对 Hermes 实测/文档确认，别当既定)
-1. per-profile `mcpServers` 的确切配置位置与语法。
-2. `hermes profile install <git-url>` 的确切用法 + 工种模板打包格式。
-3. per-tool 风险分级 / 审批配置到底怎么声明(Agent Mode #476 是否已合入)。
-4. Hermes 单网关能否多 profile,还是一 profile 一进程(影响多员工部署,见 [TD-03](TD-03-hermes-execution.md))。
-5. §3 的 role_spec 落库表结构(定了回填 [DATA-MODEL-AND-API.md](DATA-MODEL-AND-API.md))。
+## ✅ 待核清单已全部关闭(2026-07-08)
+1–4 已由 [验证报告](../research/hermes-verification-2026-07-07.md) 实测钉死(MCP 语法 / profile export·import·install / Tirith 四级审批 / 一 profile 一 gateway 一端口)，事实统一回填在 [DATA-MODEL §5.3](DATA-MODEL-AND-API.md)；5 的 role_spec 表结构已定稿于 [DATA-MODEL §6](DATA-MODEL-AND-API.md)。

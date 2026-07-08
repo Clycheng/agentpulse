@@ -38,7 +38,7 @@
 |---|---|---|---|
 | 后端 FastAPI | 后端服务器 | :8000 `/api/*` | 无状态(除 DB)，可水平扩 |
 | PostgreSQL | 后端服务器/托管 | :5432 | 生产主存储；测试用临时 SQLite(§4 双 schema 约束) |
-| Hermes gateway ×N | 后端服务器 | :8642(HTTP Runs API) | 每员工一 profile；`API_SERVER_ENABLED=true`〔实测单 profile 起过〕；单网关能否托多 profile = 〔待核〕，暂按"一 profile 一进程/端口"设计，用进程管理器拉起 |
+| Hermes gateway ×N | 后端服务器 | :8642,:8643,…(一员工一端口) | 每员工一 profile；`API_SERVER_ENABLED=true`。✅ 已实测确认(2026-07-08 V4)：**不支持单网关多 profile**，就是一 profile 一进程一端口，用进程管理器拉起 |
 | 客户端 Electron | 用户机 | — | 连后端 API；关机不影响服务器上员工 |
 | 官网/后台 | 各自机器 | — | 独立部署，连同一后端 |
 
@@ -122,7 +122,7 @@
 ## 7. Hermes 运行时边界契约（我们调它什么 / 假设它给什么）
 - **调用面**：HTTP `POST /v1/runs`→SSE `/events`→`/approval`,`/stop`〔实测〕；员工=profile,配置在 `profiles/<name>/{SOUL.md,config.yaml,.env,skills/}`。
 - **我们假设 Hermes 负责**：人格组装、技能检索、工具/MCP 执行、危险动作抛 `approval_required`、记忆/学习循环。**我们不自建这些**(ADR 0001)。
-- **`待核`(须实测补实,建议在 agentpulse 锚定会话)**：per-profile `mcpServers` 语法；`hermes profile install`/工种打包格式；per-tool 风险声明(#476)；单网关多 profile vs 一进程一 profile；`/learn` 与 profile 创建的编程化触发方式；模型名固定 `deepseek-v4-flash`〔实测〕。
+- ✅ **原〔待核〕清单已于 2026-07-08 全部实测关闭**（[验证报告](../research/hermes-verification-2026-07-07.md)，事实回填在 [DATA-MODEL §5.3](DATA-MODEL-AND-API.md)）：MCP=`hermes mcp add`；打包=`profile export/import/install`(⚠️import 写 wrapper 需清理)；审批=Tirith 四级+per-tool 覆盖；拓扑=一 profile 一 gateway 一端口；技能=`skills install/tap`；workdir=profile 级 work root+每 Run 子目录(架构决策见 TD-03)；模型名=`deepseek-v4-flash`。
 
 ## 8. 分期与"现在能细化到哪"
 - **能立刻细化到实现级**(纯我们的层)：§3 编排/服务/边界、§4 数据模型(含新表)、§5.1/5.2 时序、§6 大部分横切。→ 落到 TD-01/TD-02 + 新增 provisioning TD。

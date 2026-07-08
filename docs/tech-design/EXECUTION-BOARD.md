@@ -7,35 +7,41 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 9 | [TD-01-T2/T3](TD-01-group-discussion-v1.md) | 端到端手测群讨论第一片 | **agentpulse** | ⚪ 待领 |
-| 10 | [TD-04-T6](TD-04-agent-provisioning.md) | LocalHermesProvisioner 真实现 | **agentpulse** | ⚪ 待领 |
-
-注：1 与 2–6 **可由不同 AI 并行**；2–6 之间按序（5 依赖 4，6 无依赖可与 4/5 并行）。
+| 1 | [TD-01-T2/T3](TD-01-verify-and-harden-slice-1.md) | 端到端手测：brief 全流程 + TD-02 多 agent 讨论流(起后端+桌面端真跑一遍) | **agentpulse** | ⚪ 待领 |
+| 2 | [TD-03-T1](TD-03-hermes-execution.md) | runs 扩列 + run_steps 新表 + approvals.run_id(⚠️双 schema) | 任意 | ⚪ 待领 |
+| 3 | [TD-04-T6](TD-04-agent-provisioning.md) | LocalHermesProvisioner 真实现(语法已实测解锁，注意 import 写 wrapper 要清理) | **agentpulse** | ⚪ 待领 |
 
 ## 有依赖，等前置完成后做
 
 | 任务 | 等什么 | 会话要求 |
 |---|---|---|
-| TD-03 全部(接 Hermes 执行) | PLAYBOOK V4/V5/V7 回填；T1 可先行 | T2 起 **agentpulse** |
+| [TD-03-T2](TD-03-hermes-execution.md)(HermesBackend) | TD-03-T1 | **agentpulse** |
+| TD-03-T3(RunService+替换执行层) | TD-03-T2 | **agentpulse** |
+| TD-03-T4(Tirith 审批闭环) | TD-03-T3 | **agentpulse** |
+| TD-03-T5(员工↔profile 生命周期) | TD-03-T2；可与 TD-04-T6 合并做 | **agentpulse** |
 
 ## 已完成
 
 | 任务 | commit |
 |---|---|
-| TD-02 全部(多 agent 讨论:T1~T4) | 待提交 |
+| 验证事实回填 DATA-MODEL/TD-03/04/05/ARCHITECTURE + workdir 架构决策 + 看板重建 | 2026-07-08(见 CHANGELOG) |
+| TD-02 全部 T1–T4(多 agent 讨论编排+372 行测试) + SSE 流式 | `b61005e` |
+| 一键启动脚本 `npm run dev` | `4ec9e96` |
+| SQLite 20 个失败测试修复 | `141592f` |
 | TD-04-T5(API+前端最小闭环) | `c4d1e3e` |
-| TD-04-T4(供给编排+状态机) | 待提交 |
-| TD-04-T3(role_spec 起草+SOUL 生成) | 待提交 |
+| TD-04-T4(供给编排+状态机) | `81af20d` |
+| TD-04-T3(role_spec 起草+SOUL 生成) | `f55d0b1` |
 | TD-04-T2(ProfileProvisioner+RecordOnly) | `0ed930d` |
 | TD-04-T1(agent_specs/capabilities 建表+DTO) | `cd52af8` |
 | TD-05-T1(capability_catalog) | `dd595de` |
 | TD-01-T1b(TaskOut consensus_brief_id) | `0c745b0` |
 | TD-01-T1(讨论态接线) | `a9b2b06` |
-| PLAYBOOK V1–V7(验证报告) | `19c209b` |
+| PLAYBOOK V1–V7 验证报告 | `19c209b` |
 | 群讨论第一片(ADR 0006 实现) | `c2054bf` |
 | 全部设计文档(架构/DATA-MODEL/TD-01~05/剧本/本看板) | 见 CHANGELOG 2026-07-03~08 |
 
 ## 维护规则
 - 领任务/完成任务的 AI **必须**更新本文件并 push（这就是认领锁）。
 - 新增 TD/task 时同步登记到上面两张表。
+- **链接必须指向真实存在的文件**；完成状态必须带真实 commit 号，不写"待提交"。
 - 状态含义：⚪ 待领 / 🔵 进行中(注明领取方+日期) / ✅ 完成(注明 commit) / ⛔ 阻塞(注明等什么)。

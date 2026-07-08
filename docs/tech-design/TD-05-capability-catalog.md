@@ -40,10 +40,10 @@ def resolve_bundle(keys: list[str]) -> dict: ...            # 合并去重多个
 1. **risk_gate 只升不降**：`resolve_bundle` 合并时取最严格；任何调用方(包括 LLM 起草的 role_spec)**不能放宽** catalog 里的 risk_gate，只能收紧。
 2. **`domain_register` 永远 `prohibited_auto`**——花钱+不可逆，按安全规则必须人工，写死。
 3. 种子 8 条与 [DATA-MODEL §6.3](DATA-MODEL-AND-API.md) 一字不差；改任何一处必须同步另一处(在两个文件顶部互相注明)。
-4. `toolsets`/`mcp` 的具体合法值目前〔待核〕——v1 允许存字符串占位(如 `"terminal"`,`"github"`)，Hermes 验证会话确认真实名称后统一替换并回填 DATA-MODEL。
+4. ✅ toolset 真名已实测钉死(2026-07-08 [验证报告](../research/hermes-verification-2026-07-07.md) V1，共 25 个)：本 catalog 用到的合法值=`terminal` `file`(⚠️不是 files) `code_execution` `web` `browser` `vision` `image_gen`；种子映射以 [DATA-MODEL §6.3](DATA-MODEL-AND-API.md) 为准。实现时可把全量 25 名做成模块内 `VALID_TOOLSETS` 常量用于校验。
 
 ### 开放问题
-- Hermes toolset 的真实枚举名(`terminal`? `code_execution`?)——〔待核〕，Hermes 验证会话跑 `hermes tools list` 抄真名。
+- ~~Hermes toolset 真实枚举名~~ ✅ 已实测(见上)。
 - capability 粒度：v1 用 8 个粗粒度 key；细化(如 `git_push` 拆读/写)等真实使用反馈。
 
 ## Tech-Tasks

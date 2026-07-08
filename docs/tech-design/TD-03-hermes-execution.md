@@ -62,12 +62,11 @@ async def resume_after_approval(conn, *, approval_id: str, decision: Literal["ap
 
 **前端拿进度（v1 决策：轮询，不建 WS）**：新增 `GET /api/runs/{run_id}` 与 `GET /api/runs/{run_id}/steps?after=<step_id>`（增量拉取）；桌面端任务详情 2s 轮询。WebSocket/SSE 推送留到体验优化片，避免本片引入新基建。（此两接口回填 DATA-MODEL §5 后为准。）
 
-### 开放问题（**已转入 [HERMES-VERIFICATION-PLAYBOOK](HERMES-VERIFICATION-PLAYBOOK.md)，worker AI 照剧本实测后回填**）
-1. **Hermes 进程怎么起/怎么管**：建议本机阶段先脚本拉起固定几个 profile 的 gateway；管理策略留到远程部署阶段（拓扑见 ARCHITECTURE-DETAILED §2）。
-2. **单网关多 profile vs 一 profile 一进程** → 剧本 **V4**。
-3. **模型名**：已实测钉死 `deepseek-v4-flash`/`deepseek-v4-pro`（不是 `deepseek-chat`）。
-4. **审批触发条件/粒度** → 剧本 **V5**。
-5. **workdir per-Run 还是 per-profile 语义** → 剧本 **V7**。
+### ✅ 开放问题已全部实测关闭（2026-07-08 [验证报告](../research/hermes-verification-2026-07-07.md)，事实已回填 [DATA-MODEL §5.3](DATA-MODEL-AND-API.md)）
+1. **进程模型(V4)**：❌ 不支持单网关多 profile → **一员工一 gateway 一端口**(8642+)。本机阶段脚本拉起固定几个；`RunService` 需按 agent 解析出对应端口。
+2. **审批(V5)**：Hermes 审批系统=**Tirith**，config `approvals.mode: manual` + `tirith.enabled: true`，四级权限可 per-tool 覆盖；`approval_required` → `POST /v1/runs/{id}/approval`。**T4 实现照此配置；生产严禁 `HERMES_YOLO_MODE`。**
+3. **模型名**：`deepseek-v4-flash`/`deepseek-v4-pro`（不是 `deepseek-chat`）。
+4. **workdir(V7,架构决策)**：Runs API **无 per-run cwd** → 采用"**profile 级绝对 work root(`terminal.working_dir`) + Runner 每 Run 建子目录 `<work_root>/runs/<run_id>` 并写进 prompt**"。硬边界=员工自己的 work root，软约定=子目录；不可信任务后续升级 `terminal.backend: docker`(container_persistent: false)。`runs.workdir` 存子目录绝对路径。T2/T3 照此实现。
 
 ## Tech-Tasks
 
