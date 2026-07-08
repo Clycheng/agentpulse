@@ -15,6 +15,8 @@
 ### 现状与要替换的东西
 - 现有 `runs` 表：`id/workspace_id/conversation_id/agent_id/status/input_message_id/output_message_id/provider/model/usage_json/error/created_at/completed_at`——是"一次 LLM 调用日志"，**无 run_steps、无分步生命周期**。
 - 现有执行入口：`workspace.py::complete_agent_reply` → `DeepSeekChatClient().complete()`。**TD-03 用 `HermesBackend` 替换这里的执行部分**，但 Run 记账/写回消息的骨架可复用。
+- ⚠️ **2026-07-08 复核发现的漂移**：`complete_agent_reply` 自本设计写成后新增了 `discussion_context: str = ""` 参数（TD-02 加的，携带讨论轮次上下文）。**TD-03-T3 替换执行部分时，`RunContext.prompt` 的组装必须把 `discussion_context` 拼进去**（附加在原 prompt 后或作为独立系统段落），否则接了 Hermes 反而丢失讨论上下文，体验倒退。原 §"RunContext 至少含" 的 `prompt` 字段隐含此要求，此处显式标出防漏。
+- ✅ 复核确认接线点其余部分未漂移：`agents` 表本身不挂 `hermes_profile`（这是对的，它挂在 `agent_specs.hermes_profile`，两处 schema 都已建好），`runs` 表当前仍是 TD-03-T1 要扩的旧结构（同步 INSERT，`status='completed'`，无生命周期）——TD-03-T1 的扩列范围仍然准确，可直接开工。
 
 ### 数据模型
 - **扩 `runs`**：加 `hermes_profile_id`（对应哪个员工的 profile）、`hermes_run_id`（Hermes 侧的 run id，用于关联/续跑）、`workdir`（本次 Run 的绝对路径隔离目录）、`task_id`（Run 必关联 Task，见 ADR 0006 §4）。状态机扩成 `queued → running → waiting_user(审批) → completed/failed`。

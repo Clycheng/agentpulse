@@ -5,6 +5,9 @@
 
 ## [Unreleased]
 
+### 2026-07-08（TD-03 预检）
+- **docs**: TD-03 开工前预检——核对设计假设与最新代码（TD-02 落地后 `workspace.py`/`discussion.py` 变动较大）。发现真实漂移：`complete_agent_reply` 新增了 `discussion_context` 参数(TD-02 加的)，TD-03 原设计未覆盖，若直接替换执行层会丢失讨论上下文；已在 [TD-03](docs/tech-design/TD-03-hermes-execution.md) 标注修正，`RunContext.prompt` 组装须拼入该参数。确认其余接线点未漂移(`hermes_profile` 正确挂在 `agent_specs` 非 `agents`；`runs` 扩列范围仍准确)，TD-03-T1 可直接开工。
+
 ### 2026-07-08（架构侧收尾）
 - **docs(backfill)**: 完成验证报告(`19c209b`)遗留的回填义务——V1–V7 实测事实写入 DATA-MODEL §5.3(Runs API 真实请求体/Tirith 审批配置/一 profile 一 gateway 一端口/MCP·skills·profile 打包命令/25 个 toolset 真名)；§6.3 catalog 种子改用真名(`file` 不是 `files`)；TD-03 开放问题全关(含 **workdir 架构决策**：Runs API 无 per-run cwd → profile 级绝对 work root + 每 Run 子目录约定，硬边界在员工 work root)；TD-04-T6/TD-05/ARCHITECTURE/agent-model 的〔待核〕全部替换为实测事实。
 - **docs(board)**: 重建执行看板——修复指向不存在文件的坏链接、错乱编号；"待提交"条目全部换成真实 commit 号(TD-02=`b61005e`、TD-04-T3=`f55d0b1`、T4=`81af20d` 等)；新队列=端到端手测 / TD-03-T1 / TD-04-T6(已解锁)。维护规则加两条：链接必须指向真实文件、完成必须带 commit 号。
