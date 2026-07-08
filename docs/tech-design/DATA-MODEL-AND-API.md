@@ -137,13 +137,22 @@ derived_from_brief_id: str | null = null
 def select_next_speaker(conn, conversation_id: str, member_agent_ids: list[str],
                         last_message: Row | None) -> str | None: ...
 
-# 跑一轮讨论：选人→组 prompt(transcript + 该员工人格 + "讨论态只讨论不执行"约束)
-#   →调临时执行层(现有 complete_agent_reply)→写回消息→返回是否已可收敛
-def run_discussion_round(conn, *, workspace_id, conversation_id,
-                         max_agent_turns: int = 4) -> dict: ...
+# 非流式：跑一轮讨论，返回本轮结果摘要（用于单测/非流式 send_message 兼容层）
+def run_discussion_round(conn, *, workspace_id: str, conversation_id: str,
+                         max_agent_turns: int = 4) -> dict:
+    # 返回: {"turns": int, "converged": bool, "brief_id": str | None, "speaker_ids": list[str]}
+
+# 流式变体：给 send_message_stream 用，yield 每条 agent 发言 token（TD-02-T5 新增）
+async def run_discussion_round_stream(conn, *, workspace_id: str, conversation_id: str,
+                                      max_agent_turns: int = 4) -> AsyncIterator[dict]:
+    # yield {"type": "token"|"turn_start"|"turn_end"|"converged"|"brief_created",
+    #        "agent_id": str|None, "content": str, "brief_id": str|None}
+    # 路由层消费此 generator，把 token 类事件转成 SSE text/event-stream 推前端
+    # turn_start/turn_end 用于前端渲染"小秘正在发言..."等状态
 ```
 - 约束：讨论态(`discussing`)下只允许产出 message/提问/brief 草稿，不允许执行类动作（为 TD-03 铺路）。
 - 收敛：主持人判断"背景够拆任务" → 调 `POST /api/briefs` 出草稿；到 `max_agent_turns` 上限也强制产一版。
+- **TD-02-T5 的接线点**：`send_message_stream` 改为 `async for event in run_discussion_round_stream(...)` 然后按 event.type 推 SSE；非流式 `send_message` 改为调非流式版本（降级为 API 兼容层）。
 - 开放项（实现前定，见 [TD-02](TD-02-multi-agent-discussion.md) §开放问题）：主持人是否可配、发言人选择用 LLM 还是轮询。**这几项定了要回填本文件。**
 
 ---
@@ -151,9 +160,22 @@ def run_discussion_round(conn, *, workspace_id, conversation_id,
 ## 5. 【目标】TD-03 新增契约（接 Hermes 执行）
 
 ### 5.1 `runs` 扩列（两 schema 都加）
-新增：`task_id TEXT NOT NULL FK→tasks CASCADE`（Run 必属 Task）、`hermes_profile_id TEXT`（对应员工 profile）、`hermes_run_id TEXT`（Hermes 侧 run id）、`workdir TEXT NOT NULL`（**绝对路径**隔离目录；per-Run 还是 per-profile 语义待 [验证剧本 V7](HERMES-VERIFICATION-PLAYBOOK.md) 定）。`status` 状态机扩为 `queued→running→waiting_user→completed|failed`。
+新增：
+- `task_id TEXT NOT NULL FK→tasks CASCADE`（Run 必属 Task）
+- `hermes_profile_id TEXT`（对应员工 profile 名，对应 `agent_specs.hermes_profile`）
+- `hermes_run_id TEXT`（Hermes 侧 run id，用于调 approval/stop 接口）
+- `workdir TEXT NOT NULL`（**绝对路径**隔离目录，格式 `<data_root>/agents/<profile>/work/runs/<run_id>`，见 §5.3 workdir 架构决策）
 
-**`approvals` 扩列（两 schema 都加）**：`run_id TEXT REFERENCES runs(id) ON DELETE SET NULL`（可空——旧的任务状态审批无 run）。**没有它，老板批准后找不到该恢复哪个 Run**（恢复 = 用 `runs.hermes_run_id` 调 Hermes `POST /v1/runs/{hermes_run_id}/approval`）。
+`status` 状态机扩为：`queued → running → waiting_user | waiting_clarify → completed | failed`
+- `waiting_user`：高风险操作触发 Tirith 审批，等老板拍板
+- `waiting_clarify`：agent 主动求援（需求不清），等人回答后继续（见 §5.5）
+
+**`approvals` 扩列（两 schema 都加）**：
+- `run_id TEXT REFERENCES runs(id) ON DELETE SET NULL`（可空——旧的任务状态审批无 run）。**没有它，老板批准后找不到该恢复哪个 Run**（恢复 = 用 `runs.hermes_run_id` 调 Hermes `POST /v1/runs/{hermes_run_id}/approval`）。
+- `type TEXT NOT NULL DEFAULT 'high_risk' CHECK IN ('high_risk','clarification')`：区分高危审批 vs 求援。凡 `type='clarification'` 的 approval，`payload_json` 须包含 `{"question":"...","missing_context":"...","answer":"..."(批准后填)}`，`decision` 固定为 `'answered'`（而非 approved/rejected）。
+
+**`agents` 扩列（两 schema 都加）**：
+- `hermes_gateway_port INTEGER`（可空——员工未完成供给时为空）。端口分配规则：基础端口 `8642` + `agent_specs` 里按 workspace 顺序的序号（如第 1 个员工 8642，第 2 个 8643）；`RunService` 按此字段找 gateway 地址 `http://127.0.0.1:{port}`。供给时（TD-04-T6）由 `LocalHermesProvisioner` 写入。
 
 ### 5.2 `run_steps` 新表
 | 列 | 类型 | 约束 |
@@ -195,16 +217,37 @@ class HermesBackend:
 - **`POST /v1/runs` 请求体实测形状**：`{"input", "session_id"?, "instructions"?, "conversation_history"?, "previous_response_id"?}`——**没有 cwd/workdir 参数**。
 - **workdir 语义(架构决策)**：`terminal.working_dir` 是 **profile 级**绝对路径配置。采用"**profile 级绝对 work root + 每 Run 子目录约定**"：每员工 profile 配 `terminal.working_dir = <data_root>/agents/<profile>/work`(绝对，绝不继承进程 cwd——满足 ADR 0005)；Runner 每次 Run 前 `mkdir <work_root>/runs/<run_id>` 并在 prompt 中指定该子目录为本次工作区。硬边界=员工自己的 work root(即使 agent 不守约定,污染也出不了它自己的 root)；软约定=子目录。不可信任务后续用 `terminal.backend: docker` + `container_persistent: false` 加强。`runs.workdir` 列存该子目录绝对路径。
 - **审批系统=Tirith**：config.yaml `approvals: {mode: manual|smart|off, timeout: <秒>, cron_mode: deny|approve}` + `tirith: {enabled: true}`；四级权限(read-only / low-risk writes / high-risk writes / destructive)，可 per-tool 覆盖；`HERMES_YOLO_MODE=1` 会跳过审批——**生产严禁**。
-- **拓扑**：❌ 不支持单网关多 profile → **一员工一 gateway 进程一端口**(8642, 8643, …)，`agents` 关联需存端口或算端口的规则。
+- **拓扑**：❌ 不支持单网关多 profile → **一员工一 gateway 进程一端口**(8642, 8643, …)。端口存在 `agents.hermes_gateway_port`（见 §5.1 agents 扩列），`RunService` 用 `http://127.0.0.1:{agent.hermes_gateway_port}` 访问该员工 gateway。端口冲突检测：provisioner 写入前 `SELECT MAX(hermes_gateway_port) FROM agents WHERE workspace_id=?`，取最大值 +1（初始值 8642）。
 - **MCP 配置**：`hermes mcp add <name> --url <endpoint>` 或 `--command <cmd> --args ... --env KEY=VALUE`(stdio)，`--auth oauth|header`；落 profile 级 config.yaml。
 - **技能安装**：`hermes skills install <github-path|url>`、`hermes skills tap add <repo>`；落 `profiles/<name>/skills/`。
 - **profile 打包**：`hermes profile export <name> -o x.tar.gz`(含 config/.env/SOUL/skills/memory,不含 sessions) / `import --name <new>` / `install <git-url>` 均可用。⚠️ **import 会自动写 wrapper 到 `~/.local/bin/`**(即使原来用了 --no-alias)——供给流程 import 后必须清理该 wrapper。
 - **toolsets 真名**(25 个,全表见验证报告 V1)：常用=`terminal` `file`(⚠️不是 files) `code_execution` `web` `browser` `vision` `image_gen` `tts` `skills` `memory` `todo` `clarify` `delegation` `cronjob` `computer_use`。开关：`hermes tools enable|disable <name>`。
 
-### 5.4 审批复用
-Hermes `approval_required` → 建现有 `approvals` 行（§1 的 ApprovalOut 结构）+ Run→`waiting_user` → 前端复用**已有的内联审批卡片**（首个会话所建）。老板批准 → 调 `.../approval` 续跑。
+### 5.4 审批复用（高危操作）
+Hermes `approval_required` 事件（`type=high_risk`）→ 建 `approvals` 行（`type='high_risk'`）+ `runs.status=waiting_user` → 前端复用**已有的内联审批卡片**。老板批准 → `decision='approved'` → `resume_after_approval` 调 `POST /v1/runs/{hermes_run_id}/approval` 续跑；驳回 → `decision='rejected'` → `POST /v1/runs/{hermes_run_id}/stop`。
 
-开放项（见 [TD-03](TD-03-hermes-execution.md) §开放问题）：单网关多 profile vs 一 profile 一进程、进程管理、审批粒度用哪个高风险工具验证。**定了回填本文件。**
+### 5.5 执行中求援（clarification_required）【TD-03-T4 新增】
+
+**触发机制**：利用 Hermes 原生 `clarify` toolset。agent SOUL.md 里加指令：「遇到需求不清楚、依赖信息缺失时，调用 `clarify` 工具并附上问题和缺失的上下文，等待答复，不允许臆测继续」。`clarify` 工具调用 → Hermes 产生 `approval_required` 事件，`metadata.category='clarification'`（在 prompt 里约定）→ RunService 识别此类事件建 `approvals`（`type='clarification'`）。
+
+**数据流（worker AI 直接照此实现）**：
+```
+agent 调 clarify 工具
+→ Hermes SSE: approval_required + metadata.category='clarification'
+→ RunService:
+    建 approvals(type='clarification', payload_json={"question":..., "missing_context":...})
+    runs.status = 'waiting_clarify'
+    群里推 system 消息（type='CLARIFY_CARD:{...}'）→ 前端渲染提问卡片
+→ 人/AI 在群里回答（POST /api/approvals/{id}/answer, body={"answer":"..."}）
+    → approvals.payload_json.answer = 答案, decision = 'answered'
+    → resume_after_clarification:
+        把答案拼进 prompt 续跑 Hermes（POST /v1/runs/{hermes_run_id}/approval）
+        runs.status = 'running'
+```
+
+**新增 API**：`POST /api/approvals/{id}/answer`，body `{"answer": str}`，仅 `type='clarification'` 的 approval 可调，否则 400。
+
+开放项（见 [TD-03](TD-03-hermes-execution.md) §开放问题）：审批粒度用哪个高风险工具验证端到端。**定了回填本文件。**
 
 ---
 
