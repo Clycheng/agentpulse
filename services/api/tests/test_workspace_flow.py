@@ -491,22 +491,30 @@ def test_group_chat_returns_multiple_agent_replies_when_not_mentioned(
 
     assert send.status_code == 200
     payload = send.json()
-    assert payload["agent_message"]["sender_id"] == analyst["id"]
-    assert [message["sender_id"] for message in payload["agent_messages"]] == [
-        analyst["id"],
-        writer["id"],
-    ]
-    assert captured_agents == ["增长分析师", "内容策划"]
+    # In discussion mode (TD-02), agents reply via round-robin orchestration.
+    # Two agents × 4 max turns = 4 messages alternating between them.
+    sender_ids = [message["sender_id"] for message in payload["agent_messages"]]
+    assert len(sender_ids) == 4  # MAX_AGENT_TURNS_PER_ROUND
+    # First speaker is the one who spoke least recently (round-robin)
+    assert sender_ids[0] in [analyst["id"], writer["id"]]
+    # Speakers alternate
+    assert len(set(sender_ids)) == 2
+    # All agents were called (captured_agents may include "主持人" from speaker selection)
+    assert {"增长分析师", "内容策划"}.issubset(set(captured_agents))
 
     reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
     persisted = reloaded["messages_by_conversation"][group_id]
-    assert [message["sender_type"] for message in persisted[-3:]] == [
+    # In discussion mode: 1 user message + 4 agent messages
+    assert [message["sender_type"] for message in persisted[-5:]] == [
         "user",
         "agent",
         "agent",
+        "agent",
+        "agent",
     ]
-    assert persisted[-2]["sender_id"] == analyst["id"]
-    assert persisted[-1]["sender_id"] == writer["id"]
+    # Agent IDs alternate between the two members
+    agent_sender_ids = [m["sender_id"] for m in persisted[-4:]]
+    assert len(set(agent_sender_ids)) == 2
     outputs = reloaded["task_outputs_by_task"][task["id"]]
     assert {output["agent_id"] for output in outputs} == {analyst["id"], writer["id"]}
 

@@ -1159,69 +1159,138 @@ function App() {
     );
 
     try {
-      const response = await apiRequest<{
-        user_message: ApiBootstrap['messages_by_conversation'][string][number];
-        agent_message: ApiBootstrap['messages_by_conversation'][string][number];
-        agent_messages?: ApiBootstrap['messages_by_conversation'][string][number][];
-        created_task: ApiBootstrap['tasks'][number] | null;
-        created_agent: ApiBootstrap['agents'][number] | null;
-      }>(`/conversations/${targetChat.id}/messages`, {
-        method: 'POST',
-        token,
-        body: JSON.stringify({
-          content: text,
-          target_agent_id: targetAgentId,
-        }),
-      });
-      const userMessage = mapApiMessage(response.user_message);
-      const agentMessages = (
-        response.agent_messages?.length
-          ? response.agent_messages
-          : [response.agent_message]
-      ).map(mapApiMessage);
-      const systemTaskMessage: Message | null = response.created_task
-        ? {
-            id: tempMessageId(),
-            from: 'system',
-            type: 'system',
-            time: '刚刚',
-            text: `已自动创建任务：${response.created_task.title}`,
+      // Use SSE streaming endpoint
+      const headers = new Headers();
+      headers.set('Content-Type', 'application/json');
+      headers.set('Authorization', `Bearer ${token}`);
+      const sseResponse = await fetch(
+        `${apiBaseUrl}/conversations/${targetChat.id}/messages/stream`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ content: text, target_agent_id: targetAgentId }),
+        },
+      );
+      if (!sseResponse.ok) {
+        const errData = await sseResponse.json().catch(() => ({ detail: '请求失败' }));
+        throw new Error(errData.detail || `HTTP ${sseResponse.status}`);
+      }
+      if (!sseResponse.body) throw new Error('No response body');
+
+      const reader = sseResponse.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let currentAgentId = '';
+      let currentAgentName = '';
+      let streamingMessageId = '';
+      let streamingContent = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let currentEvent = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith('data: ') && currentEvent) {
+            const dataStr = line.slice(6);
+            try {
+              const data = JSON.parse(dataStr);
+
+              if (currentEvent === 'user_message') {
+                // Replace optimistic message with real one
+                const userMessage = mapApiMessage(data);
+                setMessagesByChat((current) => ({
+                  ...current,
+                  [targetChat.id]: [
+                    ...(current[targetChat.id] ?? []).filter(
+                      (message) => message.id !== optimisticId,
+                    ),
+                    userMessage,
+                  ],
+                }));
+              } else if (currentEvent === 'speaking') {
+                // Show who is currently speaking
+                currentAgentId = data.agent_id;
+                currentAgentName = data.agent_name;
+                streamingMessageId = `stream-${data.agent_id}-${Date.now()}`;
+                streamingContent = '';
+                setTypingName(data.agent_name);
+                setAgents((current) =>
+                  current.map((agent) =>
+                    agent.id === data.agent_id
+                      ? { ...agent, statusKind: 'busy', statusLabel: '发言中' }
+                      : agent,
+                  ),
+                );
+              } else if (currentEvent === 'chunk') {
+                // Append chunk to streaming message
+                streamingContent += data.content;
+                const chunkContent = streamingContent;
+                const chunkMsgId = streamingMessageId;
+                const chunkAgentId = currentAgentId;
+                setMessagesByChat((current) => {
+                  const existing = current[targetChat.id] ?? [];
+                  const hasStreamMsg = existing.some((m) => m.id === chunkMsgId);
+                  const streamMsg: Message = {
+                    id: chunkMsgId,
+                    from: chunkAgentId as any,
+                    type: 'text',
+                    time: '刚刚',
+                    text: chunkContent,
+                  };
+                  return {
+                    ...current,
+                    [targetChat.id]: hasStreamMsg
+                      ? existing.map((m) => (m.id === chunkMsgId ? streamMsg : m))
+                      : [...existing, streamMsg],
+                  };
+                });
+              } else if (currentEvent === 'done') {
+                // Replace streaming message with persisted one
+                const finalMessage = mapApiMessage(data);
+                const streamId = streamingMessageId;
+                setMessagesByChat((current) => ({
+                  ...current,
+                  [targetChat.id]: (current[targetChat.id] ?? []).map((m) =>
+                    m.id === streamId ? finalMessage : m,
+                  ),
+                }));
+                streamingMessageId = '';
+                streamingContent = '';
+              } else if (currentEvent === 'error') {
+                setMessagesByChat((current) => ({
+                  ...current,
+                  [targetChat.id]: [
+                    ...(current[targetChat.id] ?? []),
+                    {
+                      id: tempMessageId(),
+                      from: 'system' as const,
+                      type: 'system' as const,
+                      time: '',
+                      text: `调用失败：${data.detail}`,
+                    },
+                  ],
+                }));
+              }
+            } catch {
+              // skip malformed data
+            }
+            currentEvent = '';
           }
-        : null;
-      const systemAgentMessage: Message | null = response.created_agent
-        ? {
-            id: tempMessageId(),
-            from: 'system',
-            type: 'system',
-            time: '刚刚',
-            text: `已创建员工：${response.created_agent.name}`,
-          }
-        : null;
-      setMessagesByChat((current) => ({
-        ...current,
-        [targetChat.id]: [
-          ...(current[targetChat.id] ?? []).filter(
-            (message) => message.id !== optimisticId,
-          ),
-          userMessage,
-          ...(systemTaskMessage ? [systemTaskMessage] : []),
-          ...(systemAgentMessage ? [systemAgentMessage] : []),
-          ...agentMessages,
-        ],
-      }));
+        }
+      }
       setChats((current) =>
         current.map((chat) =>
           chat.id === targetChat.id ? { ...chat, time: '刚刚' } : chat,
         ),
       );
-      if (response.created_task || response.created_agent) {
-        await loadBootstrap(token);
-        showToast(
-          response.created_agent
-            ? '已从聊天创建员工'
-            : '已从聊天自动创建任务',
-        );
-      }
+      await loadBootstrap(token);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'LLM 调用失败，请稍后重试';

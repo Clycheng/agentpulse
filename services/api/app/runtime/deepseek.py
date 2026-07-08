@@ -1,4 +1,6 @@
+from collections.abc import AsyncGenerator
 from typing import Any
+import json
 
 import httpx
 
@@ -89,6 +91,72 @@ class DeepSeekChatClient:
             usage=data.get("usage"),
         )
 
+    async def complete_stream(
+        self, request: LlmChatRequest
+    ) -> AsyncGenerator[str, None]:
+        """Stream LLM response, yielding text chunks as they arrive.
+
+        Yields content strings. The caller is responsible for collecting
+        the full reply and persisting it.
+        """
+        if not self.api_key:
+            raise DeepSeekNotConfigured(
+                "DeepSeek API Key 未配置，请设置 AGENTPULSE_DEEPSEEK_API_KEY"
+            )
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": build_system_prompt(request)},
+                *[message_to_deepseek(message) for message in request.messages],
+            ],
+            "stream": True,
+            "thinking": {
+                "type": "enabled" if settings.deepseek_thinking_enabled else "disabled"
+            },
+        }
+        if not settings.deepseek_thinking_enabled:
+            payload["temperature"] = settings.deepseek_temperature
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                ) as response:
+                    if response.status_code >= 400:
+                        body = await response.aread()
+                        raise DeepSeekAPIError(
+                            f"DeepSeek API 返回 {response.status_code}：{body.decode()[:500]}"
+                        )
+
+                    agent_name = request.agent.name
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except ValueError:
+                            continue
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield clean_agent_prefix(content, agent_name)
+                            # Only clean prefix from first chunk
+                            agent_name = ""
+        except httpx.TimeoutException as exc:
+            raise DeepSeekAPIError("DeepSeek 请求超时，请稍后重试") from exc
+        except httpx.HTTPError as exc:
+            raise DeepSeekAPIError(f"DeepSeek 请求失败：{exc}") from exc
+
 
 def build_system_prompt(request: LlmChatRequest) -> str:
     agent = request.agent
@@ -114,6 +182,8 @@ def build_system_prompt(request: LlmChatRequest) -> str:
 
 你的工作职责 Prompt：
 {agent.prompt}
+
+{request.discussion_context}
 
 回复规则：
 1. 使用中文，语气专业、直接、可靠。

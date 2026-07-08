@@ -1,6 +1,8 @@
 import json
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
+from starlette.responses import StreamingResponse
 
 from app.api.deps import get_current_user
 from app.core.database import Database, Row, get_db
@@ -54,6 +56,13 @@ from app.services.workspace import (
     update_task,
 )
 from app.orchestration.supply import create_agent_spec, provision, ProvisioningError
+from app.orchestration.discussion import (
+    run_discussion_round,
+    select_next_speaker,
+    build_speaker_selection_prompt,
+    build_discussion_agent_prompt,
+    MAX_AGENT_TURNS_PER_ROUND,
+)
 
 router = APIRouter(tags=["workspace"])
 
@@ -646,22 +655,100 @@ async def send_message(
     # Task creation now requires a confirmed consensus_brief (see ADR 0006).
     created_task = None
     agent_messages = []
-    for agent in reply_agents:
-        try:
-            agent_messages.append(
-                await complete_agent_reply(
+
+    # Group discussion orchestration: if group chat in 'discussing' state,
+    # use multi-agent discussion round instead of replying to each agent individually.
+    is_group_discussing = (
+        conversation["kind"] == "group"
+        and (conversation.get("discussion_status") or "discussing") == "discussing"
+    )
+
+    if is_group_discussing and len(reply_agents) > 1:
+        # Multi-agent discussion round (TD-02)
+        # Uses LLM-based speaker selection + discussion context injection.
+        member_agent_ids = [a["id"] for a in reply_agents]
+        max_turns = MAX_AGENT_TURNS_PER_ROUND
+
+        for turn in range(max_turns):
+            # Select next speaker via LLM (with @mention and round-robin fallback)
+            last_msg_row = conn.execute(
+                """SELECT sender_type, sender_id, content FROM messages
+                WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1""",
+                (conversation_id,),
+            ).fetchone()
+            last_message = dict(last_msg_row) if last_msg_row else None
+
+            # Try LLM speaker selection
+            next_speaker_id = None
+            try:
+                next_speaker_id = await _llm_select_speaker(
+                    conn, conversation_id, reply_agents, last_message
+                )
+            except Exception:
+                pass  # LLM failed, fall through to non-LLM selection
+
+            if next_speaker_id is None:
+                next_speaker_id = select_next_speaker(
+                    conn,
+                    conversation_id=conversation_id,
+                    member_agent_ids=member_agent_ids,
+                    last_message=last_message,
+                )
+
+            if next_speaker_id is None:
+                break
+
+            # Find the agent row
+            next_agent = None
+            for a in reply_agents:
+                if a["id"] == next_speaker_id:
+                    next_agent = a
+                    break
+
+            if next_agent is None:
+                break
+
+            # Build discussion context for this agent
+            discussion_ctx = _build_discussion_context(
+                conn, conversation_id, next_agent, reply_agents,
+            )
+
+            try:
+                msg = await complete_agent_reply(
                     conn,
                     workspace=workspace,
                     conversation=conversation,
                     conversation_id=conversation_id,
-                    agent=agent,
+                    agent=next_agent,
                     user_message=user_message,
+                    discussion_context=discussion_ctx,
                 )
-            )
-        except DeepSeekNotConfigured as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except DeepSeekAPIError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+                if msg is not None:
+                    agent_messages.append(msg)
+                    # Commit so next speaker can see this reply
+                    conn.commit()
+            except DeepSeekNotConfigured as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except DeepSeekAPIError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+    else:
+        # DM or single-agent group: original behavior
+        for agent in reply_agents:
+            try:
+                agent_messages.append(
+                    await complete_agent_reply(
+                        conn,
+                        workspace=workspace,
+                        conversation=conversation,
+                        conversation_id=conversation_id,
+                        agent=agent,
+                        user_message=user_message,
+                    )
+                )
+            except DeepSeekNotConfigured as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except DeepSeekAPIError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     serialized_agent_messages = [
         serialize_message(message) for message in agent_messages
@@ -673,6 +760,197 @@ async def send_message(
         "created_task": serialize_task(created_task) if created_task else None,
         "created_agent": serialize_agent(created_agent) if created_agent else None,
     }
+
+
+@router.post("/conversations/{conversation_id}/messages/stream")
+async def send_message_stream(
+    conversation_id: str,
+    payload: SendMessageRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    """SSE streaming version of send_message.
+
+    Events emitted:
+    - event: user_message  data: {message}
+    - event: speaking      data: {agent_id, agent_name, agent_role}
+    - event: chunk         data: {content}
+    - event: done          data: {message}
+    - event: system        data: {content}
+    - event: end           data: {}
+    - event: error         data: {detail}
+    """
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    conversation = conn.execute(
+        "SELECT * FROM conversations WHERE id = ? AND workspace_id = ?",
+        (conversation_id, workspace["id"]),
+    ).fetchone()
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    reply_agents = resolve_reply_agents(conn, workspace["id"], conversation, payload)
+    if not reply_agents:
+        raise HTTPException(status_code=400, detail="没有可回复的智能体")
+
+    user_message = add_message(
+        conn,
+        conversation_id=conversation_id,
+        sender_type="user",
+        sender_id=current_user["id"],
+        content=payload.content,
+    )
+    conn.commit()
+
+    # Handle recruit intent (same as non-streaming)
+    recruit_intent = extract_recruit_intent(payload.content)
+    if recruit_intent is not None:
+        department = ensure_department(
+            conn, workspace["id"], recruit_intent["department_name"]
+        )
+        create_agent(
+            conn,
+            workspace_id=workspace["id"],
+            department_id=department["id"],
+            name=recruit_intent["name"],
+            role=recruit_intent["role"],
+            description=recruit_intent["description"],
+            prompt=recruit_intent["prompt"],
+            skills=recruit_intent["skills"],
+            mcps=recruit_intent["mcps"],
+            source="chat_factory",
+        )
+        conn.commit()
+
+    async def event_generator():
+        # Emit user message
+        yield f"event: user_message\ndata: {json.dumps(serialize_message(user_message), ensure_ascii=False)}\n\n"
+
+        is_group_discussing = (
+            conversation["kind"] == "group"
+            and (conversation.get("discussion_status") or "discussing") == "discussing"
+        )
+
+        if is_group_discussing and len(reply_agents) > 1:
+            # Multi-agent discussion with streaming
+            member_agent_ids = [a["id"] for a in reply_agents]
+            max_turns = MAX_AGENT_TURNS_PER_ROUND
+
+            for turn in range(max_turns):
+                last_msg_row = conn.execute(
+                    """SELECT sender_type, sender_id, content FROM messages
+                    WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1""",
+                    (conversation_id,),
+                ).fetchone()
+                last_message = dict(last_msg_row) if last_msg_row else None
+
+                next_speaker_id = None
+                try:
+                    next_speaker_id = await _llm_select_speaker(
+                        conn, conversation_id, reply_agents, last_message
+                    )
+                except Exception:
+                    pass
+
+                if next_speaker_id is None:
+                    next_speaker_id = select_next_speaker(
+                        conn,
+                        conversation_id=conversation_id,
+                        member_agent_ids=member_agent_ids,
+                        last_message=last_message,
+                    )
+
+                if next_speaker_id is None:
+                    break
+
+                next_agent = None
+                for a in reply_agents:
+                    if a["id"] == next_speaker_id:
+                        next_agent = a
+                        break
+                if next_agent is None:
+                    break
+
+                # Emit "speaking" event
+                yield f"event: speaking\ndata: {json.dumps({'agent_id': next_agent['id'], 'agent_name': next_agent['name'], 'agent_role': next_agent['role']}, ensure_ascii=False)}\n\n"
+
+                # Stream agent reply
+                discussion_ctx = _build_discussion_context(
+                    conn, conversation_id, next_agent, reply_agents,
+                )
+                try:
+                    full_reply = ""
+                    async for chunk_text in await _stream_agent_reply(
+                        conn,
+                        workspace=workspace,
+                        conversation=conversation,
+                        conversation_id=conversation_id,
+                        agent=next_agent,
+                        user_message=user_message,
+                        discussion_context=discussion_ctx,
+                    ):
+                        full_reply += chunk_text
+                        yield f"event: chunk\ndata: {json.dumps({'content': chunk_text}, ensure_ascii=False)}\n\n"
+
+                    # Persist the full message
+                    msg = add_message(
+                        conn,
+                        conversation_id=conversation_id,
+                        sender_type="agent",
+                        sender_id=next_agent["id"],
+                        content=full_reply,
+                        provider="deepseek",
+                        model="deepseek-v4-flash",
+                    )
+                    conn.commit()
+                    yield f"event: done\ndata: {json.dumps(serialize_message(msg), ensure_ascii=False)}\n\n"
+                except (DeepSeekNotConfigured, DeepSeekAPIError) as exc:
+                    yield f"event: error\ndata: {json.dumps({'detail': str(exc)}, ensure_ascii=False)}\n\n"
+                    break
+        else:
+            # DM or single-agent: stream normally
+            for agent in reply_agents:
+                yield f"event: speaking\ndata: {json.dumps({'agent_id': agent['id'], 'agent_name': agent['name'], 'agent_role': agent['role']}, ensure_ascii=False)}\n\n"
+                try:
+                    full_reply = ""
+                    async for chunk_text in await _stream_agent_reply(
+                        conn,
+                        workspace=workspace,
+                        conversation=conversation,
+                        conversation_id=conversation_id,
+                        agent=agent,
+                        user_message=user_message,
+                    ):
+                        full_reply += chunk_text
+                        yield f"event: chunk\ndata: {json.dumps({'content': chunk_text}, ensure_ascii=False)}\n\n"
+
+                    msg = add_message(
+                        conn,
+                        conversation_id=conversation_id,
+                        sender_type="agent",
+                        sender_id=agent["id"],
+                        content=full_reply,
+                        provider="deepseek",
+                        model="deepseek-v4-flash",
+                    )
+                    conn.commit()
+                    yield f"event: done\ndata: {json.dumps(serialize_message(msg), ensure_ascii=False)}\n\n"
+                except (DeepSeekNotConfigured, DeepSeekAPIError) as exc:
+                    yield f"event: error\ndata: {json.dumps({'detail': str(exc)}, ensure_ascii=False)}\n\n"
+                    break
+
+        yield f"event: end\ndata: {{}}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/approvals/{approval_id}/resolve")
@@ -806,6 +1084,201 @@ def capture_agent_experience_from_approval(
     )
 
 
+async def _stream_agent_reply(
+    conn: Database,
+    *,
+    workspace: Row,
+    conversation: Row,
+    conversation_id: str,
+    agent: Row,
+    user_message: Row,
+    discussion_context: str = "",
+) -> AsyncGenerator:
+    """Stream agent reply using DeepSeek streaming API.
+
+    Yields text chunks. The caller is responsible for collecting and persisting.
+    """
+    from collections.abc import AsyncGenerator as _AG
+
+    history = load_llm_history(conn, conversation_id)
+    related_tasks = load_related_task_context(conn, conversation_id)
+    latest_user_content = next(
+        (message.content for message in reversed(history) if message.role == "user"),
+        "",
+    )
+    knowledge_sources = [
+        LlmKnowledgeSource(
+            id=source["id"],
+            title=source["title"],
+            category=source["category"],
+            content=source["content"][:2000],
+        )
+        for source in load_knowledge_context(
+            conn,
+            workspace_id=workspace["id"],
+            query=latest_user_content,
+        )
+    ]
+    agent_experiences = load_agent_experience_context(conn, agent["id"])
+
+    request = LlmChatRequest(
+        company_name=workspace["name"],
+        conversation_title=conversation_title(conversation, agent),
+        agent=LlmChatAgent(
+            id=agent["id"],
+            name=agent["name"],
+            role=agent["role"],
+            department=agent["department_name"],
+            prompt=agent["prompt"],
+            skills=json.loads(agent["skills_json"]),
+        ),
+        messages=history,
+        related_tasks=related_tasks,
+        knowledge_sources=knowledge_sources,
+        agent_experiences=agent_experiences,
+        discussion_context=discussion_context,
+    )
+
+    return DeepSeekChatClient().complete_stream(request)
+
+
+async def _llm_select_speaker(
+    conn: Database,
+    conversation_id: str,
+    member_agents: list[Row],
+    last_message: dict | None,
+) -> str | None:
+    """Use LLM to select the next speaker in a group discussion.
+
+    Returns agent_id, or None (LLM call failed / no speaker needed).
+    """
+    member_ids = [a["id"] for a in member_agents]
+
+    # Check @mention first (no LLM needed)
+    if last_message and last_message.get("content"):
+        mentioned = _extract_mention_simple(last_message["content"], member_ids)
+        if mentioned:
+            return mentioned
+
+    # Load recent transcript for LLM
+    transcript_rows = conn.execute(
+        """SELECT messages.sender_type, messages.sender_id, messages.content, agents.name AS agent_name
+        FROM messages LEFT JOIN agents ON agents.id = messages.sender_id
+        WHERE messages.conversation_id = ? AND messages.sender_type IN ('user', 'agent')
+        ORDER BY messages.created_at DESC LIMIT 20""",
+        (conversation_id,),
+    ).fetchall()
+    transcript = [dict(r) for r in reversed(transcript_rows)]
+
+    agent_dicts = [
+        {"id": a["id"], "name": a["name"], "role": a["role"], "description": a.get("description", "")}
+        for a in member_agents
+    ]
+    prompt = build_speaker_selection_prompt(agent_dicts, transcript)
+
+    try:
+        # Use DeepSeekChatClient.complete so monkeypatch works in tests
+        completion = await DeepSeekChatClient().complete(
+            LlmChatRequest(
+                agent=LlmChatAgent(
+                    id="system",
+                    name="主持人",
+                    role="讨论主持人",
+                    prompt=prompt,
+                ),
+                messages=[LlmChatMessage(role="user", content="请选择下一个发言人")],
+            )
+        )
+        content = completion.reply
+        # Parse JSON from LLM response
+        import re
+        json_match = re.search(r'\{[^}]+\}', content)
+        if not json_match:
+            return None
+
+        llm_output = json.loads(json_match.group())
+        next_speaker = llm_output.get("next_speaker")
+        if next_speaker == "NONE":
+            return None
+        if next_speaker in member_ids:
+            return next_speaker
+        return None
+    except Exception:
+        return None
+
+
+def _extract_mention_simple(content: str, member_ids: list[str]) -> str | None:
+    """Extract @mentioned agent from message content."""
+    import re
+    mentions = re.findall(r"@([\w]+)", content)
+    for mention in mentions:
+        if mention in member_ids:
+            return mention
+    return None
+
+
+def _build_discussion_context(
+    conn: Database,
+    conversation_id: str,
+    current_agent: Row,
+    all_agents: list[Row],
+) -> str:
+    """Build discussion context string for an agent in a group chat.
+
+    Includes: other members info, recent transcript, role-based constraints.
+    """
+    # Other members
+    other_members = []
+    for a in all_agents:
+        if a["id"] != current_agent["id"]:
+            other_members.append(
+                f"- {a['name']}（{a['role']}）"
+            )
+    members_str = "\n".join(other_members) if other_members else "无"
+
+    # Recent transcript (with names)
+    transcript_rows = conn.execute(
+        """SELECT messages.sender_type, messages.sender_id, messages.content, agents.name AS agent_name
+        FROM messages LEFT JOIN agents ON agents.id = messages.sender_id
+        WHERE messages.conversation_id = ? AND messages.sender_type IN ('user', 'agent')
+        ORDER BY messages.created_at DESC LIMIT 10""",
+        (conversation_id,),
+    ).fetchall()
+
+    transcript_lines = []
+    for r in reversed(transcript_rows):
+        if r["sender_type"] == "user":
+            name = "老板"
+        else:
+            name = r.get("agent_name") or r["sender_id"][:12]
+        transcript_lines.append(f"{name}：{r['content'][:300]}")
+    transcript_str = "\n".join(transcript_lines) if transcript_lines else "（暂无）"
+
+    # Role-based discussion constraint
+    role_constraint = build_discussion_agent_prompt(
+        agent_name=current_agent["name"],
+        agent_role=current_agent["role"],
+        agent_description=current_agent.get("description", ""),
+    )
+
+    return f"""【群聊讨论模式】
+当前是群聊讨论，不是一对一私聊。你只是讨论的参与者之一，不是唯一回答者。
+
+其他群成员：
+{members_str}
+
+最近讨论记录：
+{transcript_str}
+
+{role_constraint}
+
+关键规则：
+- 只从你的岗位角度出发，不要重复别人已经说过的内容
+- 如果这个话题不涉及你的职责范围，可以简短表态或跳过
+- 不要列出和前面的人一样的问题清单，而是在别人的基础上补充或推进
+- 回复要简练，不要写长篇大论"""
+
+
 async def complete_agent_reply(
     conn: Database,
     *,
@@ -814,6 +1287,7 @@ async def complete_agent_reply(
     conversation_id: str,
     agent: Row,
     user_message: Row,
+    discussion_context: str = "",
 ) -> Row:
     history = load_llm_history(conn, conversation_id)
     related_tasks = load_related_task_context(conn, conversation_id)
@@ -851,6 +1325,7 @@ async def complete_agent_reply(
             related_tasks=related_tasks,
             knowledge_sources=knowledge_sources,
             agent_experiences=agent_experiences,
+            discussion_context=discussion_context,
         )
     )
 

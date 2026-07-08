@@ -16,14 +16,14 @@
 
 | 任务 | 等什么 | 会话要求 |
 |---|---|---|
-| TD-02 全部(多 agent 讨论) | TD-01-T1(讨论态接线) | 任意(手测除外) |
 | TD-03 全部(接 Hermes 执行) | PLAYBOOK V4/V5/V7 回填；T1 可先行 | T2 起 **agentpulse** |
 
 ## 已完成
 
 | 任务 | commit |
 |---|---|
-| TD-04-T5(API+前端最小闭环) | 待提交 |
+| TD-02 全部(多 agent 讨论:T1~T4) | 待提交 |
+| TD-04-T5(API+前端最小闭环) | `c4d1e3e` |
 | TD-04-T4(供给编排+状态机) | 待提交 |
 | TD-04-T3(role_spec 起草+SOUL 生成) | 待提交 |
 | TD-04-T2(ProfileProvisioner+RecordOnly) | `0ed930d` |

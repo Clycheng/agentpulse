@@ -55,6 +55,11 @@ class LlmChatRequest(BaseModel):
     agent_experiences: list[LlmAgentExperience] = Field(
         default_factory=list, max_length=8
     )
+    discussion_context: str = Field(
+        default="",
+        max_length=4000,
+        description="Group discussion context: other members, what they've said, role-based constraints",
+    )
 
 
 class LlmChatResponse(BaseModel):

@@ -2,6 +2,7 @@
 
 This module implements the core orchestration logic for AgentPulse:
 - Discussion state machine (discussing -> aligned)
+- Multi-agent speaker selection + discussion rounds
 - Consensus brief management
 - Task creation gate (must have confirmed brief)
 - Capability catalog (system-level static asset)
@@ -28,6 +29,13 @@ from app.orchestration.discussion import (
     DiscussionStatus,
     get_discussion_status,
     set_discussion_status,
+    select_next_speaker,
+    build_speaker_selection_prompt,
+    run_discussion_round,
+    check_convergence,
+    build_convergence_prompt,
+    build_brief_draft_prompt,
+    build_discussion_agent_prompt,
 )
 from app.orchestration.gate import (
     validate_task_creation_gate,
@@ -55,6 +63,13 @@ __all__ = [
     "DiscussionStatus",
     "get_discussion_status",
     "set_discussion_status",
+    "select_next_speaker",
+    "build_speaker_selection_prompt",
+    "run_discussion_round",
+    "check_convergence",
+    "build_convergence_prompt",
+    "build_brief_draft_prompt",
+    "build_discussion_agent_prompt",
     "validate_task_creation_gate",
     "TaskCreationGateError",
     "CATALOG",
