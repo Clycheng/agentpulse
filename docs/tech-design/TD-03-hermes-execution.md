@@ -60,7 +60,20 @@ async def start_run(conn, *, task_id: str, agent_id: str, prompt: str) -> str  #
     # 建 runs(queued) → mkdir workdir(绝对,V7 定语义) → status=running → 消费 HermesBackend.run(ctx)
 async def resume_after_approval(conn, *, approval_id: str, decision: Literal["approved","rejected"]) -> None
     # 经 approvals.run_id 找 runs.hermes_run_id → POST {hermes}/v1/runs/{id}/approval → 继续消费 SSE
+async def resume_after_clarification(conn, *, approval_id: str, answer: str) -> None
+    # 同上：经 approvals.run_id 找 hermes_run_id → POST .../approval（answer 拼入 context）→ 继续 SSE
 ```
+
+**⑤ 执行中求援（clarification_required）— 补全"Codex 级"能力的缺口**：
+
+Hermes 的 Tirith 只内置"高危操作需审批"，不内置"我搞不懂需求"这种求援。解法：**把 clarification 建模为一种 `approval_type`，完全复用现有审批基建，不新建任何基建**。
+
+- **SOUL.md 里加 1 条指令**：「遇到需求不清楚、依赖信息缺失时，**必须**先在群里提问（发 `clarification_required` 事件），挂起当前 Run，等老板或同事答复后再继续——不允许臆测并继续执行」。这把"求援"变成 agent 的自然动作。
+- **approvals 表新增 `type` 字段**：现有隐式 `type=high_risk`，新增 `type=clarification`；`payload_json` 存问题和缺失的上下文；`decision` 不是 approved/rejected 而是 `answered`（answer 存在 `payload_json.answer`）。
+- **SSE 事件映射**：Hermes 抛 `clarification_required`（可用 `approval_required` 事件类型，agent prompt 里约定 metadata 里标 `category: clarification`）→ RunService 建 `approvals`（type=clarification）→ `runs.status=waiting_clarify` → 前端群里弹提问卡片（和审批卡片同组件，文案不同）。
+- **答复流**：老板/同事在群里回答 → `POST /api/approvals/{id}/answer` → `resume_after_clarification`（把答案拼进 Hermes 续跑 prompt）→ `runs.status=running`。
+
+这样 agent 就具备了"碰到疑问主动暂停问人、拿到答案后继续"的能力，完整 Codex 对等且更安全。
 
 **前端拿进度（v1 决策：轮询，不建 WS）**：新增 `GET /api/runs/{run_id}` 与 `GET /api/runs/{run_id}/steps?after=<step_id>`（增量拉取）；桌面端任务详情 2s 轮询。WebSocket/SSE 推送留到体验优化片，避免本片引入新基建。（此两接口回填 DATA-MODEL §5 后为准。）
 
@@ -93,12 +106,16 @@ async def resume_after_approval(conn, *, approval_id: str, decision: Literal["ap
 - 需 agentpulse 会话：是。
 - 估算：2 天。
 
-### TD-03-T4：审批闭环接 Hermes approval_required
-- 改动点：Hermes `approval_required` → 建 Approval + Run=waiting_user + 前端审批卡片（复用首个会话做的内联审批卡片）；老板批准 → 调 Hermes approval 放行续跑；选一个高风险工具做端到端验证。
-- 验收：端到端——一个高风险动作触发审批卡片，批准后继续、驳回后停止/给替代方案。
+### TD-03-T4：审批闭环 + 执行中求援（approval_required + clarification_required）
+- 改动点：
+  1. `approvals` 表加 `type` 字段（`high_risk` / `clarification`）；
+  2. Hermes `approval_required`（high_risk 类）→ 建 Approval + Run=waiting_user + 前端审批卡片；批准 → 调 Hermes approval 续跑；驳回 → 停止/返回替代方案；
+  3. `clarification_required`（agent prompt 约定以 `approval_required` 事件携带 `category: clarification` metadata 触发）→ 建 Approval（type=clarification）+ Run=waiting_clarify + 群里弹提问卡片；老板/同事回答 → `resume_after_clarification`（答案拼进续跑 prompt）→ 继续；
+  4. **SOUL.md 模板**里加一条指令（影响所有员工）："需求不清楚/缺信息时发 clarification_required，不允许臆测继续"。
+- 验收：端到端——① 高风险动作触发审批卡，批准/驳回分支均走通；② agent 遇到模糊需求时暂停并在群里弹提问，老板回答后 agent 带答案继续并正确完成任务。
 - 依赖：TD-03-T3。
 - 需 agentpulse 会话：是。
-- 估算：1.5 天。
+- 估算：2 天（比原来多半天，因为加了 clarification 分支）。
 
 ### TD-03-T5：员工↔profile 生命周期
 - 改动点：招募/创建员工时创建对应 Hermes profile（写 SOUL.md、配模型），删除员工时清理。
