@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 2026-07-10（TD-08-T1：Idea 中心数据模型 + API）
+- **feat(api)**: 落地北极星 §1.5「没有 idle 员工 → idea 中心」的后端地基（纯数据 + API，不接 Hermes）。
+  - schema（双 schema + `ensure_column` 迁移）：新增 `ideas` 表（category/status 带 CHECK 约束，`converted_brief_id` 追溯转化）；`agent_specs` 加 `last_idle_think_at`/`idle_think_interval_hours`/`idle_thinking_enabled`；`conversations` 加 `idea_id`（追溯从哪个 idea 转来的会话）。
+  - `app/services/ideas.py`：create/get/list（按 new 优先 + status/agent/category 过滤）/review（accept→accepted、dismiss→dismissed）/convert（建 group 会话 + 拉入 source agent + 首条系统消息=idea 内容 + 回链 `conversations.idea_id` + idea→converted）/set_idle_thinking。
+  - `app/api/routes/ideas.py`（注册进 main）：`GET/POST /api/ideas`、`GET /api/ideas/{id}`、`POST /api/ideas/{id}/review`、`POST /api/ideas/{id}/convert`、`PATCH /api/agents/{id}/idle-thinking`；业务逻辑在 service 层，路由只做 HTTP。
+  - 两处实现偏差（已回填 DATA-MODEL §8）：`idle_thinking_enabled` 两方言统一存 `INTEGER 0/1`（迁移用单一定义字符串），API 序列化为 bool；idle-thinking 接口返回精简的 `IdleThinkingSettings` 而非 `AgentSpecOut`（无 spec 的员工返回 404）。
+  - 测试：新增 `test_ideas.py` 8 例（CRUD、new 优先与过滤、review、convert 建会话并直查 DB 断言 `idea_id` 回链、重复 convert 拒绝、schema 422、DB CHECK 约束、idle-thinking 更新与无 spec 404）。全套 **170 测试通过**（+8）。DATA-MODEL §8.1 标记已实现。
+
 ### 2026-07-09（前端重做：桌面端设计系统升级）
 - **feat(desktop)**: 用 impeccable 前端 skill 重做桌面端 UI（`apps/desktop/src/styles.css`，纯样式层，不动 `main.tsx` 逻辑/结构，功能不受影响）。
   - **方向**：从"通用浅色 + SaaS 蓝 + 扁平卡片"升级为「一人 AI 公司运营驾驶舱」。register=product（对标 Linear/Raycast 的克制）。配色策略 Restrained：中性 ink 底 + **单一品牌色 teal「脉搏」**（语义=员工 7×24 在工作），teal 只用于主操作/选中/focus/live 状态；success/warning/danger 与品牌色分色相；保留并沿用 per-agent `hue`（外壳克制、人物带色）。

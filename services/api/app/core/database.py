@@ -362,6 +362,23 @@ def init_postgres(conn: Database) -> None:
           created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS ideas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          source_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL CHECK(category IN (
+            'improvement','opportunity','risk','learning'
+          )),
+          status TEXT NOT NULL DEFAULT 'new' CHECK(status IN (
+            'new','reviewed','accepted','dismissed','converted'
+          )),
+          converted_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL,
+          reviewed_at TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS agent_specs (
           id TEXT PRIMARY KEY,
           agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
@@ -418,6 +435,18 @@ def init_postgres(conn: Database) -> None:
         "CHECK(type IN ('high_risk','clarification','capability_upgrade'))",
     )
     ensure_column(conn, "agents", "hermes_gateway_port", "INTEGER")
+    # TD-08-T1: idea center (idle reflection). idle_thinking_enabled stored as
+    # 0/1 INTEGER in both dialects (serialized to bool at the API layer).
+    ensure_column(conn, "agent_specs", "last_idle_think_at", "TEXT")
+    ensure_column(
+        conn, "agent_specs", "idle_think_interval_hours", "INTEGER NOT NULL DEFAULT 6"
+    )
+    ensure_column(
+        conn, "agent_specs", "idle_thinking_enabled", "INTEGER NOT NULL DEFAULT 1"
+    )
+    ensure_column(
+        conn, "conversations", "idea_id", "TEXT REFERENCES ideas(id) ON DELETE SET NULL"
+    )
 
 
 def init_sqlite(conn: Database) -> None:
@@ -652,6 +681,23 @@ def init_sqlite(conn: Database) -> None:
           created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS ideas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          source_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL CHECK(category IN (
+            'improvement','opportunity','risk','learning'
+          )),
+          status TEXT NOT NULL DEFAULT 'new' CHECK(status IN (
+            'new','reviewed','accepted','dismissed','converted'
+          )),
+          converted_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL,
+          reviewed_at TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS agent_specs (
           id TEXT PRIMARY KEY,
           agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
@@ -708,6 +754,18 @@ def init_sqlite(conn: Database) -> None:
         "CHECK(type IN ('high_risk','clarification','capability_upgrade'))",
     )
     ensure_column(conn, "agents", "hermes_gateway_port", "INTEGER")
+    # TD-08-T1: idea center (idle reflection). idle_thinking_enabled stored as
+    # 0/1 INTEGER in both dialects (serialized to bool at the API layer).
+    ensure_column(conn, "agent_specs", "last_idle_think_at", "TEXT")
+    ensure_column(
+        conn, "agent_specs", "idle_think_interval_hours", "INTEGER NOT NULL DEFAULT 6"
+    )
+    ensure_column(
+        conn, "agent_specs", "idle_thinking_enabled", "INTEGER NOT NULL DEFAULT 1"
+    )
+    ensure_column(
+        conn, "conversations", "idea_id", "TEXT REFERENCES ideas(id) ON DELETE SET NULL"
+    )
 
 
 def ensure_column(
