@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 2026-07-09（前端重做：桌面端设计系统升级）
+- **feat(desktop)**: 用 impeccable 前端 skill 重做桌面端 UI（`apps/desktop/src/styles.css`，纯样式层，不动 `main.tsx` 逻辑/结构，功能不受影响）。
+  - **方向**：从"通用浅色 + SaaS 蓝 + 扁平卡片"升级为「一人 AI 公司运营驾驶舱」。register=product（对标 Linear/Raycast 的克制）。配色策略 Restrained：中性 ink 底 + **单一品牌色 teal「脉搏」**（语义=员工 7×24 在工作），teal 只用于主操作/选中/focus/live 状态；success/warning/danger 与品牌色分色相；保留并沿用 per-agent `hue`（外壳克制、人物带色）。
+  - **Token 层重写**：`:root`（浅色）+ `[data-theme='dark']`（近黑 cockpit + 更亮 teal）全套 token——中性梯度、品牌 teal 家族（含 `--on-primary`/`--primary-strong`）、语义色带 soft 变体、4 级 `--shadow-*` 高度、teal `--ring`、圆角(含 pill)、`--ease-out`；字体 Latin=Inter + CJK=Noto Sans SC。
+  - **组件精修**：全局 `:focus-visible` teal ring + 交互过渡 + `prefers-reduced-motion` 兜底 + `pulse-ring` 关键帧（仅 live 指示器）；按钮/小按钮补齐 hover/active/disabled 全套状态与阴影；侧栏品牌 mark 改 teal 渐变芯片、active 导航加 teal 指示条；search-box 变真输入(border+focus ring)、composer focus ring + send 全状态、卡片加 xs 阴影、pill 圆角、清理残留写死蓝（auth 渐变/focus 改 teal token）。
+  - **对比度**：按 skill 要求把 `--subtle`（placeholder/timestamp）在两套主题都调到达标。
+  - 浏览器预览验证：消息/人才市场/任务/员工四视图 + 浅色&深色两主题均已截图确认级联正确、无 console 报错。新增 `apps/desktop/AGENTS.md` 固化设计系统，防后续 AI 改回通用蓝。
+
 ### 2026-07-09（TD-03-T1：Run/RunStep 数据模型）
 - **feat(api)**: 为接 Hermes 执行铺好数据地基（纯 schema + 生命周期，不起 Hermes）。
   - `database.py` 两套 schema（SQLite + Postgres）+ `ensure_column` 迁移：`runs` 扩 `task_id`/`hermes_profile_id`/`hermes_run_id`/`workdir`（新列暂可空，NOT NULL 与"每个 Run 必属 Task"由 TD-03-T3 的 RunService 在应用层强制）；新增 `run_steps` 表（映射 Hermes SSE 事件：message/thinking/tool_call/tool_result/approval_required/status/final）；`approvals` 加 `run_id`（批准后据此恢复对应 Run）+ `type`（high_risk/clarification/capability_upgrade，行为在 T4）；`agents` 加 `hermes_gateway_port`（一员工一 gateway 一端口）。引用 `runs` 的 FK 列走 `ensure_column`（在 runs 建表之后加），规避 Postgres 前向引用报错。

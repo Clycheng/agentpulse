@@ -1,34 +1,60 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,0&display=block');
 
 :root {
-  --app-bg: #f5f6f8;
+  /* Neutral canvas — subtly cool ink, layered for depth (not flat gray). */
+  --app-bg: #eceff3;
   --surface: #ffffff;
-  --surface-muted: #f7f8fa;
-  --surface-subtle: #eef0f3;
-  --border: #dde1e7;
-  --border-soft: #eceff3;
-  --text: #1f2329;
-  --text-strong: #111827;
-  --muted: #6b7280;
-  --subtle: #9aa1ad;
-  --primary: #3155c8;
-  --primary-hover: #2546b1;
-  --primary-soft: #eef2ff;
-  --primary-soft-strong: #e3e9ff;
+  --surface-muted: #f4f6f9;
+  --surface-subtle: #e8ecf1;
+  --border: #e1e6ec;
+  --border-soft: #edf0f4;
+  --text: #1a1f29;
+  --text-strong: #0a0e16;
+  --muted: #545d6b;
+  --subtle: #6e7887;
+
+  /* Brand "pulse" — a single teal signal reserved for primary actions,
+     current selection, focus and live/working state. Not decoration. */
+  --primary: #0d9488;
+  --primary-hover: #0a7f74;
+  --primary-strong: #0a635b;
+  --primary-soft: #e4f5f2;
+  --primary-soft-strong: #c9ece6;
+  --on-primary: #ffffff;
+
+  /* Semantic — distinct hues from the teal brand. */
   --danger: #dc2626;
-  --success: #16803c;
-  --warning: #d97706;
-  --shadow-soft: 0 18px 50px rgba(16, 24, 40, 0.12);
-  --radius-sm: 4px;
-  --radius: 6px;
-  --radius-lg: 8px;
-  color: #1f2329;
-  background: #f3f4f6;
+  --danger-soft: #fdecec;
+  --success: #15803d;
+  --success-soft: #e6f4ea;
+  --warning: #c2740a;
+  --warning-soft: #fbf0dc;
+
+  /* Elevation scale. */
+  --shadow-xs: 0 1px 2px rgba(12, 20, 38, 0.06);
+  --shadow-sm: 0 2px 8px rgba(12, 20, 38, 0.07);
+  --shadow-md: 0 10px 28px rgba(12, 20, 38, 0.1);
+  --shadow-lg: 0 26px 64px rgba(12, 20, 38, 0.16);
+  --shadow-soft: var(--shadow-lg);
+  --ring: 0 0 0 3px rgba(13, 148, 136, 0.28);
+
+  --radius-sm: 7px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  color: var(--text);
+  background: var(--app-bg);
   font-family:
-    'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    'Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui,
+    sans-serif;
   font-synthesis: none;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 * {
@@ -94,6 +120,53 @@ button {
   }
 }
 
+/* Brand "pulse" — the heartbeat of a company whose employees never idle.
+   Reserved for live/working status indicators. */
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(13, 148, 136, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(13, 148, 136, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(13, 148, 136, 0);
+  }
+}
+
+/* Interactive foundations: consistent focus ring + motion across the app. */
+button,
+a,
+input,
+textarea,
+[tabindex] {
+  transition:
+    background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    box-shadow 0.16s var(--ease-out),
+    transform 0.16s var(--ease-out);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 .material-symbol {
   display: inline-block;
   font-family: 'Material Symbols Rounded';
@@ -118,24 +191,37 @@ button {
 }
 
 .workbench-shell[data-theme='dark'] {
-  --app-bg: #171a1f;
-  --surface: #20242b;
-  --surface-muted: #262b33;
-  --surface-subtle: #303642;
-  --border: #353c48;
-  --border-soft: #2c323c;
-  --text: #eceff4;
+  --app-bg: #0b0e13;
+  --surface: #14181f;
+  --surface-muted: #1a1f28;
+  --surface-subtle: #232a35;
+  --border: #2a313d;
+  --border-soft: #1d2029;
+  --text: #e6ebf2;
   --text-strong: #ffffff;
-  --muted: #b6bdc9;
-  --subtle: #8992a1;
-  --primary: #8ea2ff;
-  --primary-hover: #a4b4ff;
-  --primary-soft: #29314f;
-  --primary-soft-strong: #333d63;
+  --muted: #a2acba;
+  --subtle: #7c8695;
+
+  --primary: #2dd4bf;
+  --primary-hover: #5eead4;
+  --primary-strong: #99f6e4;
+  --primary-soft: #0e2b29;
+  --primary-soft-strong: #13413c;
+  --on-primary: #04211e;
+
   --danger: #f87171;
-  --success: #5cc985;
-  --warning: #f5b85d;
-  --shadow-soft: 0 18px 54px rgba(0, 0, 0, 0.35);
+  --danger-soft: #2c1a1c;
+  --success: #4ade80;
+  --success-soft: #16281d;
+  --warning: #fbbf24;
+  --warning-soft: #2c2413;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 12px 34px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 28px 64px rgba(0, 0, 0, 0.6);
+  --shadow-soft: var(--shadow-lg);
+  --ring: 0 0 0 3px rgba(45, 212, 191, 0.32);
 }
 
 .sidebar {
@@ -153,13 +239,16 @@ button {
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  margin-bottom: 14px;
-  border-radius: var(--radius);
-  background: var(--primary-soft);
-  color: var(--primary);
-  font-size: 18px;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  background: linear-gradient(150deg, var(--primary) 0%, var(--primary-strong) 100%);
+  color: var(--on-primary);
+  font-size: 19px;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 .nav-item {
@@ -184,7 +273,19 @@ button {
 
 .nav-item.active {
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--primary-strong);
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -9px;
+  top: 50%;
+  width: 3px;
+  height: 22px;
+  transform: translateY(-50%);
+  border-radius: 0 3px 3px 0;
+  background: var(--primary);
 }
 
 .nav-item.active .material-symbol {
@@ -291,7 +392,11 @@ button {
   justify-content: center;
   padding: 48px;
   background:
-    linear-gradient(90deg, rgba(49, 85, 200, 0.06), transparent 36%),
+    radial-gradient(
+      120% 120% at 0% 0%,
+      color-mix(in srgb, var(--primary) 10%, transparent),
+      transparent 42%
+    ),
     var(--app-bg);
 }
 
@@ -482,7 +587,7 @@ button {
 
 .auth-form input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(49, 85, 200, 0.12);
+  box-shadow: var(--ring);
 }
 
 .auth-error {
@@ -557,11 +662,23 @@ button {
   display: flex;
   align-items: center;
   margin: 0 12px 10px;
-  padding: 7px 10px;
+  padding: 8px 11px;
+  border: 1px solid transparent;
   border-radius: var(--radius);
   background: var(--surface-subtle);
   color: var(--subtle);
   gap: 6px;
+  cursor: text;
+}
+
+.search-box:hover {
+  border-color: var(--border);
+}
+
+.search-box:focus-within {
+  border-color: var(--primary);
+  background: var(--surface);
+  box-shadow: var(--ring);
 }
 
 .search-box span:not(.material-symbol) {
@@ -746,22 +863,44 @@ button {
 
 .button.primary {
   background: var(--primary);
-  color: #ffffff;
+  color: var(--on-primary);
+  box-shadow: var(--shadow-xs);
 }
 
 .button.primary:hover {
   background: var(--primary-hover);
+  box-shadow: var(--shadow-sm);
+}
+
+.button.primary:active {
+  background: var(--primary-strong);
+  transform: translateY(1px);
+  box-shadow: none;
 }
 
 .button.secondary {
   border: 1px solid var(--border);
   background: var(--surface);
-  color: var(--muted);
+  color: var(--text);
 }
 
 .button.secondary:hover {
   border-color: var(--primary);
-  color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.button.secondary:active {
+  transform: translateY(1px);
+}
+
+.button:disabled,
+.button[disabled],
+.small-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .card {
@@ -769,6 +908,7 @@ button {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
+  box-shadow: var(--shadow-xs);
 }
 
 .empty-state {
@@ -814,25 +954,31 @@ button {
   color: var(--primary);
 }
 
+.small-button:active {
+  transform: translateY(1px);
+}
+
 .small-button.primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #ffffff;
+  color: var(--on-primary);
+  box-shadow: var(--shadow-xs);
 }
 
 .small-button.primary:hover {
   background: var(--primary-hover);
-  color: #ffffff;
+  color: var(--on-primary);
 }
 
 .small-button.danger {
-  border-color: #f1c3c0;
-  color: #c0392b;
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  color: var(--danger);
 }
 
 .small-button.danger:hover {
-  background: #fdf1f0;
-  color: #c0392b;
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .task-table-row:hover,
@@ -889,8 +1035,9 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-pill);
   font-weight: 700;
+  letter-spacing: 0.2px;
 }
 
 .priority-pill {
@@ -1544,6 +1691,7 @@ button {
 
 .composer-box:focus-within {
   border-color: var(--primary);
+  box-shadow: var(--ring);
 }
 
 .composer-box input {
@@ -1570,8 +1718,25 @@ textarea::placeholder {
   height: 36px;
   border-radius: var(--radius);
   background: var(--primary);
-  color: #ffffff;
+  color: var(--on-primary);
   cursor: pointer;
+  box-shadow: var(--shadow-xs);
+}
+
+.composer-box button:hover {
+  background: var(--primary-hover);
+}
+
+.composer-box button:active {
+  background: var(--primary-strong);
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.composer-box button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .composer p {
