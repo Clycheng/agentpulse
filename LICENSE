@@ -1,21 +1,63 @@
-MIT License
+AgentPulse Custom License (学习用途授权协议)
 
-Copyright (c) 2026 AgentPulse contributors
+Copyright (c) 2026 Clycheng (https://github.com/Clycheng)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+本协议授予您在以下条件下使用本软件的权利：
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+一、授权范围
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. 学习与研究用途：您可以免费使用、复制、修改、合并、发布本软件及其相关文档，用于：
+   - 个人学习、技术研究
+   - 教育培训（高校课程、技术讲座、开源社区分享）
+   - 非商业性质的内部技术验证与原型开发
+   
+2. 商业用途限制：
+   - 未经书面授权，严禁将本软件用于任何商业目的，包括但不限于：
+     * 商业产品开发与销售
+     * 提供付费技术服务或咨询
+     * 嵌入商业产品或平台
+     * 用于公司内部生产环境（营利性组织）
+   
+3. 商业授权：
+   - 如需商业使用，请联系项目所有者获取授权许可。
+   - 授权费用及条款根据具体商业场景协商确定。
+   - 获得授权后，将收到书面授权证书及适用范围说明。
+
+二、义务与限制
+
+1. 版权声明：在任何使用或分发时，必须保留本协议全文及原作者版权信息。
+   
+2. 禁止再许可：您不得将本软件再许可给第三方，不得移除或修改本协议条款。
+   
+3. 禁止商标滥用：未经授权，不得使用本项目名称、商标、Logo用于商业宣传或产品命名。
+
+三、免责声明
+
+本软件按原样提供，不附带任何形式的明示或暗示担保，包括但不限于：
+- 适销性担保
+- 特定用途适用性担保
+- 不侵权担保
+
+在任何情况下，作者或版权持有人不对任何索赔、损害或其他责任负责，无论是基于合同、侵权或其他法律理论。
+
+四、定义
+
+- "商业用途"：任何以营利为目的或服务于营利性组织的用途。
+- "授权"：由项目所有者签发的书面许可文件，明确商业使用范围和期限。
+- "软件"：本仓库中的所有源代码、文档、配置文件及相关资源。
+
+五、协议变更
+
+项目所有者有权随时修改本协议。修改后的协议将在仓库中公布，继续使用本软件视为接受新协议条款。若不同意新协议，应停止使用并删除相关副本。
+
+---
+
+联系方式（获取商业授权）：
+- GitHub: https://github.com/Clycheng
+- Email: 30332511+Clycheng@users.noreply.github.com
+
+授权咨询请提供以下信息：
+1. 公司名称/个人身份
+2. 使用场景描述
+3. 预期使用规模（用户数、部署方式等）
+4. 是否需要源码定制或技术支持
