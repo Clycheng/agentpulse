@@ -3,24 +3,23 @@
 > **任何 worker AI 开工流程**：读完 [README.md](README.md) 的"Worker AI 执行协议" → 在本文件挑「现在就做」里最靠前、且会话类型匹配的任务 → **开工第一个动作 = 把该任务状态改成 `🔵 进行中` 并 commit+push 本文件**（防止多 AI 撞车）→ 做完按协议验收/回填 → 状态改 `✅ 完成(commit)` 再 push。
 > 任务状态**只在本文件标**（TD 文件里只有设计和验收标准，不标状态），避免两处漂移。
 
-## 🔴 架构复核发现真实漂移（2026-07-08）——TD-02-T5 是当前最高优先级
+## ✅ 架构漂移已修复（2026-07-09）——TD-02-T5 完成，TD-03-T2/T3 解锁
 
-`orchestration/discussion.py::run_discussion_round` 是设计好的编排入口，但**生产路由从未调用它**——`send_message`/`send_message_stream` 里各自手写了一份重复的讨论循环 + 另一套 `_llm_select_speaker`，违反边界层不写业务逻辑的规则。详情/修法见 [TD-02 🔴 章节](TD-02-multi-agent-discussion.md)。**TD-03-T2 及以后必须等 TD-02-T5 完成**，否则会把 Hermes 接到前端根本走不到的死路径上。
+`orchestration/discussion.py::run_discussion_round` 曾是死码（生产路由手写重复讨论循环 + `_llm_select_speaker`）。TD-02-T5 已把 `send_message`/`send_message_stream` 的讨论循环统一收回到 `run_discussion_round`（重写为 async 事件流），发言人选择唯一入口收敛到 `resolve_next_speaker`/`select_next_speaker`，路由层只注入"如何执行一轮 turn"和"如何调主持人 LLM"。三条禁止模式 grep 全干净，新增生产路径断言测试。**TD-03-T2 及以后现可开工。**
 
 ## 现在就做（按此顺序领）
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | [TD-02-T5](TD-02-multi-agent-discussion.md#td-02-t5) | **路由归位**：消除 send_message/send_message_stream 重复实现，统一收回调用 run_discussion_round | 否 | ⚪ 待领 |
-| 2 | [TD-01-T2/T3](TD-01-verify-and-harden-slice-1.md) | 端到端手测：brief 全流程 + 多 agent 讨论流(起后端+桌面端真跑一遍，建议在 TD-02-T5 之后测，避免测到即将被重构的路径) | **agentpulse** | ⚪ 待领 |
-| 3 | [TD-03-T1](TD-03-hermes-execution.md) | runs 扩列 + run_steps 新表 + approvals.run_id(⚠️双 schema，不受 TD-02-T5 影响可先做) | 任意 | ⚪ 待领 |
-| 4 | [TD-04-T6](TD-04-agent-provisioning.md) | LocalHermesProvisioner 真实现(语法已实测解锁，注意 import 写 wrapper 要清理) | **agentpulse** | ⚪ 待领 |
+| 1 | [TD-03-T1](TD-03-hermes-execution.md) | runs 扩列 + run_steps 新表 + approvals.run_id(⚠️双 schema) | 任意 | ⚪ 待领 |
+| 2 | [TD-04-T6](TD-04-agent-provisioning.md) | LocalHermesProvisioner 真实现(语法已实测解锁，注意 import 写 wrapper 要清理) | **agentpulse** | ⚪ 待领 |
+| 3 | [TD-01-T2/T3](TD-01-verify-and-harden-slice-1.md) | 端到端手测：brief 全流程 + 多 agent 讨论流(起后端+桌面端真跑一遍；TD-02-T5 已重构完，现在测的就是最终路径) | **agentpulse** | ⚪ 待领 |
 
 ## 有依赖，等前置完成后做
 
 | 任务 | 等什么 | 会话要求 |
 |---|---|---|
-| [TD-03-T2](TD-03-hermes-execution.md)(HermesBackend) | TD-03-T1 **且 TD-02-T5** | **agentpulse** |
+| [TD-03-T2](TD-03-hermes-execution.md)(HermesBackend) | TD-03-T1（TD-02-T5 已完成✅） | **agentpulse** |
 | TD-03-T3(RunService+替换执行层) | TD-03-T2 | **agentpulse** |
 | TD-03-T4(Tirith 审批 + clarification_required) | TD-03-T3 | **agentpulse** |
 | TD-03-T5(员工↔profile 生命周期) | TD-03-T2；可与 TD-04-T6 合并做 | **agentpulse** |
@@ -40,6 +39,7 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| TD-02-T5(路由归位)：send_message/stream 讨论循环统一收回 run_discussion_round(改为 async 事件流)，删除路由层 `_llm_select_speaker`/`_extract_mention_simple`/`_build_discussion_context`，发言人选择收敛到 `resolve_next_speaker`；+8 编排单测 +1 生产路径断言测试 | 2026-07-09(见 CHANGELOG) | 三条 grep 全干净；149 测试全过；解锁 TD-03-T2/T3 |
 | 架构复核：发现 TD-02 路由层重复实现漂移，新增 TD-02-T5 阻塞项 | 2026-07-08(见 CHANGELOG) | 纯发现+文档纠正，代码未改 |
 | 验证事实回填 DATA-MODEL/TD-03/04/05/ARCHITECTURE + workdir 架构决策 + 看板重建 | 2026-07-08(见 CHANGELOG) | |
 | TD-02 T1–T4(多 agent 讨论编排+372 行测试) + SSE 流式 | `b61005e` | ⚠️ 编排函数本身正确，但**未被路由实际调用**——见上方漂移说明，需 TD-02-T5 完成整合 |

@@ -8,6 +8,7 @@ Covers:
 - build_discussion_agent_prompt: discussion mode constraints
 """
 
+import asyncio
 import sqlite3
 from unittest.mock import MagicMock
 
@@ -19,8 +20,10 @@ from app.orchestration.discussion import (
     TRANSCRIPT_WINDOW,
     DiscussionStatus,
     select_next_speaker,
+    resolve_next_speaker,
     build_speaker_selection_prompt,
     run_discussion_round,
+    build_discussion_context,
     check_convergence,
     build_convergence_prompt,
     build_brief_draft_prompt,
@@ -28,7 +31,23 @@ from app.orchestration.discussion import (
     _extract_mention,
     _round_robin_pick,
     _format_transcript,
+    _parse_speaker_json,
 )
+
+
+async def _drain(agen) -> list[dict]:
+    """Collect all events from an async generator."""
+    return [event async for event in agen]
+
+
+def _run(agen) -> list[dict]:
+    """Drive an async generator to completion synchronously."""
+    return asyncio.run(_drain(agen))
+
+
+def _run_coro(coro):
+    """Run an async coroutine synchronously."""
+    return asyncio.run(coro)
 
 
 def _make_db() -> Database:
@@ -58,6 +77,12 @@ def _make_db() -> Database:
             provider TEXT,
             model TEXT,
             created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS agents (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL DEFAULT '',
+            description TEXT
         );
     """)
     return db
@@ -198,81 +223,262 @@ class TestRoundRobinPick:
         assert _round_robin_pick([], []) is None
 
 
-# --- Discussion round tests (TD-02-T2) ---
+# --- Discussion round tests (TD-02-T2, async event stream via TD-02-T5) ---
 
 class TestRunDiscussionRound:
-    def test_dry_run_no_callback(self):
+    def test_no_message_from_executor_stops(self):
         db = _make_db()
         _insert_conversation(db)
         _insert_message(db, "conv_1", "user", "user_1", "开始讨论")
 
-        result = run_discussion_round(
-            db,
-            workspace_id="ws_1",
-            conversation_id="conv_1",
-            member_agent_ids=["agent_abc"],
-            on_agent_reply=None,  # dry run
-        )
-        assert result["turns_used"] == 0
-        assert result["agent_messages"] == []
-        assert result["converged"] is False
+        async def noop(conn, agent_id):
+            return
+            yield  # pragma: no cover — makes this an async generator
 
-    def test_with_callback_respects_max_turns(self):
+        events = _run(
+            run_discussion_round(
+                db,
+                workspace_id="ws_1",
+                conversation_id="conv_1",
+                member_agents=[{"id": "agent_abc"}],
+                turn_executor=noop,
+            )
+        )
+        end = events[-1]
+        assert end["type"] == "end"
+        assert end["turns_used"] == 0
+        assert end["converged"] is False
+
+    def test_respects_max_turns(self):
         db = _make_db()
         _insert_conversation(db)
         _insert_message(db, "conv_1", "user", "user_1", "开始讨论")
 
         call_count = 0
 
-        def mock_reply(conn, agent_id, conversation_id):
+        async def reply(conn, agent_id):
             nonlocal call_count
             call_count += 1
-            _insert_message(conn, conversation_id, "agent", agent_id, f"回复{call_count}", f"msg_{call_count}")
-            return {"id": f"msg_{call_count}", "content": f"回复{call_count}"}
+            _insert_message(conn, "conv_1", "agent", agent_id, f"回复{call_count}", f"msg_{call_count}")
+            yield {"type": "message", "message": {"id": f"msg_{call_count}"}}
 
-        result = run_discussion_round(
-            db,
-            workspace_id="ws_1",
-            conversation_id="conv_1",
-            member_agent_ids=["agent_abc"],
-            max_turns=2,
-            on_agent_reply=mock_reply,
+        events = _run(
+            run_discussion_round(
+                db,
+                workspace_id="ws_1",
+                conversation_id="conv_1",
+                member_agents=[{"id": "agent_abc"}],
+                turn_executor=reply,
+                max_turns=2,
+            )
         )
-        assert result["turns_used"] == 2
-        assert result["converged"] is True  # hit max_turns
+        messages = [e for e in events if e["type"] == "message"]
+        end = events[-1]
+        assert len(messages) == 2
+        assert end["turns_used"] == 2
+        assert end["converged"] is True  # hit max_turns
+
+    def test_emits_speaker_before_message(self):
+        db = _make_db()
+        _insert_conversation(db)
+        _insert_message(db, "conv_1", "user", "user_1", "开始讨论")
+
+        async def reply(conn, agent_id):
+            _insert_message(conn, "conv_1", "agent", agent_id, "回复", "msg_1")
+            yield {"type": "message", "message": {"id": "msg_1"}}
+
+        events = _run(
+            run_discussion_round(
+                db,
+                workspace_id="ws_1",
+                conversation_id="conv_1",
+                member_agents=[{"id": "agent_abc"}],
+                turn_executor=reply,
+                max_turns=1,
+            )
+        )
+        types = [e["type"] for e in events]
+        assert types[0] == "speaker"
+        assert events[0]["agent_id"] == "agent_abc"
+        assert "message" in types
 
     def test_stops_when_no_speaker(self):
         db = _make_db()
         _insert_conversation(db)
         _insert_message(db, "conv_1", "user", "user_1", "开始讨论")
 
-        result = run_discussion_round(
-            db,
-            workspace_id="ws_1",
-            conversation_id="conv_1",
-            member_agent_ids=[],  # empty → no speaker
-            on_agent_reply=lambda *a: None,
-        )
-        assert result["turns_used"] == 0
+        async def reply(conn, agent_id):
+            yield {"type": "message", "message": {"id": "x"}}
 
-    def test_callback_exception_stops_round(self):
+        events = _run(
+            run_discussion_round(
+                db,
+                workspace_id="ws_1",
+                conversation_id="conv_1",
+                member_agents=[],  # empty → no speaker
+                turn_executor=reply,
+            )
+        )
+        end = events[-1]
+        assert end["turns_used"] == 0
+        assert not any(e["type"] == "message" for e in events)
+
+    def test_executor_exception_stops_round(self):
         db = _make_db()
         _insert_conversation(db)
         _insert_message(db, "conv_1", "user", "user_1", "开始讨论")
 
-        def failing_reply(conn, agent_id, conversation_id):
+        async def failing(conn, agent_id):
             raise RuntimeError("LLM error")
+            yield  # pragma: no cover — makes this an async generator
 
-        result = run_discussion_round(
-            db,
-            workspace_id="ws_1",
-            conversation_id="conv_1",
-            member_agent_ids=["agent_abc"],
-            max_turns=4,
-            on_agent_reply=failing_reply,
+        events = _run(
+            run_discussion_round(
+                db,
+                workspace_id="ws_1",
+                conversation_id="conv_1",
+                member_agents=[{"id": "agent_abc"}],
+                turn_executor=failing,
+                max_turns=4,
+            )
         )
-        assert result["turns_used"] == 0
-        assert result["converged"] is False
+        errors = [e for e in events if e["type"] == "error"]
+        end = events[-1]
+        assert len(errors) == 1
+        assert "LLM error" in errors[0]["detail"]
+        assert isinstance(errors[0]["exc"], RuntimeError)
+        assert end["turns_used"] == 0
+        assert end["converged"] is False
+
+
+# --- Full speaker resolution tests (TD-02-T5: LLM path moved into orchestration) ---
+
+class TestResolveNextSpeaker:
+    def test_mention_short_circuits_llm(self):
+        db = _make_db()
+        _insert_conversation(db)
+
+        async def llm(prompt):  # pragma: no cover — must not be called
+            raise AssertionError("LLM should not be called when @mention present")
+
+        result = _run_coro(
+            resolve_next_speaker(
+                db,
+                conversation_id="conv_1",
+                member_agents=[{"id": "agent_abc", "name": "A", "role": "r", "description": ""}],
+                last_message={"sender_type": "user", "content": "@agent_abc 上"},
+                llm_complete=llm,
+            )
+        )
+        assert result == "agent_abc"
+
+    def test_llm_selects_speaker(self):
+        db = _make_db()
+        _insert_conversation(db)
+        _insert_message(db, "conv_1", "user", "user_1", "大家讨论下")
+
+        async def llm(prompt):
+            return '{"next_speaker": "agent_def", "reason": "该他了"}'
+
+        result = _run_coro(
+            resolve_next_speaker(
+                db,
+                conversation_id="conv_1",
+                member_agents=[
+                    {"id": "agent_abc", "name": "A", "role": "r", "description": ""},
+                    {"id": "agent_def", "name": "B", "role": "r", "description": ""},
+                ],
+                last_message={"sender_type": "user", "content": "大家讨论下"},
+                llm_complete=llm,
+            )
+        )
+        assert result == "agent_def"
+
+    def test_llm_garbage_falls_back_to_round_robin(self):
+        db = _make_db()
+        _insert_conversation(db)
+        _insert_message(db, "conv_1", "agent", "agent_abc", "我先说")
+
+        async def llm(prompt):
+            return "not json at all"
+
+        result = _run_coro(
+            resolve_next_speaker(
+                db,
+                conversation_id="conv_1",
+                member_agents=[
+                    {"id": "agent_abc", "name": "A", "role": "r", "description": ""},
+                    {"id": "agent_def", "name": "B", "role": "r", "description": ""},
+                ],
+                last_message={"sender_type": "agent", "content": "我先说"},
+                llm_complete=llm,
+            )
+        )
+        # abc spoke last → round-robin picks def
+        assert result == "agent_def"
+
+    def test_no_llm_uses_round_robin(self):
+        db = _make_db()
+        _insert_conversation(db)
+
+        result = _run_coro(
+            resolve_next_speaker(
+                db,
+                conversation_id="conv_1",
+                member_agents=[{"id": "agent_abc", "name": "A", "role": "r", "description": ""}],
+                last_message=None,
+                llm_complete=None,
+            )
+        )
+        assert result == "agent_abc"
+
+    def test_empty_members_returns_none(self):
+        db = _make_db()
+        _insert_conversation(db)
+
+        result = _run_coro(
+            resolve_next_speaker(
+                db,
+                conversation_id="conv_1",
+                member_agents=[],
+                last_message=None,
+            )
+        )
+        assert result is None
+
+
+class TestParseSpeakerJson:
+    def test_valid_json(self):
+        assert _parse_speaker_json('{"next_speaker": "a1"}') == {"next_speaker": "a1"}
+
+    def test_json_embedded_in_text(self):
+        assert _parse_speaker_json('好的 {"next_speaker": "a1"} 就这样') == {"next_speaker": "a1"}
+
+    def test_no_json(self):
+        assert _parse_speaker_json("随便说点什么") is None
+
+    def test_empty(self):
+        assert _parse_speaker_json("") is None
+
+
+class TestBuildDiscussionContext:
+    def test_includes_members_and_constraint(self):
+        db = _make_db()
+        _insert_conversation(db)
+        _insert_message(db, "conv_1", "user", "u1", "开工")
+        ctx = build_discussion_context(
+            db,
+            "conv_1",
+            current_agent={"id": "a1", "name": "小明", "role": "设计师", "description": "画图"},
+            all_agents=[
+                {"id": "a1", "name": "小明", "role": "设计师", "description": "画图"},
+                {"id": "a2", "name": "小红", "role": "工程师", "description": ""},
+            ],
+        )
+        assert "群聊讨论模式" in ctx
+        assert "小红" in ctx  # other member listed
+        assert "小明" in ctx  # role constraint mentions the current agent
+        assert "不允许宣称已执行" in ctx
 
 
 # --- Convergence tests (TD-02-T3) ---

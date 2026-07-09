@@ -533,6 +533,77 @@ def test_group_chat_returns_multiple_agent_replies_when_not_mentioned(
     ]
 
 
+def test_stream_group_discussion_routes_through_orchestration(tmp_path, monkeypatch):
+    """TD-02-T5 architecture assertion: the production /messages/stream path
+    for a group discussion must actually call orchestration.run_discussion_round
+    (not a hand-rolled loop in the route). We mock the orchestration entry point
+    and assert it is invoked via a real HTTP request.
+    """
+    calls: list[dict] = []
+
+    async def fake_run_discussion_round(conn, **kwargs):
+        calls.append(kwargs)
+        yield {"type": "end", "converged": False, "turns_used": 0}
+
+    monkeypatch.setattr(
+        workspace_routes, "run_discussion_round", fake_run_discussion_round
+    )
+
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    analyst = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "增长分析师",
+            "description": "负责增长数据分析",
+            "department_name": "增长与客户",
+            "prompt": "你负责分析渠道数据。",
+        },
+    ).json()
+    writer = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "内容策划",
+            "description": "负责内容方案",
+            "department_name": "内容部",
+            "prompt": "你负责把需求转成内容选题。",
+        },
+    ).json()
+
+    group = client.post(
+        "/api/conversations/group",
+        headers=auth_header(token),
+        json={"name": "增长作战室", "member_ids": [analyst["id"], writer["id"]]},
+    )
+    assert group.status_code == 200
+    group_id = group.json()["id"]
+
+    resp = client.post(
+        f"/api/conversations/{group_id}/messages/stream",
+        headers=auth_header(token),
+        json={"content": "我们一起讨论下本周增长打法"},
+    )
+    assert resp.status_code == 200
+    # Consume the SSE stream so the generator body runs to completion.
+    body = resp.text
+    assert "event: user_message" in body
+
+    assert len(calls) == 1, (
+        "run_discussion_round must be called from the streaming production path"
+    )
+    assert calls[0]["conversation_id"] == group_id
+    assert {a["id"] for a in calls[0]["member_agents"]} == {
+        analyst["id"],
+        writer["id"],
+    }
+    assert callable(calls[0]["turn_executor"])
+    assert callable(calls[0]["llm_complete"])
+
+
 def test_task_api_updates_and_injects_related_context(tmp_path, monkeypatch):
     captured_payloads = []
 

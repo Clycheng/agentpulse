@@ -13,9 +13,22 @@ See ADR 0002, ADR 0006, and TD-02 for design details.
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from app.core.database import Database
+
+# Injected callbacks (provided by the route layer so orchestration never
+# touches the runtime/HTTP layer directly — see services/api/AGENTS.md).
+#
+# TurnExecutor: given (conn, agent_id) produce this agent's reply. Yields
+#   event dicts: {"type": "chunk", "content": str} for streaming, and finally
+#   {"type": "message", "message": <row>} once persisted. Responsible for
+#   committing so the next speaker selection can see the new message.
+TurnExecutor = Callable[[Database, str], AsyncIterator[dict]]
+# LlmComplete: given a system prompt, return the model's raw text completion.
+LlmComplete = Callable[[str], Awaitable[str]]
 
 # --- Configuration constants ---
 
@@ -200,82 +213,126 @@ def _round_robin_pick(
     return candidates[0]
 
 
-# --- Discussion round orchestration (TD-02-T2) ---
+# --- Full speaker resolution (mention → LLM → round-robin) ---
 
-def run_discussion_round(
+async def resolve_next_speaker(
+    conn: Database,
+    *,
+    conversation_id: str,
+    member_agents: list[Any],
+    last_message: dict | None = None,
+    llm_complete: LlmComplete | None = None,
+) -> str | None:
+    """Resolve the next speaker end-to-end.
+
+    Priority: ① @mention in last message → ② moderator LLM (via injected
+    ``llm_complete``) → ③ round-robin fallback. The @mention/validation/
+    round-robin decisions live in :func:`select_next_speaker`; this wrapper
+    only adds the LLM call (whose transport is injected so orchestration
+    stays free of HTTP/runtime imports).
+    """
+    member_agent_ids = [a["id"] for a in member_agents]
+    if not member_agent_ids:
+        return None
+
+    # @mention short-circuits before any LLM cost.
+    if last_message and last_message.get("content"):
+        mentioned = _extract_mention(last_message["content"], member_agent_ids)
+        if mentioned:
+            return mentioned
+
+    llm_output: dict[str, Any] | None = None
+    if llm_complete is not None:
+        try:
+            transcript = _load_transcript(conn, conversation_id)
+            agent_dicts = [
+                {
+                    "id": a["id"],
+                    "name": _row_get(a, "name"),
+                    "role": _row_get(a, "role"),
+                    "description": _row_get(a, "description"),
+                }
+                for a in member_agents
+            ]
+            prompt = build_speaker_selection_prompt(agent_dicts, transcript)
+            text = await llm_complete(prompt)
+            llm_output = _parse_speaker_json(text)
+        except Exception:
+            llm_output = None
+
+    return select_next_speaker(
+        conn,
+        conversation_id=conversation_id,
+        member_agent_ids=member_agent_ids,
+        last_message=last_message,
+        llm_output=llm_output,
+    )
+
+
+# --- Discussion round orchestration (TD-02-T2, wired via TD-02-T5) ---
+
+async def run_discussion_round(
     conn: Database,
     *,
     workspace_id: str,
     conversation_id: str,
-    member_agent_ids: list[str],
+    member_agents: list[Any],
+    turn_executor: TurnExecutor,
+    llm_complete: LlmComplete | None = None,
     max_turns: int = MAX_AGENT_TURNS_PER_ROUND,
-    on_agent_reply: Any | None = None,
-) -> dict:
-    """Run one round of multi-agent discussion.
+) -> AsyncIterator[dict]:
+    """Run one round of multi-agent discussion as an async event stream.
 
-    This is called from the route layer when a group conversation is in
-    'discussing' state. It orchestrates multiple agent turns in sequence.
+    This is the single production entry point for group discussion — both the
+    streaming and non-streaming routes drive it. It owns the turn loop, speaker
+    selection and convergence signalling; the route layer only injects how a
+    turn is executed (``turn_executor``) and how the moderator LLM is called
+    (``llm_complete``), and translates the yielded events to its transport
+    (SSE frames for streaming, an accumulated list for non-streaming).
 
-    Args:
-        conn: Database connection
-        workspace_id: Workspace ID
-        conversation_id: Group conversation ID
-        member_agent_ids: List of agent IDs in the group
-        max_turns: Maximum consecutive agent turns before pausing
-        on_agent_reply: Async callback(conn, agent_id, conversation_id) -> message_row
-            If None, no actual LLM calls are made (dry run for testing).
-
-    Returns:
-        dict with keys:
-        - agent_messages: list of agent message rows
-        - converged: bool (whether check_convergence says to stop)
-        - turns_used: int (number of agent turns used)
+    Yields event dicts:
+      - {"type": "speaker", "agent_id": str}
+      - {"type": "chunk", "content": str}          (re-emitted from turn_executor)
+      - {"type": "message", "message": <row>}      (re-emitted from turn_executor)
+      - {"type": "error", "detail": str, "exc": Exception}
+      - {"type": "end", "converged": bool, "turns_used": int}   (always last)
     """
-    agent_messages = []
+    turns_used = 0
     converged = False
 
-    for turn in range(max_turns):
-        # Select next speaker
-        last_msg_row = conn.execute(
-            """SELECT sender_type, sender_id, content FROM messages
-            WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1""",
-            (conversation_id,),
-        ).fetchone()
-        last_message = dict(last_msg_row) if last_msg_row else None
-
-        next_speaker = select_next_speaker(
+    for _turn in range(max_turns):
+        last_message = _load_last_message(conn, conversation_id)
+        next_speaker = await resolve_next_speaker(
             conn,
             conversation_id=conversation_id,
-            member_agent_ids=member_agent_ids,
+            member_agents=member_agents,
             last_message=last_message,
+            llm_complete=llm_complete,
         )
-
         if next_speaker is None:
             break
 
-        # Call the agent reply callback
-        if on_agent_reply is not None:
-            try:
-                msg = on_agent_reply(conn, next_speaker, conversation_id)
-                if msg is not None:
-                    agent_messages.append(msg)
-            except Exception:
-                break
-        else:
-            # Dry run — no actual LLM call
+        yield {"type": "speaker", "agent_id": next_speaker}
+
+        got_message = False
+        try:
+            async for event in turn_executor(conn, next_speaker):
+                yield event
+                if event.get("type") == "message":
+                    got_message = True
+        except Exception as exc:  # execution-layer failure → surface, stop round
+            yield {"type": "error", "detail": str(exc), "exc": exc}
             break
 
-        # Check convergence after each agent turn
-        # (simplified: not calling LLM here, just check turn count)
-        if turn + 1 >= max_turns:
+        if not got_message:
+            break
+
+        turns_used += 1
+        if turns_used >= max_turns:
             converged = True
             break
 
-    return {
-        "agent_messages": agent_messages,
-        "converged": converged,
-        "turns_used": len(agent_messages),
-    }
+    yield {"type": "end", "converged": converged, "turns_used": turns_used}
 
 
 # --- Convergence check (TD-02-T3) ---
@@ -388,7 +445,122 @@ def build_discussion_agent_prompt(
 如果背景不清楚，先在群里提问，不要臆测。"""
 
 
+# --- Discussion context assembly (per-agent prompt for a group turn) ---
+
+def build_discussion_context(
+    conn: Database,
+    conversation_id: str,
+    current_agent: Any,
+    all_agents: list[Any],
+) -> str:
+    """Build the discussion-mode context string injected into an agent's turn.
+
+    Includes: the other group members, the recent transcript, and the
+    role-based discussion constraint. Kept in the orchestration layer so the
+    route stays free of discussion business logic.
+    """
+    other_members = [
+        f"- {a['name']}（{a['role']}）"
+        for a in all_agents
+        if a["id"] != current_agent["id"]
+    ]
+    members_str = "\n".join(other_members) if other_members else "无"
+
+    transcript_rows = conn.execute(
+        """SELECT messages.sender_type, messages.sender_id, messages.content,
+                  agents.name AS agent_name
+        FROM messages LEFT JOIN agents ON agents.id = messages.sender_id
+        WHERE messages.conversation_id = ?
+          AND messages.sender_type IN ('user', 'agent')
+        ORDER BY messages.created_at DESC LIMIT 10""",
+        (conversation_id,),
+    ).fetchall()
+
+    transcript_lines = []
+    for row in reversed(transcript_rows):
+        if row["sender_type"] == "user":
+            name = "老板"
+        else:
+            name = _row_get(row, "agent_name") or row["sender_id"][:12]
+        transcript_lines.append(f"{name}：{row['content'][:300]}")
+    transcript_str = "\n".join(transcript_lines) if transcript_lines else "（暂无）"
+
+    role_constraint = build_discussion_agent_prompt(
+        agent_name=current_agent["name"],
+        agent_role=current_agent["role"],
+        agent_description=_row_get(current_agent, "description"),
+    )
+
+    return f"""【群聊讨论模式】
+当前是群聊讨论，不是一对一私聊。你只是讨论的参与者之一，不是唯一回答者。
+
+其他群成员：
+{members_str}
+
+最近讨论记录：
+{transcript_str}
+
+{role_constraint}
+
+关键规则：
+- 只从你的岗位角度出发，不要重复别人已经说过的内容
+- 如果这个话题不涉及你的职责范围，可以简短表态或跳过
+- 不要列出和前面的人一样的问题清单，而是在别人的基础上补充或推进
+- 回复要简练，不要写长篇大论"""
+
+
 # --- Helpers ---
+
+def _row_get(row: Any, key: str, default: str = "") -> Any:
+    """Safely read a column from a sqlite Row or a plain dict."""
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return default
+    return value if value is not None else default
+
+
+def _load_last_message(conn: Database, conversation_id: str) -> dict | None:
+    row = conn.execute(
+        """SELECT sender_type, sender_id, content FROM messages
+        WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1""",
+        (conversation_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _load_transcript(
+    conn: Database, conversation_id: str, limit: int = 20
+) -> list[dict]:
+    rows = conn.execute(
+        """SELECT messages.sender_type, messages.sender_id, messages.content,
+                  agents.name AS agent_name
+        FROM messages LEFT JOIN agents ON agents.id = messages.sender_id
+        WHERE messages.conversation_id = ?
+          AND messages.sender_type IN ('user', 'agent')
+        ORDER BY messages.created_at DESC LIMIT ?""",
+        (conversation_id, limit),
+    ).fetchall()
+    return [dict(row) for row in reversed(rows)]
+
+
+def _parse_speaker_json(text: str) -> dict | None:
+    """Extract the moderator's speaker-selection JSON from raw LLM text.
+
+    Returns the parsed dict (validated downstream by select_next_speaker) or
+    None if no valid JSON object is present.
+    """
+    if not text:
+        return None
+    match = re.search(r"\{[^{}]*\}", text)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group())
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
 
 def _format_transcript(transcript: list[dict]) -> str:
     """Format a list of message dicts into a readable transcript."""

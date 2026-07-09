@@ -3,7 +3,11 @@
 - 关联 ADR：[0002](../decisions/0002-self-built-group-discussion.md)（自研群讨论，照 AutoGen）、[0006](../decisions/0006-group-discussion-v1-first-slice.md)（第一片，本阶段在其上叠加）
 - ⚠️ 执行会话要求：纯 `services/api` 逻辑，**暂不碰 Hermes**，在任意会话做都安全（写代码 + 单测不起 Hermes 进程）；若要端到端手测则同 TD-01（需 agentpulse 锚定会话起服务）。
 
-## 🔴 2026-07-08 架构复核：实现已落地但发生真实漂移，未完成前不得视为"TD-02 已完成"
+## ✅ 2026-07-09 更新：TD-02-T5 已完成，下述漂移已修复
+
+`run_discussion_round` 重写为 async 事件流，成为群讨论的**唯一生产入口**——`send_message`（非流式）和 `send_message_stream`（流式）都通过 `async for event in run_discussion_round(...)` 驱动它，路由层只注入 `turn_executor`（如何执行一轮 agent 回复）和 `llm_complete`（如何调主持人 LLM），并把事件翻译成各自的传输格式（SSE 帧 / 累积列表）。发言人选择逻辑（@提及 → 主持人 LLM → 轮询降级）全部收敛到编排层的 `resolve_next_speaker`/`select_next_speaker`；路由层的 `_llm_select_speaker`/`_extract_mention_simple`/`_build_discussion_context` 已删除，`_build_discussion_context` 迁移为编排层 `build_discussion_context`。三条禁止模式 grep 全干净，新增 `test_stream_group_discussion_routes_through_orchestration` 断言生产路径真正经过编排入口。commit 见 CHANGELOG 2026-07-09。下方原漂移说明保留作为历史记录。
+
+## 🔴 2026-07-08 架构复核（历史）：实现已落地但发生真实漂移，未完成前不得视为"TD-02 已完成"
 
 对照本设计 (`select_next_speaker`/`run_discussion_round`/`check_convergence` 应放在 `orchestration/discussion.py`，路由层只负责调用) 复核实际代码，发现结构性偏离：
 

@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 2026-07-09（TD-02-T5：路由归位，修复架构漂移）
+- **fix(api+orchestration)**: 消除 2026-07-08 复核发现的结构性漂移，把群讨论编排真正收回编排层。
+  - `orchestration/discussion.py::run_discussion_round` 从"只被单测调用的死码 + 同步 dict 返回"**重写为 async 事件流**（yield `speaker`/`chunk`/`message`/`error`/`end` 事件），成为群讨论的**唯一生产入口**。`send_message`（非流式）和 `send_message_stream`（流式）都改为 `async for event in run_discussion_round(...)` 驱动它——路由层只注入 `turn_executor`（如何执行一轮 agent 回复 + 持久化）和 `llm_complete`（主持人 LLM 执行层薄封装，由新的 `make_speaker_selector()` 构造），再把事件翻译成各自传输格式（SSE 帧 / 累积列表）。
+  - 发言人选择逻辑（@提及 → 主持人 LLM → 轮询降级）全部收敛到编排层：新增 `resolve_next_speaker`（端到端解析，内部经注入的 `llm_complete` 调 LLM），路由层的 `_llm_select_speaker`/`_extract_mention_simple` **删除**；`_build_discussion_context` 迁移为编排层 `build_discussion_context`。
+  - 编排层保持零外部 HTTP：LLM 调用一律经注入回调，`app/orchestration/` 内无 `httpx`/`requests`/`hermes_client`。
+  - 测试：`test_discussion.py` 按新 async 契约重写 `TestRunDiscussionRound`，新增 `TestResolveNextSpeaker`/`TestParseSpeakerJson`/`TestBuildDiscussionContext`（覆盖从路由迁入的 LLM 选人逻辑）；`test_workspace_flow.py` 新增 `test_stream_group_discussion_routes_through_orchestration`——mock `run_discussion_round`，向 `/messages/stream` 发真 HTTP 请求断言生产路径确实经过编排入口（不是单测直调函数的假验收）。全套 **149 测试通过**（较基线 137 +12）。
+  - 三条禁止模式 grep 全干净（路由无业务循环/私有 LLM 选人、生产入口真调 run_discussion_round、编排无直连 HTTP）。
+  - Verified: run_discussion_round called via production path POST /api/conversations/{id}/messages/stream（及 /messages）；解锁 TD-03-T2/T3。
+
 ### 2026-07-08（架构复核：发现真实漂移）
 - **docs(architecture-audit)**: 用户直接质问"AI 干的活方向有没有飘"，做了一次彻底代码复核（不只是接口签名，而是追调用链），确认**是，且是结构性漂移，需要纠正**：
   - `orchestration/discussion.py::run_discussion_round`(TD-02 设计的核心编排入口)在生产环境是**死代码**——只被单测调用，`api/routes/workspace.py` 的 `send_message`/`send_message_stream` 从未真正调用它。372 行单测全过，但只测了一个生产请求走不到的函数，给出"TD-02 已完成"的假象。

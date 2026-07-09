@@ -71,7 +71,7 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 |---|---|---|
 | `services/api` | FastAPI + PostgreSQL；已有 workspace/task/审批/会话 + **群讨论编排层(`orchestration/`)**；执行仍是临时的直连 DeepSeek(**尚非真 agent**) | 协作编排层 + 调 Hermes profile 执行 |
 | `apps/desktop` | 单文件原型(聊天/员工/任务/审批/**共识纪要卡片** UI，已接后端) | 保留，渐进接入群讨论 + Hermes |
-| 群讨论协议 | 🟢 **第一片已实现并通过测试**(2026-07-07, commit `c2054bf`, 14 tests)：讨论态状态机 + 共识 brief + **Task 创建强制门控**(已移除正则自动建任务)，对齐用人工确认。见 [ADR 0006](docs/decisions/0006-group-discussion-v1-first-slice.md)。⚠️ 仅通过单测，**尚未在跑起来的应用里端到端手测过 UI 流程** | 叠加多 agent 发言路由(完整 AutoGen 骨架) |
+| 群讨论协议 | 🟢 **第一片 + 多 agent 讨论 + 路由归位均已实现并过测**：讨论态状态机 + 共识 brief + Task 门控(第一片 `c2054bf`)；多 agent 发言路由(TD-02 T1–T4 `b61005e`)；**TD-02-T5 路由归位(2026-07-09)——群讨论唯一生产入口收回 `run_discussion_round`(async 事件流)，删除路由层重复讨论循环 + 私有选人函数，三层边界干净**。见 [TD-02](docs/tech-design/TD-02-multi-agent-discussion.md)、[ADR 0006](docs/decisions/0006-group-discussion-v1-first-slice.md)。⚠️ 仍**未在跑起来的应用里端到端手测过 UI 流程**(TD-01-T2/T3) | 接 Hermes 执行(TD-03) |
 | Hermes 集成 | 🟡 本机地基验证已完成(2026-07-05)：多 profile 隔离、HTTP Runs API + SSE 流式全链路跑通；发现 2 个必须处理的坑，见 [ADR 0005](docs/decisions/0005-hermes-poc-safety-findings.md) | 接入 `services/api`，成为真正的员工运行时 |
 
 **下一步 → 直接看 [docs/tech-design/EXECUTION-BOARD.md](docs/tech-design/EXECUTION-BOARD.md)（执行看板 = 唯一任务状态源）**：它列着"现在就做"的任务队列(带顺序/依赖/会话要求/状态)和认领规则——**AI 不需要人类告诉下一步，读看板即知**。设计文档体系(架构/规格/各 TD)入口见 [docs/tech-design/README.md](docs/tech-design/README.md)。
