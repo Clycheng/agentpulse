@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### 2026-07-10（TD-09-T1：外部渠道数据模型 + Router 核心）
+- **feat(api)**: 外部渠道接入地基——外部消息(微信/邮件/网页/通用 webhook)进来后归一化成标准消息、进入普通会话流，**agent 完全不感知渠道**（纯数据 + Router，不接 webhook 端点/不碰 Hermes）。
+  - schema（双 schema + `ensure_column`）：新增 `channel_configs`（channel_type CHECK、token UNIQUE、config_json、target_agent_id/target_conversation_id、active 存 INTEGER 0/1）；`conversations` 加 `source_channel`/`external_conversation_id`；`messages` 加 `external_message_id`（webhook 重发去重）。
+  - `app/channels/`：`adapters/`(base `ChannelMessage` + `generic` 适配器按可配置点路径 `message_path`/`user_id_path`/`message_id_path` 提取 + 注册表 `get_adapter`)；`router.py` 的 `route_inbound`(归一化→找/建会话→去重→落 `sender_type='user'` 消息)、`find_or_create_conversation`(pin 固定群 / 按 `(source_channel, external_user_id)` 归线程)、`message_already_processed`。留 TD-09-T2 触发 agent 回复的接缝。
+  - 测试：新增 `test_channels.py` 6 例（建会话+消息+外部字段、按 external_message_id 去重、同一外部用户归一会话且不同用户分开、pin 固定群路由、无 message_id 不去重、自定义嵌套路径 + 缺内容报错）。全套 **176 测试通过**（+6）。DATA-MODEL §9.1 标记已实现。
+
 ### 2026-07-10（TD-08-T1：Idea 中心数据模型 + API）
 - **feat(api)**: 落地北极星 §1.5「没有 idle 员工 → idea 中心」的后端地基（纯数据 + API，不接 Hermes）。
   - schema（双 schema + `ensure_column` 迁移）：新增 `ideas` 表（category/status 带 CHECK 约束，`converted_brief_id` 追溯转化）；`agent_specs` 加 `last_idle_think_at`/`idle_think_interval_hours`/`idle_thinking_enabled`；`conversations` 加 `idea_id`（追溯从哪个 idea 转来的会话）。

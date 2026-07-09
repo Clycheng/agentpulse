@@ -379,6 +379,21 @@ def init_postgres(conn: Database) -> None:
           reviewed_at TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS channel_configs (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          channel_type TEXT NOT NULL CHECK(channel_type IN (
+            'wechat','email','web_widget','generic_webhook'
+          )),
+          name TEXT NOT NULL,
+          token TEXT NOT NULL UNIQUE,
+          config_json TEXT NOT NULL DEFAULT '{}',
+          target_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          target_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS agent_specs (
           id TEXT PRIMARY KEY,
           agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
@@ -447,6 +462,12 @@ def init_postgres(conn: Database) -> None:
     ensure_column(
         conn, "conversations", "idea_id", "TEXT REFERENCES ideas(id) ON DELETE SET NULL"
     )
+    # TD-09-T1: external channel adapters. Conversations remember which channel
+    # (and external thread) they came from; messages carry the external id for
+    # webhook-redelivery dedup.
+    ensure_column(conn, "conversations", "source_channel", "TEXT")
+    ensure_column(conn, "conversations", "external_conversation_id", "TEXT")
+    ensure_column(conn, "messages", "external_message_id", "TEXT")
 
 
 def init_sqlite(conn: Database) -> None:
@@ -698,6 +719,21 @@ def init_sqlite(conn: Database) -> None:
           reviewed_at TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS channel_configs (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          channel_type TEXT NOT NULL CHECK(channel_type IN (
+            'wechat','email','web_widget','generic_webhook'
+          )),
+          name TEXT NOT NULL,
+          token TEXT NOT NULL UNIQUE,
+          config_json TEXT NOT NULL DEFAULT '{}',
+          target_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          target_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS agent_specs (
           id TEXT PRIMARY KEY,
           agent_id TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
@@ -766,6 +802,12 @@ def init_sqlite(conn: Database) -> None:
     ensure_column(
         conn, "conversations", "idea_id", "TEXT REFERENCES ideas(id) ON DELETE SET NULL"
     )
+    # TD-09-T1: external channel adapters. Conversations remember which channel
+    # (and external thread) they came from; messages carry the external id for
+    # webhook-redelivery dedup.
+    ensure_column(conn, "conversations", "source_channel", "TEXT")
+    ensure_column(conn, "conversations", "external_conversation_id", "TEXT")
+    ensure_column(conn, "messages", "external_message_id", "TEXT")
 
 
 def ensure_column(
