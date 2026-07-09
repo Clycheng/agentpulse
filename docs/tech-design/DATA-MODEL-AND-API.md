@@ -157,9 +157,11 @@ async def run_discussion_round_stream(conn, *, workspace_id: str, conversation_i
 
 ---
 
-## 5. 【目标】TD-03 新增契约（接 Hermes 执行）
+## 5. TD-03 契约（接 Hermes 执行）
 
-### 5.1 `runs` 扩列（两 schema 都加）
+> **§5.1 / §5.2 schema 已实现**（TD-03-T1, 2026-07-09）：`runs` 扩列、`run_steps` 新表、`approvals.run_id`+`approvals.type`、`agents.hermes_gateway_port` 均已落到 `database.py` 两套 schema + `ensure_column` 迁移；生命周期状态机在 `app/runtime/runs.py`。§5.3+（HermesBackend/RunService/审批流）仍是【目标】，待 TD-03-T2 起实现。
+
+### 5.1 `runs` 扩列（两 schema 都加）✅ 已实现
 新增：
 - `task_id TEXT NOT NULL FK→tasks CASCADE`（Run 必属 Task）
 - `hermes_profile_id TEXT`（对应员工 profile 名，对应 `agent_specs.hermes_profile`）

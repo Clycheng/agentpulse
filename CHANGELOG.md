@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 2026-07-09（TD-03-T1：Run/RunStep 数据模型）
+- **feat(api)**: 为接 Hermes 执行铺好数据地基（纯 schema + 生命周期，不起 Hermes）。
+  - `database.py` 两套 schema（SQLite + Postgres）+ `ensure_column` 迁移：`runs` 扩 `task_id`/`hermes_profile_id`/`hermes_run_id`/`workdir`（新列暂可空，NOT NULL 与"每个 Run 必属 Task"由 TD-03-T3 的 RunService 在应用层强制）；新增 `run_steps` 表（映射 Hermes SSE 事件：message/thinking/tool_call/tool_result/approval_required/status/final）；`approvals` 加 `run_id`（批准后据此恢复对应 Run）+ `type`（high_risk/clarification/capability_upgrade，行为在 T4）；`agents` 加 `hermes_gateway_port`（一员工一 gateway 一端口）。引用 `runs` 的 FK 列走 `ensure_column`（在 runs 建表之后加），规避 Postgres 前向引用报错。
+  - 新增 `app/runtime/runs.py`：Run 生命周期状态机（`queued → running → waiting_user|waiting_clarify → completed|failed`，非法转移抛 `RunStateError`，终态 stamp `completed_at`）+ `create_run`/`transition_run`/`append_run_step`/`list_run_steps`（支持 `after_step_id` 增量拉取，对接 TD-03 前端轮询契约）。
+  - 测试：新增 `test_run_lifecycle.py` 13 例——状态机合法/非法转移、终态无出边、失败记 error、run_steps 追加+增量列出、以及对真实 `init_db()` 跑迁移并断言新列/新表存在且幂等。全套 **162 测试通过**（+13）。
+  - DATA-MODEL §5.1/§5.2 标记为已实现；解锁 TD-03-T2（HermesBackend，需 agentpulse 会话起 Hermes）。
+
 ### 2026-07-09（TD-02-T5：路由归位，修复架构漂移）
 - **fix(api+orchestration)**: 消除 2026-07-08 复核发现的结构性漂移，把群讨论编排真正收回编排层。
   - `orchestration/discussion.py::run_discussion_round` 从"只被单测调用的死码 + 同步 dict 返回"**重写为 async 事件流**（yield `speaker`/`chunk`/`message`/`error`/`end` 事件），成为群讨论的**唯一生产入口**。`send_message`（非流式）和 `send_message_stream`（流式）都改为 `async for event in run_discussion_round(...)` 驱动它——路由层只注入 `turn_executor`（如何执行一轮 agent 回复 + 持久化）和 `llm_complete`（主持人 LLM 执行层薄封装，由新的 `make_speaker_selector()` 构造），再把事件翻译成各自传输格式（SSE 帧 / 累积列表）。

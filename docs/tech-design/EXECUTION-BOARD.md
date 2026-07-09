@@ -11,15 +11,14 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | [TD-03-T1](TD-03-hermes-execution.md) | runs 扩列 + run_steps 新表 + approvals.run_id(⚠️双 schema) | 任意 | ⚪ 待领 |
-| 2 | [TD-04-T6](TD-04-agent-provisioning.md) | LocalHermesProvisioner 真实现(语法已实测解锁，注意 import 写 wrapper 要清理) | **agentpulse** | ⚪ 待领 |
-| 3 | [TD-01-T2/T3](TD-01-verify-and-harden-slice-1.md) | 端到端手测：brief 全流程 + 多 agent 讨论流(起后端+桌面端真跑一遍；TD-02-T5 已重构完，现在测的就是最终路径) | **agentpulse** | ⚪ 待领 |
+| 1 | [TD-04-T6](TD-04-agent-provisioning.md) | LocalHermesProvisioner 真实现(语法已实测解锁，注意 import 写 wrapper 要清理) | **agentpulse** | ⚪ 待领 |
+| 2 | [TD-01-T2/T3](TD-01-verify-and-harden-slice-1.md) | 端到端手测：brief 全流程 + 多 agent 讨论流(起后端+桌面端真跑一遍；TD-02-T5 已重构完，现在测的就是最终路径) | **agentpulse** | ⚪ 待领 |
+| 3 | [TD-03-T2](TD-03-hermes-execution.md) | HermesBackend 适配层(HTTP Runs API + SSE → AgentEvent，强制 workdir 绝对路径)。TD-03-T1 已完成✅ | **agentpulse**(起 Hermes) | ⚪ 待领 |
 
 ## 有依赖，等前置完成后做
 
 | 任务 | 等什么 | 会话要求 |
 |---|---|---|
-| [TD-03-T2](TD-03-hermes-execution.md)(HermesBackend) | TD-03-T1（TD-02-T5 已完成✅） | **agentpulse** |
 | TD-03-T3(RunService+替换执行层) | TD-03-T2 | **agentpulse** |
 | TD-03-T4(Tirith 审批 + clarification_required) | TD-03-T3 | **agentpulse** |
 | TD-03-T5(员工↔profile 生命周期) | TD-03-T2；可与 TD-04-T6 合并做 | **agentpulse** |
@@ -39,6 +38,7 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| TD-03-T1(Run/RunStep 数据模型)：runs 扩 task_id/hermes_profile_id/hermes_run_id/workdir，新增 run_steps 表，approvals 加 run_id+type，agents 加 hermes_gateway_port(两 schema 都改+ensure_column 迁移)；新增 `runtime/runs.py` 生命周期状态机(queued→running→waiting_user/clarify→completed/failed) + 13 单测 | 2026-07-09(见 CHANGELOG) | 纯 schema+lifecycle；162 测试全过；解锁 TD-03-T2 |
 | TD-02-T5(路由归位)：send_message/stream 讨论循环统一收回 run_discussion_round(改为 async 事件流)，删除路由层 `_llm_select_speaker`/`_extract_mention_simple`/`_build_discussion_context`，发言人选择收敛到 `resolve_next_speaker`；+8 编排单测 +1 生产路径断言测试 | 2026-07-09(见 CHANGELOG) | 三条 grep 全干净；149 测试全过；解锁 TD-03-T2/T3 |
 | 架构复核：发现 TD-02 路由层重复实现漂移，新增 TD-02-T5 阻塞项 | 2026-07-08(见 CHANGELOG) | 纯发现+文档纠正，代码未改 |
 | 验证事实回填 DATA-MODEL/TD-03/04/05/ARCHITECTURE + workdir 架构决策 + 看板重建 | 2026-07-08(见 CHANGELOG) | |
