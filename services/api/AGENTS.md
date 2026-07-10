@@ -49,10 +49,11 @@ grep -rn "httpx\|requests\|hermes_client" app/orchestration/
 
 ---
 
-## 当前已知死码（待 TD-02-T5 清理）
+## 讨论编排入口（TD-02-T5 已归位，2026-07-09）
 
-- `workspace.py::complete_agent_reply`：非流式 `/messages`，前端只走 `/messages/stream`，此函数是死路径。
-- `workspace.py::_llm_select_speaker` + `_extract_mention_simple`：路由层的重复发言人选择，等 TD-02-T5 删。
-- `workspace.py` send_message / send_message_stream 里各自内联的讨论循环：TD-02-T5 替换为调 `run_discussion_round`。
+群讨论的**唯一生产入口** = `orchestration/discussion.py::run_discussion_round`（async 事件流）。`send_message` / `send_message_stream` 都 `async for event in run_discussion_round(...)` 驱动它，只注入两个回调：
 
-详见 [TD-02 🔴漂逸说明](../../docs/tech-design/TD-02-multi-agent-discussion.md)。
+- `turn_executor(conn, agent_id)`：异步生成器，产出该 agent 这一轮的回复（流式 yield `chunk` 事件 + 最终 `message` 事件；非流式只产出 `message`），并负责持久化 + commit。
+- `llm_complete(prompt) -> str`：主持人 LLM 的执行层薄封装（由 `make_speaker_selector()` 构造），只负责调 DeepSeek 返回原文；发言人选择的全部判定（@提及/JSON 解析/轮询降级）在编排层。
+
+改动这三处前重读本文件的三层边界；`complete_agent_reply` 仍服务于非流式 `/messages`（其单测在 `test_workspace_flow.py`），不是死码。

@@ -333,15 +333,65 @@ def init_postgres(conn: Database) -> None:
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
           conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
           agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
           status TEXT NOT NULL,
           input_message_id TEXT NOT NULL,
           output_message_id TEXT,
+          hermes_profile_id TEXT,
+          hermes_run_id TEXT,
+          workdir TEXT,
           provider TEXT NOT NULL DEFAULT 'deepseek',
           model TEXT NOT NULL DEFAULT '',
           usage_json TEXT NOT NULL DEFAULT '{}',
           error TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL,
           completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS run_steps (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+          type TEXT NOT NULL CHECK(type IN (
+            'message','thinking','tool_call','tool_result',
+            'approval_required','status','final'
+          )),
+          status TEXT NOT NULL DEFAULT '',
+          title TEXT NOT NULL DEFAULT '',
+          detail TEXT NOT NULL DEFAULT '',
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS ideas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          source_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL CHECK(category IN (
+            'improvement','opportunity','risk','learning'
+          )),
+          status TEXT NOT NULL DEFAULT 'new' CHECK(status IN (
+            'new','reviewed','accepted','dismissed','converted'
+          )),
+          converted_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL,
+          reviewed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS channel_configs (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          channel_type TEXT NOT NULL CHECK(channel_type IN (
+            'wechat','email','web_widget','generic_webhook'
+          )),
+          name TEXT NOT NULL,
+          token TEXT NOT NULL UNIQUE,
+          config_json TEXT NOT NULL DEFAULT '{}',
+          target_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          target_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS agent_specs (
@@ -384,6 +434,40 @@ def init_postgres(conn: Database) -> None:
     ensure_column(conn, "tasks", "parent_task_id", "TEXT REFERENCES tasks(id) ON DELETE SET NULL")
     ensure_column(conn, "tasks", "consensus_brief_id", "TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL")
     ensure_column(conn, "conversations", "discussion_status", "TEXT NOT NULL DEFAULT 'discussing' CHECK(discussion_status IN ('discussing', 'aligned'))")
+    # TD-03-T1: Run/RunStep data model. New columns are nullable here; RunService
+    # (TD-03-T3) enforces "every Run belongs to a Task" + absolute workdir at the
+    # application layer once execution actually flows through Hermes.
+    ensure_column(conn, "runs", "task_id", "TEXT REFERENCES tasks(id) ON DELETE CASCADE")
+    ensure_column(conn, "runs", "hermes_profile_id", "TEXT")
+    ensure_column(conn, "runs", "hermes_run_id", "TEXT")
+    ensure_column(conn, "runs", "workdir", "TEXT")
+    ensure_column(conn, "approvals", "run_id", "TEXT REFERENCES runs(id) ON DELETE SET NULL")
+    ensure_column(
+        conn,
+        "approvals",
+        "type",
+        "TEXT NOT NULL DEFAULT 'high_risk' "
+        "CHECK(type IN ('high_risk','clarification','capability_upgrade'))",
+    )
+    ensure_column(conn, "agents", "hermes_gateway_port", "INTEGER")
+    # TD-08-T1: idea center (idle reflection). idle_thinking_enabled stored as
+    # 0/1 INTEGER in both dialects (serialized to bool at the API layer).
+    ensure_column(conn, "agent_specs", "last_idle_think_at", "TEXT")
+    ensure_column(
+        conn, "agent_specs", "idle_think_interval_hours", "INTEGER NOT NULL DEFAULT 6"
+    )
+    ensure_column(
+        conn, "agent_specs", "idle_thinking_enabled", "INTEGER NOT NULL DEFAULT 1"
+    )
+    ensure_column(
+        conn, "conversations", "idea_id", "TEXT REFERENCES ideas(id) ON DELETE SET NULL"
+    )
+    # TD-09-T1: external channel adapters. Conversations remember which channel
+    # (and external thread) they came from; messages carry the external id for
+    # webhook-redelivery dedup.
+    ensure_column(conn, "conversations", "source_channel", "TEXT")
+    ensure_column(conn, "conversations", "external_conversation_id", "TEXT")
+    ensure_column(conn, "messages", "external_message_id", "TEXT")
 
 
 def init_sqlite(conn: Database) -> None:
@@ -589,15 +673,65 @@ def init_sqlite(conn: Database) -> None:
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
           conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
           agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
           status TEXT NOT NULL,
           input_message_id TEXT NOT NULL,
           output_message_id TEXT,
+          hermes_profile_id TEXT,
+          hermes_run_id TEXT,
+          workdir TEXT,
           provider TEXT NOT NULL DEFAULT 'deepseek',
           model TEXT NOT NULL DEFAULT '',
           usage_json TEXT NOT NULL DEFAULT '{}',
           error TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL,
           completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS run_steps (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+          type TEXT NOT NULL CHECK(type IN (
+            'message','thinking','tool_call','tool_result',
+            'approval_required','status','final'
+          )),
+          status TEXT NOT NULL DEFAULT '',
+          title TEXT NOT NULL DEFAULT '',
+          detail TEXT NOT NULL DEFAULT '',
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS ideas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          source_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL CHECK(category IN (
+            'improvement','opportunity','risk','learning'
+          )),
+          status TEXT NOT NULL DEFAULT 'new' CHECK(status IN (
+            'new','reviewed','accepted','dismissed','converted'
+          )),
+          converted_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL,
+          reviewed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS channel_configs (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          channel_type TEXT NOT NULL CHECK(channel_type IN (
+            'wechat','email','web_widget','generic_webhook'
+          )),
+          name TEXT NOT NULL,
+          token TEXT NOT NULL UNIQUE,
+          config_json TEXT NOT NULL DEFAULT '{}',
+          target_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          target_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS agent_specs (
@@ -640,6 +774,40 @@ def init_sqlite(conn: Database) -> None:
     ensure_column(conn, "tasks", "parent_task_id", "TEXT REFERENCES tasks(id) ON DELETE SET NULL")
     ensure_column(conn, "tasks", "consensus_brief_id", "TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL")
     ensure_column(conn, "conversations", "discussion_status", "TEXT NOT NULL DEFAULT 'discussing' CHECK(discussion_status IN ('discussing', 'aligned'))")
+    # TD-03-T1: Run/RunStep data model. New columns are nullable here; RunService
+    # (TD-03-T3) enforces "every Run belongs to a Task" + absolute workdir at the
+    # application layer once execution actually flows through Hermes.
+    ensure_column(conn, "runs", "task_id", "TEXT REFERENCES tasks(id) ON DELETE CASCADE")
+    ensure_column(conn, "runs", "hermes_profile_id", "TEXT")
+    ensure_column(conn, "runs", "hermes_run_id", "TEXT")
+    ensure_column(conn, "runs", "workdir", "TEXT")
+    ensure_column(conn, "approvals", "run_id", "TEXT REFERENCES runs(id) ON DELETE SET NULL")
+    ensure_column(
+        conn,
+        "approvals",
+        "type",
+        "TEXT NOT NULL DEFAULT 'high_risk' "
+        "CHECK(type IN ('high_risk','clarification','capability_upgrade'))",
+    )
+    ensure_column(conn, "agents", "hermes_gateway_port", "INTEGER")
+    # TD-08-T1: idea center (idle reflection). idle_thinking_enabled stored as
+    # 0/1 INTEGER in both dialects (serialized to bool at the API layer).
+    ensure_column(conn, "agent_specs", "last_idle_think_at", "TEXT")
+    ensure_column(
+        conn, "agent_specs", "idle_think_interval_hours", "INTEGER NOT NULL DEFAULT 6"
+    )
+    ensure_column(
+        conn, "agent_specs", "idle_thinking_enabled", "INTEGER NOT NULL DEFAULT 1"
+    )
+    ensure_column(
+        conn, "conversations", "idea_id", "TEXT REFERENCES ideas(id) ON DELETE SET NULL"
+    )
+    # TD-09-T1: external channel adapters. Conversations remember which channel
+    # (and external thread) they came from; messages carry the external id for
+    # webhook-redelivery dedup.
+    ensure_column(conn, "conversations", "source_channel", "TEXT")
+    ensure_column(conn, "conversations", "external_conversation_id", "TEXT")
+    ensure_column(conn, "messages", "external_message_id", "TEXT")
 
 
 def ensure_column(

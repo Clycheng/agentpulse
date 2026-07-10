@@ -58,10 +58,7 @@ from app.services.workspace import (
 from app.orchestration.supply import create_agent_spec, provision, ProvisioningError
 from app.orchestration.discussion import (
     run_discussion_round,
-    select_next_speaker,
-    build_speaker_selection_prompt,
-    build_discussion_agent_prompt,
-    MAX_AGENT_TURNS_PER_ROUND,
+    build_discussion_context,
 )
 
 router = APIRouter(tags=["workspace"])
@@ -664,73 +661,50 @@ async def send_message(
     )
 
     if is_group_discussing and len(reply_agents) > 1:
-        # Multi-agent discussion round (TD-02)
-        # Uses LLM-based speaker selection + discussion context injection.
-        member_agent_ids = [a["id"] for a in reply_agents]
-        max_turns = MAX_AGENT_TURNS_PER_ROUND
-
-        for turn in range(max_turns):
-            # Select next speaker via LLM (with @mention and round-robin fallback)
-            last_msg_row = conn.execute(
-                """SELECT sender_type, sender_id, content FROM messages
-                WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1""",
-                (conversation_id,),
-            ).fetchone()
-            last_message = dict(last_msg_row) if last_msg_row else None
-
-            # Try LLM speaker selection
-            next_speaker_id = None
-            try:
-                next_speaker_id = await _llm_select_speaker(
-                    conn, conversation_id, reply_agents, last_message
-                )
-            except Exception:
-                pass  # LLM failed, fall through to non-LLM selection
-
-            if next_speaker_id is None:
-                next_speaker_id = select_next_speaker(
-                    conn,
-                    conversation_id=conversation_id,
-                    member_agent_ids=member_agent_ids,
-                    last_message=last_message,
-                )
-
-            if next_speaker_id is None:
-                break
-
-            # Find the agent row
-            next_agent = None
-            for a in reply_agents:
-                if a["id"] == next_speaker_id:
-                    next_agent = a
-                    break
-
-            if next_agent is None:
-                break
-
-            # Build discussion context for this agent
-            discussion_ctx = _build_discussion_context(
-                conn, conversation_id, next_agent, reply_agents,
+        # Multi-agent discussion round (TD-02) — orchestrated by the
+        # discussion layer. The route only injects how a turn executes and
+        # how the moderator LLM is called, then collects the yielded messages.
+        async def turn_executor(conn, agent_id):
+            next_agent = next(
+                (a for a in reply_agents if a["id"] == agent_id), None
             )
+            if next_agent is None:
+                return
+            discussion_ctx = build_discussion_context(
+                conn, conversation_id, next_agent, reply_agents
+            )
+            msg = await complete_agent_reply(
+                conn,
+                workspace=workspace,
+                conversation=conversation,
+                conversation_id=conversation_id,
+                agent=next_agent,
+                user_message=user_message,
+                discussion_context=discussion_ctx,
+            )
+            # Commit so the next speaker selection can see this reply.
+            conn.commit()
+            if msg is not None:
+                yield {"type": "message", "message": msg}
 
-            try:
-                msg = await complete_agent_reply(
-                    conn,
-                    workspace=workspace,
-                    conversation=conversation,
-                    conversation_id=conversation_id,
-                    agent=next_agent,
-                    user_message=user_message,
-                    discussion_context=discussion_ctx,
-                )
-                if msg is not None:
-                    agent_messages.append(msg)
-                    # Commit so next speaker can see this reply
-                    conn.commit()
-            except DeepSeekNotConfigured as exc:
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
-            except DeepSeekAPIError as exc:
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
+        error_exc: Exception | None = None
+        async for event in run_discussion_round(
+            conn,
+            workspace_id=workspace["id"],
+            conversation_id=conversation_id,
+            member_agents=reply_agents,
+            turn_executor=turn_executor,
+            llm_complete=make_speaker_selector(),
+        ):
+            if event["type"] == "message":
+                agent_messages.append(event["message"])
+            elif event["type"] == "error":
+                error_exc = event.get("exc")
+
+        if isinstance(error_exc, DeepSeekNotConfigured):
+            raise HTTPException(status_code=503, detail=str(error_exc))
+        if isinstance(error_exc, DeepSeekAPIError):
+            raise HTTPException(status_code=502, detail=str(error_exc))
     else:
         # DM or single-agent group: original behavior
         for agent in reply_agents:
@@ -833,81 +807,65 @@ async def send_message_stream(
         )
 
         if is_group_discussing and len(reply_agents) > 1:
-            # Multi-agent discussion with streaming
-            member_agent_ids = [a["id"] for a in reply_agents]
-            max_turns = MAX_AGENT_TURNS_PER_ROUND
-
-            for turn in range(max_turns):
-                last_msg_row = conn.execute(
-                    """SELECT sender_type, sender_id, content FROM messages
-                    WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1""",
-                    (conversation_id,),
-                ).fetchone()
-                last_message = dict(last_msg_row) if last_msg_row else None
-
-                next_speaker_id = None
-                try:
-                    next_speaker_id = await _llm_select_speaker(
-                        conn, conversation_id, reply_agents, last_message
-                    )
-                except Exception:
-                    pass
-
-                if next_speaker_id is None:
-                    next_speaker_id = select_next_speaker(
-                        conn,
-                        conversation_id=conversation_id,
-                        member_agent_ids=member_agent_ids,
-                        last_message=last_message,
-                    )
-
-                if next_speaker_id is None:
-                    break
-
-                next_agent = None
-                for a in reply_agents:
-                    if a["id"] == next_speaker_id:
-                        next_agent = a
-                        break
-                if next_agent is None:
-                    break
-
-                # Emit "speaking" event
-                yield f"event: speaking\ndata: {json.dumps({'agent_id': next_agent['id'], 'agent_name': next_agent['name'], 'agent_role': next_agent['role']}, ensure_ascii=False)}\n\n"
-
-                # Stream agent reply
-                discussion_ctx = _build_discussion_context(
-                    conn, conversation_id, next_agent, reply_agents,
+            # Multi-agent discussion with streaming — orchestrated by the
+            # discussion layer. The route injects a streaming turn executor
+            # and translates the yielded events into SSE frames.
+            async def turn_executor(conn, agent_id):
+                next_agent = next(
+                    (a for a in reply_agents if a["id"] == agent_id), None
                 )
-                try:
-                    full_reply = ""
-                    async for chunk_text in await _stream_agent_reply(
-                        conn,
-                        workspace=workspace,
-                        conversation=conversation,
-                        conversation_id=conversation_id,
-                        agent=next_agent,
-                        user_message=user_message,
-                        discussion_context=discussion_ctx,
-                    ):
-                        full_reply += chunk_text
-                        yield f"event: chunk\ndata: {json.dumps({'content': chunk_text}, ensure_ascii=False)}\n\n"
+                if next_agent is None:
+                    return
+                discussion_ctx = build_discussion_context(
+                    conn, conversation_id, next_agent, reply_agents
+                )
+                full_reply = ""
+                async for chunk_text in await _stream_agent_reply(
+                    conn,
+                    workspace=workspace,
+                    conversation=conversation,
+                    conversation_id=conversation_id,
+                    agent=next_agent,
+                    user_message=user_message,
+                    discussion_context=discussion_ctx,
+                ):
+                    full_reply += chunk_text
+                    yield {"type": "chunk", "content": chunk_text}
 
-                    # Persist the full message
-                    msg = add_message(
-                        conn,
-                        conversation_id=conversation_id,
-                        sender_type="agent",
-                        sender_id=next_agent["id"],
-                        content=full_reply,
-                        provider="deepseek",
-                        model="deepseek-v4-flash",
+                msg = add_message(
+                    conn,
+                    conversation_id=conversation_id,
+                    sender_type="agent",
+                    sender_id=next_agent["id"],
+                    content=full_reply,
+                    provider="deepseek",
+                    model="deepseek-v4-flash",
+                )
+                conn.commit()
+                yield {"type": "message", "message": msg}
+
+            async for event in run_discussion_round(
+                conn,
+                workspace_id=workspace["id"],
+                conversation_id=conversation_id,
+                member_agents=reply_agents,
+                turn_executor=turn_executor,
+                llm_complete=make_speaker_selector(),
+            ):
+                etype = event["type"]
+                if etype == "speaker":
+                    speaker = next(
+                        (a for a in reply_agents if a["id"] == event["agent_id"]),
+                        None,
                     )
-                    conn.commit()
-                    yield f"event: done\ndata: {json.dumps(serialize_message(msg), ensure_ascii=False)}\n\n"
-                except (DeepSeekNotConfigured, DeepSeekAPIError) as exc:
-                    yield f"event: error\ndata: {json.dumps({'detail': str(exc)}, ensure_ascii=False)}\n\n"
-                    break
+                    if speaker is not None:
+                        yield f"event: speaking\ndata: {json.dumps({'agent_id': speaker['id'], 'agent_name': speaker['name'], 'agent_role': speaker['role']}, ensure_ascii=False)}\n\n"
+                elif etype == "chunk":
+                    yield f"event: chunk\ndata: {json.dumps({'content': event['content']}, ensure_ascii=False)}\n\n"
+                elif etype == "message":
+                    yield f"event: done\ndata: {json.dumps(serialize_message(event['message']), ensure_ascii=False)}\n\n"
+                elif etype == "error":
+                    yield f"event: error\ndata: {json.dumps({'detail': event['detail']}, ensure_ascii=False)}\n\n"
         else:
             # DM or single-agent: stream normally
             for agent in reply_agents:
@@ -1142,42 +1100,16 @@ async def _stream_agent_reply(
     return DeepSeekChatClient().complete_stream(request)
 
 
-async def _llm_select_speaker(
-    conn: Database,
-    conversation_id: str,
-    member_agents: list[Row],
-    last_message: dict | None,
-) -> str | None:
-    """Use LLM to select the next speaker in a group discussion.
+def make_speaker_selector():
+    """Build the moderator-LLM callback injected into run_discussion_round.
 
-    Returns agent_id, or None (LLM call failed / no speaker needed).
+    Pure execution-layer plumbing: given a system prompt (assembled by the
+    orchestration layer), return the model's raw text. All selection logic
+    (@mention priority, JSON parsing/validation, round-robin fallback) lives
+    in orchestration/discussion.py.
     """
-    member_ids = [a["id"] for a in member_agents]
 
-    # Check @mention first (no LLM needed)
-    if last_message and last_message.get("content"):
-        mentioned = _extract_mention_simple(last_message["content"], member_ids)
-        if mentioned:
-            return mentioned
-
-    # Load recent transcript for LLM
-    transcript_rows = conn.execute(
-        """SELECT messages.sender_type, messages.sender_id, messages.content, agents.name AS agent_name
-        FROM messages LEFT JOIN agents ON agents.id = messages.sender_id
-        WHERE messages.conversation_id = ? AND messages.sender_type IN ('user', 'agent')
-        ORDER BY messages.created_at DESC LIMIT 20""",
-        (conversation_id,),
-    ).fetchall()
-    transcript = [dict(r) for r in reversed(transcript_rows)]
-
-    agent_dicts = [
-        {"id": a["id"], "name": a["name"], "role": a["role"], "description": a.get("description", "")}
-        for a in member_agents
-    ]
-    prompt = build_speaker_selection_prompt(agent_dicts, transcript)
-
-    try:
-        # Use DeepSeekChatClient.complete so monkeypatch works in tests
+    async def _complete(prompt: str) -> str:
         completion = await DeepSeekChatClient().complete(
             LlmChatRequest(
                 agent=LlmChatAgent(
@@ -1189,94 +1121,9 @@ async def _llm_select_speaker(
                 messages=[LlmChatMessage(role="user", content="请选择下一个发言人")],
             )
         )
-        content = completion.reply
-        # Parse JSON from LLM response
-        import re
-        json_match = re.search(r'\{[^}]+\}', content)
-        if not json_match:
-            return None
+        return completion.reply
 
-        llm_output = json.loads(json_match.group())
-        next_speaker = llm_output.get("next_speaker")
-        if next_speaker == "NONE":
-            return None
-        if next_speaker in member_ids:
-            return next_speaker
-        return None
-    except Exception:
-        return None
-
-
-def _extract_mention_simple(content: str, member_ids: list[str]) -> str | None:
-    """Extract @mentioned agent from message content."""
-    import re
-    mentions = re.findall(r"@([\w]+)", content)
-    for mention in mentions:
-        if mention in member_ids:
-            return mention
-    return None
-
-
-def _build_discussion_context(
-    conn: Database,
-    conversation_id: str,
-    current_agent: Row,
-    all_agents: list[Row],
-) -> str:
-    """Build discussion context string for an agent in a group chat.
-
-    Includes: other members info, recent transcript, role-based constraints.
-    """
-    # Other members
-    other_members = []
-    for a in all_agents:
-        if a["id"] != current_agent["id"]:
-            other_members.append(
-                f"- {a['name']}（{a['role']}）"
-            )
-    members_str = "\n".join(other_members) if other_members else "无"
-
-    # Recent transcript (with names)
-    transcript_rows = conn.execute(
-        """SELECT messages.sender_type, messages.sender_id, messages.content, agents.name AS agent_name
-        FROM messages LEFT JOIN agents ON agents.id = messages.sender_id
-        WHERE messages.conversation_id = ? AND messages.sender_type IN ('user', 'agent')
-        ORDER BY messages.created_at DESC LIMIT 10""",
-        (conversation_id,),
-    ).fetchall()
-
-    transcript_lines = []
-    for r in reversed(transcript_rows):
-        if r["sender_type"] == "user":
-            name = "老板"
-        else:
-            name = r.get("agent_name") or r["sender_id"][:12]
-        transcript_lines.append(f"{name}：{r['content'][:300]}")
-    transcript_str = "\n".join(transcript_lines) if transcript_lines else "（暂无）"
-
-    # Role-based discussion constraint
-    role_constraint = build_discussion_agent_prompt(
-        agent_name=current_agent["name"],
-        agent_role=current_agent["role"],
-        agent_description=current_agent.get("description", ""),
-    )
-
-    return f"""【群聊讨论模式】
-当前是群聊讨论，不是一对一私聊。你只是讨论的参与者之一，不是唯一回答者。
-
-其他群成员：
-{members_str}
-
-最近讨论记录：
-{transcript_str}
-
-{role_constraint}
-
-关键规则：
-- 只从你的岗位角度出发，不要重复别人已经说过的内容
-- 如果这个话题不涉及你的职责范围，可以简短表态或跳过
-- 不要列出和前面的人一样的问题清单，而是在别人的基础上补充或推进
-- 回复要简练，不要写长篇大论"""
+    return _complete
 
 
 async def complete_agent_reply(

@@ -157,9 +157,11 @@ async def run_discussion_round_stream(conn, *, workspace_id: str, conversation_i
 
 ---
 
-## 5. 【目标】TD-03 新增契约（接 Hermes 执行）
+## 5. TD-03 契约（接 Hermes 执行）
 
-### 5.1 `runs` 扩列（两 schema 都加）
+> **§5.1 / §5.2 schema 已实现**（TD-03-T1, 2026-07-09）：`runs` 扩列、`run_steps` 新表、`approvals.run_id`+`approvals.type`、`agents.hermes_gateway_port` 均已落到 `database.py` 两套 schema + `ensure_column` 迁移；生命周期状态机在 `app/runtime/runs.py`。§5.3+（HermesBackend/RunService/审批流）仍是【目标】，待 TD-03-T2 起实现。
+
+### 5.1 `runs` 扩列（两 schema 都加）✅ 已实现
 新增：
 - `task_id TEXT NOT NULL FK→tasks CASCADE`（Run 必属 Task）
 - `hermes_profile_id TEXT`（对应员工 profile 名，对应 `agent_specs.hermes_profile`）
@@ -347,9 +349,11 @@ def reload_gateway(self, profile_name: str) -> None:
 
 ---
 
-## 8. 【目标】Idea 中心（TD-08）
+## 8. Idea 中心（TD-08）
 
-### 8.1 `ideas` 新表
+> **§8.1 schema + API 已实现**（TD-08-T1, 2026-07-10）：`ideas` 表、`agent_specs` 三列、`conversations.idea_id` 均落到两套 schema + `ensure_column`；service 在 `app/services/ideas.py`，路由在 `app/api/routes/ideas.py`。实现细节两处与本设计的偏差已标注在下方。§8 的"idle 反思自动产 idea"(TD-08-T2) 仍是【目标】，需 Hermes。
+
+### 8.1 `ideas` 新表 ✅ 已实现
 | 列 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | `id` | TEXT | PK | `idea_xxx` |
@@ -362,17 +366,21 @@ def reload_gateway(self, profile_name: str) -> None:
 | `converted_brief_id` | TEXT | 可空 FK→consensus_briefs SET NULL | |
 | `created_at` / `reviewed_at` | TEXT | reviewed_at 可空 | |
 
-`agent_specs` 扩列（TD-08，双 schema）：`last_idle_think_at TEXT 可空` / `idle_think_interval_hours INTEGER NOT NULL DEFAULT 6` / `idle_thinking_enabled BOOLEAN NOT NULL DEFAULT TRUE`。
+`agent_specs` 扩列（TD-08，双 schema）：`last_idle_think_at TEXT 可空` / `idle_think_interval_hours INTEGER NOT NULL DEFAULT 6` / `idle_thinking_enabled`。**实现偏差①**：`idle_thinking_enabled` 两套 schema 都用 `INTEGER NOT NULL DEFAULT 1`（不是 BOOLEAN）——因为 `ensure_column` 迁移对两方言用同一定义字符串，统一 0/1 最省事；API 层序列化为 `bool`。
 
 `conversations` 扩列（TD-08，双 schema）：`idea_id TEXT 可空 FK→ideas SET NULL`（追溯从哪个 idea 转化来的会话）。
 
 ### 8.2 TD-08 API 见 [TD-08-idea-center.md](TD-08-idea-center.md)
 
+**实现偏差②**：`PATCH /api/agents/{id}/idle-thinking` 返回 `IdleThinkingSettings`（`{agent_id, idle_thinking_enabled, idle_think_interval_hours, last_idle_think_at}`）而非 TD-08 写的 `AgentSpecOut`——避免为一个开关去扩 `AgentSpecOut` 及其所有消费方；无 agent_specs 行的员工（如默认小秘）返回 404。`POST /api/ideas`（agent 产出 idea 的入口，TD-08-T2 会用）已一并实现。
+
 ---
 
-## 9. 【目标】外部渠道接入（TD-09）
+## 9. 外部渠道接入（TD-09）
 
-### 9.1 `channel_configs` 新表
+> **§9.1 schema + Router + §9.2 webhook + §9.3 渠道管理 API 已实现**（TD-09-T1/T2, 2026-07-10）：`channel_configs` 表 + `conversations.source_channel/external_conversation_id` + `messages.external_message_id`（两套 schema + `ensure_column`，`active` 统一 `INTEGER 0/1`）；`app/channels/`（`router.route_inbound`/`find_or_create_conversation`/dedup + `adapters/` 的 generic & email 适配器 + 注册表）；`app/services/channels.py`（CRUD/stats/HMAC 验签/token 生成）；`routes/channels.py`（`/api/channels` 认证 CRUD + 软删）；`routes/webhooks.py`（公开 `POST /webhooks/{type}/{token}`，token+可选 HMAC 验签 → route_inbound → pin 有 target_agent 时经 `complete_agent_reply` 尽力触发回复）。**仍待做**：微信(XML+加密)/网页 widget 适配器、ChannelReply 把回复发回原渠道、渠道管理前端（TD-09-T3）。
+
+### 9.1 `channel_configs` 新表 ✅ 已实现
 | 列 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | `id` | TEXT | PK | `chan_xxx` |
