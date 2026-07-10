@@ -25,8 +25,7 @@
 | [TD-06-T1](TD-06-agent-self-evolution.md)(技能自动沉淀) | TD-03-T3 + TD-04-T6 | **agentpulse** |
 | [TD-06-T2](TD-06-agent-self-evolution.md)(主动能力升级申请) | TD-03-T4 + TD-04-T6 | **agentpulse** |
 | TD-06-T3(SOUL 模板注入 + 成长轨迹 UI) | TD-06-T1 + TD-06-T2 | 否（前端）/ agentpulse（验 SOUL） |
-| [TD-07-T1](TD-07-business-capability-catalog.md)(业务能力目录扩展) | TD-05-T1（已完成） | 否 |
-| TD-07-T2(角色 Bundle + UI) | TD-07-T1 + TD-04-T5 | 否 |
+| TD-07-T2(创建员工 UI 接入 ROLE_BUNDLES) | TD-07-T1（已完成✅）+ TD-04-T5 | 否 |
 | TD-08-T2(IdleThinkService + cron) | TD-03-T2 + TD-04-T6 | **agentpulse** |
 | TD-08-T3(Idea 中心前端) | TD-08-T1 + TD-08-T2 | 否 |
 | TD-09-T3(ChannelReply 回发 + 微信/widget 适配器 + 渠道管理前端) | TD-09-T2（已完成✅） | 否 |
@@ -36,6 +35,7 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| TD-07-T1(业务能力目录扩展)：`capability_catalog.py` 补 31 个业务能力(客服/内容/数据/HR/法务/财务/项目) + `ROLE_BUNDLES`(12 预配角色) + `get_role_bundle`/`list_role_bundles`；对齐 social_content 与真相源；10 新单测(条目合法性/MCP 必带 creds/角色 bundle key 全在 catalog/解析不报错) | 2026-07-10(见 CHANGELOG) | 纯常量+单测；194 测试全过；TD-07-T2 解锁 |
 | TD-09-T2(渠道管理 API + 公开 webhook 端点)：`services/channels.py`(CRUD/stats/HMAC 验签/token) + `routes/channels.py`(/api/channels 认证 CRUD + 软删) + `routes/webhooks.py`(公开 `/webhooks/{type}/{token}` 验签→route_inbound→尽力触发 agent 回复) + email 适配器；8 单测(CRUD/webhook 入站/去重/验签/未知或停用 token/不支持类型/mock LLM 触发回复) | 2026-07-10(见 CHANGELOG) | 纯 API，可 curl 验证；184 测试全过；TD-09-T3 解锁 |
 | TD-09-T1(channel_configs 表 + Router 核心)：`channel_configs` 表 + `conversations.source_channel/external_conversation_id` + `messages.external_message_id`(双 schema+迁移)；`app/channels/`(router `route_inbound`/`find_or_create_conversation`/dedup + generic 适配器 + 注册表)；6 单测(归一化/dedup/按外部用户归会话/固定群路由/自定义路径) | 2026-07-10(见 CHANGELOG) | 纯数据+适配器；176 测试全过；TD-09-T2 解锁 |
 | TD-08-T1(ideas 表 + API)：`ideas` 表 + `agent_specs` 3 列 + `conversations.idea_id`(双 schema+迁移)；`schemas/idea.py` + `services/ideas.py`(CRUD/review/convert/idle-thinking) + `routes/ideas.py`(GET/POST/review/convert + PATCH idle-thinking)；8 单测(CRUD/流转/CHECK/convert 建会话并回链 idea_id) | 2026-07-10(见 CHANGELOG) | 纯数据+API；170 测试全过；TD-08-T2 仍等 Hermes |

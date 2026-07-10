@@ -307,6 +307,7 @@ domain_register → (API 包装工具) + creds[注册商key+付费方式]       
 seo_audit       → toolsets[terminal,web]  (lighthouse 经 terminal 跑)          risk=auto
 social_content  → toolsets[web,vision,image_gen] (发布环节人工，见能力文档 §5)   risk=approval
 ```
+**TD-07（2026-07-10）已扩展**：在技术岗种子外补齐 7 大业务类共 31 个能力条目（客服/内容运营/数据/HR/法务/财务/项目管理，见 [TD-07](TD-07-business-capability-catalog.md)），并新增 `ROLE_BUNDLES` 常量（"客服专员""数据分析师"等 12 个预配角色 → 能力清单，供"按职位一键招人"）。同时把种子里 `social_content` 的 toolsets 从代码侧的 `[web,vision]` 修正为与本表一致的 `[web,vision,image_gen]`（此前是 TD-05 代码与本真相源不一致，已对齐）。付款类 `payment_execution` = `prohibited_auto`（花钱不可逆，永不自动）。访问器：`get_role_bundle(name)` / `list_role_bundles()`。
 
 ### 6.4 新增 API 契约
 | 接口 | 请求体 | 响应 | 错误 |

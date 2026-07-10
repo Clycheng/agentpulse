@@ -87,9 +87,263 @@ CATALOG: dict[str, CapabilityDef] = {
     "social_content": CapabilityDef(
         key="social_content",
         description="生成社交媒体内容（发布环节须人工确认）",
-        toolsets=("web", "vision"),
+        toolsets=("web", "image_gen", "vision"),
         risk_gate="approval",
     ),
+    # --- Business capabilities (TD-07) ---
+    # Customer service
+    "customer_service": CapabilityDef(
+        key="customer_service",
+        description="意图识别 + 知识检索 + FAQ 回复",
+        toolsets=("clarify", "memory", "web"),
+        risk_gate="auto",
+    ),
+    "ticket_management": CapabilityDef(
+        key="ticket_management",
+        description="创建/查询/更新工单",
+        toolsets=("clarify", "memory"),
+        mcp=("ticket_system",),
+        required_credentials=("TICKET_API_KEY",),
+        risk_gate="auto",
+    ),
+    "refund_processing": CapabilityDef(
+        key="refund_processing",
+        description="退款/换货（超阈值强制审批）",
+        toolsets=("clarify",),
+        mcp=("order_system",),
+        required_credentials=("ORDER_API_KEY",),
+        risk_gate="approval",
+    ),
+    "customer_data_lookup": CapabilityDef(
+        key="customer_data_lookup",
+        description="查询客户订单/档案",
+        toolsets=("memory",),
+        mcp=("crm_system",),
+        required_credentials=("CRM_API_KEY",),
+        risk_gate="auto",
+    ),
+    # Content & operations
+    "content_writing": CapabilityDef(
+        key="content_writing",
+        description="各类文案/文章/报告撰写",
+        toolsets=("file", "web"),
+        risk_gate="auto",
+    ),
+    "image_creation": CapabilityDef(
+        key="image_creation",
+        description="生成配图、设计素材",
+        toolsets=("image_gen", "vision"),
+        risk_gate="auto",
+    ),
+    "email_drafting": CapabilityDef(
+        key="email_drafting",
+        description="起草邮件/信函",
+        toolsets=("file",),
+        risk_gate="auto",
+    ),
+    "email_sending": CapabilityDef(
+        key="email_sending",
+        description="发送邮件（代发需审批）",
+        mcp=("email_service",),
+        required_credentials=("EMAIL_API_KEY",),
+        risk_gate="approval",
+    ),
+    "seo_content": CapabilityDef(
+        key="seo_content",
+        description="SEO 优化建议 + 关键词分析",
+        toolsets=("web", "terminal"),
+        risk_gate="auto",
+    ),
+    "ad_analysis": CapabilityDef(
+        key="ad_analysis",
+        description="广告数据分析/报告（不含出价操作）",
+        toolsets=("web",),
+        mcp=("ad_platform",),
+        required_credentials=("AD_API_KEY",),
+        risk_gate="auto",
+    ),
+    "ad_bidding": CapabilityDef(
+        key="ad_bidding",
+        description="广告出价/预算修改（花钱需审批）",
+        mcp=("ad_platform",),
+        required_credentials=("AD_API_KEY",),
+        risk_gate="approval",
+    ),
+    # Data & analytics
+    "data_query": CapabilityDef(
+        key="data_query",
+        description="SQL 查询/数据提取",
+        toolsets=("terminal", "code_execution"),
+        mcp=("database",),
+        required_credentials=("DB_URL",),
+        risk_gate="auto",
+    ),
+    "data_analysis": CapabilityDef(
+        key="data_analysis",
+        description="数据分析/统计/可视化",
+        toolsets=("terminal", "code_execution", "file"),
+        risk_gate="auto",
+    ),
+    "report_generation": CapabilityDef(
+        key="report_generation",
+        description="自动生成数据报告/看板截图",
+        toolsets=("terminal", "code_execution", "file"),
+        risk_gate="auto",
+    ),
+    "web_scraping": CapabilityDef(
+        key="web_scraping",
+        description="网页数据抓取（合规范围内）",
+        toolsets=("web", "terminal"),
+        risk_gate="auto",
+    ),
+    # Human resources
+    "resume_screening": CapabilityDef(
+        key="resume_screening",
+        description="简历筛选/打分/对比",
+        toolsets=("file", "web"),
+        risk_gate="auto",
+    ),
+    "jd_generation": CapabilityDef(
+        key="jd_generation",
+        description="岗位描述起草",
+        toolsets=("file",),
+        risk_gate="auto",
+    ),
+    "interview_prep": CapabilityDef(
+        key="interview_prep",
+        description="面试题生成/评分标准",
+        toolsets=("file",),
+        risk_gate="auto",
+    ),
+    "onboarding_docs": CapabilityDef(
+        key="onboarding_docs",
+        description="入职材料/培训内容生成",
+        toolsets=("file", "web"),
+        risk_gate="auto",
+    ),
+    "hr_data_analysis": CapabilityDef(
+        key="hr_data_analysis",
+        description="HR 数据分析（人员流动/薪酬分布）",
+        toolsets=("terminal", "code_execution"),
+        mcp=("hris_system",),
+        required_credentials=("HRIS_API_KEY",),
+        risk_gate="auto",
+    ),
+    "payroll_processing": CapabilityDef(
+        key="payroll_processing",
+        description="薪酬核算辅助（提交需人工审批）",
+        mcp=("hris_system",),
+        required_credentials=("HRIS_API_KEY",),
+        risk_gate="approval",
+    ),
+    # Legal & compliance
+    "contract_review": CapabilityDef(
+        key="contract_review",
+        description="合同条款风险识别/对比/标注",
+        toolsets=("file", "web"),
+        risk_gate="auto",
+    ),
+    "contract_drafting": CapabilityDef(
+        key="contract_drafting",
+        description="合同/协议起草（辅助，非法律意见）",
+        toolsets=("file",),
+        risk_gate="auto",
+    ),
+    "compliance_check": CapabilityDef(
+        key="compliance_check",
+        description="合规性检查/政策匹配",
+        toolsets=("file", "web"),
+        risk_gate="auto",
+    ),
+    # Finance
+    "expense_analysis": CapabilityDef(
+        key="expense_analysis",
+        description="费用分析/异常预警/报表",
+        toolsets=("terminal", "code_execution", "file"),
+        mcp=("accounting_system",),
+        required_credentials=("ACCOUNTING_API_KEY",),
+        risk_gate="auto",
+    ),
+    "invoice_processing": CapabilityDef(
+        key="invoice_processing",
+        description="发票识别/录入辅助",
+        toolsets=("file", "vision"),
+        mcp=("accounting_system",),
+        required_credentials=("ACCOUNTING_API_KEY",),
+        risk_gate="auto",
+    ),
+    "financial_reporting": CapabilityDef(
+        key="financial_reporting",
+        description="财务报表生成/分析",
+        toolsets=("terminal", "code_execution", "file"),
+        mcp=("accounting_system",),
+        required_credentials=("ACCOUNTING_API_KEY",),
+        risk_gate="auto",
+    ),
+    "payment_execution": CapabilityDef(
+        key="payment_execution",
+        description="付款操作永远禁止自动（花钱不可逆）",
+        mcp=("payment_system",),
+        required_credentials=("PAYMENT_API_KEY",),
+        risk_gate="prohibited_auto",
+    ),
+    # Project management
+    "task_delegation": CapabilityDef(
+        key="task_delegation",
+        description="任务拆解/分配/跟进（AgentPulse 原生）",
+        toolsets=("delegation", "todo"),
+        risk_gate="auto",
+    ),
+    "meeting_scheduling": CapabilityDef(
+        key="meeting_scheduling",
+        description="日历查询/会议邀请",
+        mcp=("calendar_service",),
+        required_credentials=("CALENDAR_API_KEY",),
+        risk_gate="auto",
+    ),
+    "project_reporting": CapabilityDef(
+        key="project_reporting",
+        description="项目周报/进度报告生成",
+        toolsets=("file",),
+        risk_gate="auto",
+    ),
+}
+
+
+# Role bundles — preset capability combinations for common job types (TD-07).
+# The desktop "hire by role" flow uses these so users pick a role instead of
+# ticking capabilities one by one. Every key here MUST exist in CATALOG
+# (guarded by tests). risk_gate is still resolved per-capability at provision
+# time — a bundle never relaxes a gate.
+ROLE_BUNDLES: dict[str, tuple[str, ...]] = {
+    "客服专员": ("customer_service", "ticket_management", "customer_data_lookup"),
+    "售后专员": (
+        "customer_service",
+        "ticket_management",
+        "refund_processing",
+        "customer_data_lookup",
+    ),
+    "内容运营": ("content_writing", "image_creation", "social_content", "seo_content"),
+    "广告投放": ("ad_analysis", "ad_bidding", "data_analysis"),
+    "数据分析师": ("data_query", "data_analysis", "report_generation"),
+    "HR 专员": ("resume_screening", "jd_generation", "interview_prep", "onboarding_docs"),
+    "财务助理": ("expense_analysis", "invoice_processing", "financial_reporting"),
+    "法务助理": ("contract_review", "contract_drafting", "compliance_check"),
+    "项目经理": (
+        "task_delegation",
+        "meeting_scheduling",
+        "project_reporting",
+        "report_generation",
+    ),
+    "前端工程师": ("write_code", "run_tests", "git_push", "deploy_preview"),
+    "后端工程师": (
+        "write_code",
+        "run_tests",
+        "git_push",
+        "deploy_preview",
+        "deploy_prod",
+    ),
+    "DevOps": ("write_code", "git_push", "deploy_preview", "deploy_prod"),
 }
 
 
@@ -170,3 +424,20 @@ def resolve_bundle(keys: list[str]) -> dict:
         "required_credentials": sorted(creds),
         "risk_gate": _strictest_risk(risk_gates),
     }
+
+
+def list_role_bundles() -> list[str]:
+    """Return the available role-bundle names."""
+    return list(ROLE_BUNDLES.keys())
+
+
+def get_role_bundle(role_name: str) -> list[str]:
+    """Return the capability keys for a role bundle.
+
+    Raises:
+        ValueError: If the role name is unknown.
+    """
+    bundle = ROLE_BUNDLES.get(role_name)
+    if bundle is None:
+        raise ValueError(f"Unknown role bundle: {role_name}")
+    return list(bundle)

@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 2026-07-10（TD-07-T1：业务岗位能力目录扩展）
+- **feat(api)**: 让"用一句话招人"覆盖业务岗，不只是技术岗。
+  - `orchestration/capability_catalog.py` 在技术岗种子外补齐 **7 大类 31 个业务能力**：客服（customer_service/ticket_management/refund_processing/customer_data_lookup）、内容运营（content_writing/image_creation/email_drafting/email_sending/seo_content/ad_analysis/ad_bidding）、数据（data_query/data_analysis/report_generation/web_scraping）、HR、法务、财务（含 `payment_execution` = `prohibited_auto`，花钱不可逆永不自动）、项目管理。
+  - 新增 `ROLE_BUNDLES`（12 个预配角色：客服专员/数据分析师/HR 专员…→ 能力清单）+ `get_role_bundle(name)`/`list_role_bundles()` 访问器；供 TD-07-T2"按职位一键招人"用。
+  - 对齐修正：种子里 `social_content` 的 toolsets 由代码侧 `[web,vision]` 补成与 DATA-MODEL §6.3 真相源一致的 `[web,vision,image_gen]`（此前 TD-05 代码与真相源不一致）。
+  - 测试：`test_capability_catalog.py` 扩到 33 例——把"CATALOG 恰好 8 个种子键"的断言改为"种子键 ⊆ CATALOG"，新增业务条目合法性（description/risk_gate 合法、有 MCP 必声明凭证）、`ROLE_BUNDLES` 全部 key 都在 catalog、每个角色能 resolve_bundle 不报错、未知角色报错。全套 **194 测试通过**（+10）。DATA-MODEL §6.3 同步。
+
 ### 2026-07-10（TD-09-T2：渠道管理 API + 公开 Webhook 端点）
 - **feat(api)**: 把 TD-09-T1 的 channel router 接成一条可 curl 验证的完整入站链路。
   - `app/services/channels.py`：渠道 CRUD（create 生成 `token` + 返回 `webhook_url`、list、get+stats、patch、软删 active=0）、`channel_stats`（今日入站数 / 活跃外部用户数）、`verify_signature`（URL token 为主凭证；config 里配了 `secret` 则额外校验 `X-Signature` = HMAC-SHA256(raw_body)）。
