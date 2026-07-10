@@ -378,7 +378,7 @@ def reload_gateway(self, profile_name: str) -> None:
 
 ## 9. 外部渠道接入（TD-09）
 
-> **§9.1 schema + Router 核心已实现**（TD-09-T1, 2026-07-10）：`channel_configs` 表、`conversations.source_channel`/`external_conversation_id`、`messages.external_message_id` 落到两套 schema + `ensure_column`；`app/channels/`（`router.py` 的 `route_inbound`/`find_or_create_conversation`/dedup + `adapters/` 的 generic 适配器 + 注册表）。§9.2 webhook 公开端点、§9.3 渠道管理 API、微信/邮件/widget 适配器与 ChannelReply 回发仍是【目标】（TD-09-T2/T3）。`active` 两套 schema 统一存 `INTEGER 0/1`。
+> **§9.1 schema + Router + §9.2 webhook + §9.3 渠道管理 API 已实现**（TD-09-T1/T2, 2026-07-10）：`channel_configs` 表 + `conversations.source_channel/external_conversation_id` + `messages.external_message_id`（两套 schema + `ensure_column`，`active` 统一 `INTEGER 0/1`）；`app/channels/`（`router.route_inbound`/`find_or_create_conversation`/dedup + `adapters/` 的 generic & email 适配器 + 注册表）；`app/services/channels.py`（CRUD/stats/HMAC 验签/token 生成）；`routes/channels.py`（`/api/channels` 认证 CRUD + 软删）；`routes/webhooks.py`（公开 `POST /webhooks/{type}/{token}`，token+可选 HMAC 验签 → route_inbound → pin 有 target_agent 时经 `complete_agent_reply` 尽力触发回复）。**仍待做**：微信(XML+加密)/网页 widget 适配器、ChannelReply 把回复发回原渠道、渠道管理前端（TD-09-T3）。
 
 ### 9.1 `channel_configs` 新表 ✅ 已实现
 | 列 | 类型 | 约束 | 说明 |

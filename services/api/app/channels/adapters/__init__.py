@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from app.channels.adapters.base import ChannelAdapter, ChannelMessage
+from app.channels.adapters.email import EmailAdapter
 from app.channels.adapters.generic import GenericWebhookAdapter
 
-# Registry keyed by channel_configs.channel_type. TD-09-T2 fills in the
-# wechat / email / web_widget adapters; the generic one is enough for T1 and
-# for any system that can POST JSON.
+# Registry keyed by channel_configs.channel_type. wechat (XML + crypto) and
+# web_widget (SSE session) inbound parsing land in a later slice; generic +
+# email cover any system that can POST JSON.
 _ADAPTERS: dict[str, ChannelAdapter] = {
     "generic_webhook": GenericWebhookAdapter(),
+    "email": EmailAdapter(),
 }
 
 
@@ -29,6 +31,7 @@ def get_adapter(channel_type: str) -> ChannelAdapter:
 __all__ = [
     "ChannelAdapter",
     "ChannelMessage",
+    "EmailAdapter",
     "GenericWebhookAdapter",
     "UnsupportedChannelError",
     "get_adapter",

@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 2026-07-10（TD-09-T2：渠道管理 API + 公开 Webhook 端点）
+- **feat(api)**: 把 TD-09-T1 的 channel router 接成一条可 curl 验证的完整入站链路。
+  - `app/services/channels.py`：渠道 CRUD（create 生成 `token` + 返回 `webhook_url`、list、get+stats、patch、软删 active=0）、`channel_stats`（今日入站数 / 活跃外部用户数）、`verify_signature`（URL token 为主凭证；config 里配了 `secret` 则额外校验 `X-Signature` = HMAC-SHA256(raw_body)）。
+  - `app/api/routes/channels.py`：`/api/channels` 认证 CRUD（含 target_agent/target_conversation 归属校验）。
+  - `app/api/routes/webhooks.py`：**公开** `POST /webhooks/{channel_type}/{token}`（不挂 /api、无 JWT）——按 token+type 查 active 渠道 → 验签 → 解析 JSON → `route_inbound` → 若渠道 pin 了 target_agent，经现有 `complete_agent_reply` **尽力触发一次回复**（执行层报错则吞掉、仍返回 200，消息已落库）。
+  - 新增 email 适配器（SendGrid/Mailgun inbound-parse 风格，按 from/text 归一化）；注册表现覆盖 generic_webhook + email；微信(XML+加密)/widget 留 TD-09-T3。
+  - 测试：新增 `test_channels_api.py` 8 例（CRUD + 未知 target 拒绝、webhook 入站落库、去重、stats、未知/停用 token→404、缺/对 HMAC 签名→401/200、不支持渠道类型→400、mock LLM 下 target_agent 触发 agent 回复）。全套 **184 测试通过**（+8）。DATA-MODEL §9.2/9.3 标记已实现。
+
 ### 2026-07-10（TD-09-T1：外部渠道数据模型 + Router 核心）
 - **feat(api)**: 外部渠道接入地基——外部消息(微信/邮件/网页/通用 webhook)进来后归一化成标准消息、进入普通会话流，**agent 完全不感知渠道**（纯数据 + Router，不接 webhook 端点/不碰 Hermes）。
   - schema（双 schema + `ensure_column`）：新增 `channel_configs`（channel_type CHECK、token UNIQUE、config_json、target_agent_id/target_conversation_id、active 存 INTEGER 0/1）；`conversations` 加 `source_channel`/`external_conversation_id`；`messages` 加 `external_message_id`（webhook 重发去重）。

@@ -29,13 +29,14 @@
 | TD-07-T2(角色 Bundle + UI) | TD-07-T1 + TD-04-T5 | 否 |
 | TD-08-T2(IdleThinkService + cron) | TD-03-T2 + TD-04-T6 | **agentpulse** |
 | TD-08-T3(Idea 中心前端) | TD-08-T1 + TD-08-T2 | 否 |
-| TD-09-T2(Webhook 端点 + 渠道 API) | TD-09-T1（已完成✅） | 否 |
+| TD-09-T3(ChannelReply 回发 + 微信/widget 适配器 + 渠道管理前端) | TD-09-T2（已完成✅） | 否 |
 | TD-09-T3(ChannelReply + 网页 Widget) | TD-09-T2 | 否 |
 
 ## 已完成
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| TD-09-T2(渠道管理 API + 公开 webhook 端点)：`services/channels.py`(CRUD/stats/HMAC 验签/token) + `routes/channels.py`(/api/channels 认证 CRUD + 软删) + `routes/webhooks.py`(公开 `/webhooks/{type}/{token}` 验签→route_inbound→尽力触发 agent 回复) + email 适配器；8 单测(CRUD/webhook 入站/去重/验签/未知或停用 token/不支持类型/mock LLM 触发回复) | 2026-07-10(见 CHANGELOG) | 纯 API，可 curl 验证；184 测试全过；TD-09-T3 解锁 |
 | TD-09-T1(channel_configs 表 + Router 核心)：`channel_configs` 表 + `conversations.source_channel/external_conversation_id` + `messages.external_message_id`(双 schema+迁移)；`app/channels/`(router `route_inbound`/`find_or_create_conversation`/dedup + generic 适配器 + 注册表)；6 单测(归一化/dedup/按外部用户归会话/固定群路由/自定义路径) | 2026-07-10(见 CHANGELOG) | 纯数据+适配器；176 测试全过；TD-09-T2 解锁 |
 | TD-08-T1(ideas 表 + API)：`ideas` 表 + `agent_specs` 3 列 + `conversations.idea_id`(双 schema+迁移)；`schemas/idea.py` + `services/ideas.py`(CRUD/review/convert/idle-thinking) + `routes/ideas.py`(GET/POST/review/convert + PATCH idle-thinking)；8 单测(CRUD/流转/CHECK/convert 建会话并回链 idea_id) | 2026-07-10(见 CHANGELOG) | 纯数据+API；170 测试全过；TD-08-T2 仍等 Hermes |
 | TD-03-T1(Run/RunStep 数据模型)：runs 扩 task_id/hermes_profile_id/hermes_run_id/workdir，新增 run_steps 表，approvals 加 run_id+type，agents 加 hermes_gateway_port(两 schema 都改+ensure_column 迁移)；新增 `runtime/runs.py` 生命周期状态机(queued→running→waiting_user/clarify→completed/failed) + 13 单测 | 2026-07-09(见 CHANGELOG) | 纯 schema+lifecycle；162 测试全过；解锁 TD-03-T2 |
