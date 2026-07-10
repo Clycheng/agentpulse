@@ -3,7 +3,7 @@ import type { ReactNode, RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-type View = 'chat' | 'staff' | 'market' | 'tasks' | 'lib';
+type View = 'chat' | 'staff' | 'market' | 'tasks' | 'ideas' | 'lib' | 'channels';
 type ThemeMode = 'system' | 'light' | 'dark';
 type EffectiveTheme = 'light' | 'dark';
 type AgentStatus = 'busy' | 'wait' | 'stuck' | 'idle';
@@ -1800,6 +1800,22 @@ function App() {
             onOpenKnowledge={() => setKnowledgeOpen(true)}
           />
         )}
+
+        {view === 'ideas' && token && (
+          <IdeasView
+            token={token}
+            agents={agents}
+            onConverted={async (conversationId) => {
+              await loadBootstrap(token);
+              openChat(conversationId);
+              showToast('已根据想法拉起讨论');
+            }}
+          />
+        )}
+
+        {view === 'channels' && token && (
+          <ChannelsView token={token} agents={agents} />
+        )}
       </section>
 
       {detailAgent && (
@@ -1843,6 +1859,7 @@ function App() {
 
       {createOpen && (
         <CreateAgentModal
+          token={token ?? ''}
           departments={depts
             .filter((dept) => dept.name !== '老板办公室')
             .map((dept) => dept.name)}
@@ -2235,6 +2252,8 @@ function Sidebar({
     { key: 'staff', icon: 'group', label: '员工', badge: 0 },
     { key: 'market', icon: 'storefront', label: '人才市场', badge: 0 },
     { key: 'tasks', icon: 'task_alt', label: '任务', badge: taskAlerts },
+    { key: 'ideas', icon: 'lightbulb', label: '想法', badge: 0 },
+    { key: 'channels', icon: 'hub', label: '渠道', badge: 0 },
     { key: 'lib', icon: 'folder_open', label: '资料库', badge: 0 },
   ];
 
@@ -2280,6 +2299,434 @@ function Sidebar({
         {materialIcon('logout')}
       </button>
     </aside>
+  );
+}
+
+type Idea = {
+  id: string;
+  source_agent_id: string;
+  source_agent_name: string;
+  title: string;
+  description: string;
+  category: string;
+  status: string;
+  converted_brief_id: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+};
+
+const IDEA_CATEGORIES: Record<string, { label: string; color: string }> = {
+  improvement: { label: '改进', color: 'var(--primary)' },
+  opportunity: { label: '机会', color: 'var(--success)' },
+  risk: { label: '风险', color: 'var(--danger)' },
+  learning: { label: '学习', color: 'var(--warning)' },
+};
+
+const IDEA_STATUS_LABEL: Record<string, string> = {
+  new: '待处理',
+  accepted: '已接受',
+  dismissed: '已忽略',
+  converted: '已转讨论',
+  reviewed: '已查看',
+};
+
+function IdeasView({
+  token,
+  agents,
+  onConverted,
+}: {
+  token: string;
+  agents: Agent[];
+  onConverted: (conversationId: string) => void;
+}) {
+  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState('all');
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    apiRequest<Idea[]>('/ideas', { token })
+      .then((data) => {
+        if (alive) setIdeas(data);
+      })
+      .catch((err: unknown) => {
+        if (alive) setError(err instanceof Error ? err.message : '加载失败');
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
+  const review = async (id: string, action: 'accept' | 'dismiss') => {
+    try {
+      const updated = await apiRequest<Idea>(`/ideas/${id}/review`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ action }),
+      });
+      setIdeas((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '操作失败');
+    }
+  };
+
+  const convert = async (id: string) => {
+    try {
+      const res = await apiRequest<{ conversation_id: string; idea: Idea }>(
+        `/ideas/${id}/convert`,
+        { method: 'POST', token },
+      );
+      setIdeas((prev) => prev.map((item) => (item.id === id ? res.idea : item)));
+      onConverted(res.conversation_id);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '转化失败');
+    }
+  };
+
+  const agentColor = (id: string) => {
+    const agent = agents.find((item) => item.id === id);
+    return agent ? avatarColor(agent) : 'var(--primary)';
+  };
+
+  const filtered =
+    filter === 'all' ? ideas : ideas.filter((idea) => idea.category === filter);
+  const summary = ideas.length
+    ? `共 ${ideas.length} 条想法，来自 ${new Set(ideas.map((i) => i.source_agent_id)).size} 位员工`
+    : '员工空闲时会主动琢磨业务，把想法沉淀到这里';
+
+  return (
+    <div className="screen-scroll">
+      <div className="screen-inner">
+        <header className="page-header">
+          <div>
+            <h1>想法中心</h1>
+            <p>{summary}</p>
+          </div>
+        </header>
+
+        <div className="tabs">
+          {[
+            { key: 'all', label: '全部' },
+            ...Object.entries(IDEA_CATEGORIES).map(([key, meta]) => ({
+              key,
+              label: meta.label,
+            })),
+          ].map((tab) => (
+            <button
+              className={filter === tab.key ? 'tab active' : 'tab'}
+              key={tab.key}
+              type="button"
+              onClick={() => setFilter(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {error && <div className="auth-error">{error}</div>}
+
+        {loading ? (
+          <div className="empty-state">加载中…</div>
+        ) : filtered.length === 0 ? (
+          <div className="empty-state">
+            还没有想法。员工空闲时会主动复盘、发现机会与风险，产出的 idea 会出现在这里，
+            你可以一键转成讨论。
+          </div>
+        ) : (
+          <div className="idea-list">
+            {filtered.map((idea) => {
+              const cat = IDEA_CATEGORIES[idea.category] ?? {
+                label: idea.category,
+                color: 'var(--muted)',
+              };
+              return (
+                <article className="card idea-card" key={idea.id}>
+                  <div className="idea-head">
+                    <span
+                      className="idea-avatar"
+                      style={{ background: agentColor(idea.source_agent_id) }}
+                    >
+                      {avatarText(idea.source_agent_name)}
+                    </span>
+                    <div className="idea-byline">
+                      <strong>{idea.source_agent_name}</strong>
+                      <em>{formatTime(idea.created_at)}</em>
+                    </div>
+                    <span
+                      className="idea-cat"
+                      style={{ background: cat.color + '1f', color: cat.color }}
+                    >
+                      {cat.label}
+                    </span>
+                    {idea.status !== 'new' && (
+                      <span className="idea-status-tag">
+                        {IDEA_STATUS_LABEL[idea.status] ?? idea.status}
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="idea-title">{idea.title}</h3>
+                  <p className="idea-desc">{idea.description}</p>
+                  {idea.status === 'new' && (
+                    <div className="idea-actions">
+                      <button
+                        className="small-button primary"
+                        type="button"
+                        onClick={() => convert(idea.id)}
+                      >
+                        {materialIcon('forum')}转为讨论
+                      </button>
+                      <button
+                        className="small-button"
+                        type="button"
+                        onClick={() => review(idea.id, 'accept')}
+                      >
+                        接受
+                      </button>
+                      <button
+                        className="small-button"
+                        type="button"
+                        onClick={() => review(idea.id, 'dismiss')}
+                      >
+                        忽略
+                      </button>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type ChannelConfig = {
+  id: string;
+  channel_type: string;
+  name: string;
+  token: string;
+  config: Record<string, unknown>;
+  target_agent_id: string | null;
+  target_conversation_id: string | null;
+  active: boolean;
+  created_at: string;
+  webhook_url: string;
+};
+
+const CHANNEL_TYPES: Array<{ value: string; label: string }> = [
+  { value: 'generic_webhook', label: '通用 Webhook' },
+  { value: 'email', label: '邮件' },
+  { value: 'web_widget', label: '网页 Widget' },
+  { value: 'wechat', label: '微信' },
+];
+
+function channelTypeLabel(type: string) {
+  return CHANNEL_TYPES.find((item) => item.value === type)?.label ?? type;
+}
+
+function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
+  const [channels, setChannels] = useState<ChannelConfig[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [name, setName] = useState('');
+  const [channelType, setChannelType] = useState('generic_webhook');
+  const [targetAgentId, setTargetAgentId] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [copiedId, setCopiedId] = useState('');
+
+  const webhookOrigin = apiBaseUrl.replace(/\/api\/?$/, '');
+  const fullUrl = (path: string) => `${webhookOrigin}${path}`;
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    apiRequest<ChannelConfig[]>('/channels', { token })
+      .then((data) => {
+        if (alive) setChannels(data);
+      })
+      .catch((err: unknown) => {
+        if (alive) setError(err instanceof Error ? err.message : '加载失败');
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
+  const create = async () => {
+    if (!name.trim() || creating) return;
+    setCreating(true);
+    setError('');
+    try {
+      const created = await apiRequest<ChannelConfig>('/channels', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          channel_type: channelType,
+          name: name.trim(),
+          target_agent_id: targetAgentId || null,
+        }),
+      });
+      setChannels((prev) => [created, ...prev]);
+      setName('');
+      setTargetAgentId('');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '创建失败');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const deactivate = async (id: string) => {
+    setError('');
+    try {
+      const updated = await apiRequest<ChannelConfig>(`/channels/${id}`, {
+        method: 'DELETE',
+        token,
+      });
+      setChannels((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '操作失败');
+    }
+  };
+
+  const copyUrl = async (channel: ChannelConfig) => {
+    try {
+      await navigator.clipboard.writeText(fullUrl(channel.webhook_url));
+      setCopiedId(channel.id);
+      window.setTimeout(() => setCopiedId(''), 1500);
+    } catch {
+      /* clipboard blocked — user can select the text manually */
+    }
+  };
+
+  const agentName = (id: string | null) =>
+    id ? (agents.find((agent) => agent.id === id)?.name ?? id) : '按路由决定';
+
+  return (
+    <div className="screen-scroll">
+      <div className="screen-inner">
+        <header className="page-header">
+          <div>
+            <h1>渠道接入</h1>
+            <p>
+              把微信 / 邮件 / 网页 / 通用 webhook 接进来，外部消息自动进入会话，
+              AI 员工像内部对话一样处理——渠道对员工完全透明。
+            </p>
+          </div>
+        </header>
+
+        <section className="card channel-create" aria-label="创建渠道">
+          <div className="channel-form-row">
+            <label className="channel-field">
+              <span>渠道名称</span>
+              <input
+                value={name}
+                placeholder="例如：官网客服入口"
+                onChange={(event) => setName(event.target.value)}
+              />
+            </label>
+            <label className="channel-field">
+              <span>类型</span>
+              <select
+                value={channelType}
+                onChange={(event) => setChannelType(event.target.value)}
+              >
+                {CHANNEL_TYPES.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="channel-field">
+              <span>默认分配员工</span>
+              <select
+                value={targetAgentId}
+                onChange={(event) => setTargetAgentId(event.target.value)}
+              >
+                <option value="">（按路由决定）</option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="button primary"
+              type="button"
+              onClick={create}
+              disabled={creating || !name.trim()}
+            >
+              {materialIcon('add_link')}
+              {creating ? '创建中…' : '创建渠道'}
+            </button>
+          </div>
+        </section>
+
+        {error && <div className="auth-error">{error}</div>}
+
+        {loading ? (
+          <div className="empty-state">加载中…</div>
+        ) : channels.length === 0 ? (
+          <div className="empty-state">
+            还没有渠道。创建一个通用 Webhook，把它的地址填到你的官网表单或客服系统，
+            外部消息就会自动进来。
+          </div>
+        ) : (
+          <div className="channel-list">
+            {channels.map((channel) => (
+              <article className="card channel-card" key={channel.id}>
+                <div className="channel-card-head">
+                  <strong>{channel.name}</strong>
+                  <span className="channel-type-tag">
+                    {channelTypeLabel(channel.channel_type)}
+                  </span>
+                  <span
+                    className={channel.active ? 'channel-status on' : 'channel-status off'}
+                  >
+                    <i className="channel-dot" />
+                    {channel.active ? '已启用' : '已停用'}
+                  </span>
+                </div>
+                <div className="channel-url">
+                  {materialIcon('link')}
+                  <code>{fullUrl(channel.webhook_url)}</code>
+                  <button
+                    className="small-button"
+                    type="button"
+                    onClick={() => copyUrl(channel)}
+                  >
+                    {copiedId === channel.id ? '已复制' : '复制'}
+                  </button>
+                </div>
+                <div className="channel-meta">
+                  <span>默认员工：{agentName(channel.target_agent_id)}</span>
+                  {channel.active && (
+                    <button
+                      className="channel-link-button"
+                      type="button"
+                      onClick={() => deactivate(channel.id)}
+                    >
+                      停用
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -4206,7 +4653,14 @@ const RISK_BADGE: Record<string, { label: string; color: string }> = {
   prohibited_auto: { label: '仅人工', color: '#f44336' },
 };
 
+type RoleBundle = {
+  role_name: string;
+  capability_keys: string[];
+  resolved: { risk_gate: string };
+};
+
 function CreateAgentModal({
+  token,
   departments,
   createName,
   createDesc,
@@ -4221,6 +4675,7 @@ function CreateAgentModal({
   onClose,
   onSubmit,
 }: {
+  token: string;
   departments: string[];
   createName: string;
   createDesc: string;
@@ -4235,12 +4690,39 @@ function CreateAgentModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const [bundles, setBundles] = useState<RoleBundle[]>([]);
+
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    apiRequest<RoleBundle[]>('/role-bundles', { token })
+      .then((data) => {
+        if (alive) setBundles(data);
+      })
+      .catch(() => {
+        /* catalog unavailable — manual capability picking still works */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
   const toggleCap = (key: string) => {
     onCapKeysChange(
       createCapKeys.includes(key)
         ? createCapKeys.filter((k) => k !== key)
         : [...createCapKeys, key],
     );
+  };
+
+  const bundleActive = (bundle: RoleBundle) =>
+    bundle.capability_keys.length === createCapKeys.length &&
+    bundle.capability_keys.every((key) => createCapKeys.includes(key));
+
+  const pickBundle = (bundle: RoleBundle) => {
+    onCapKeysChange(bundleActive(bundle) ? [] : [...bundle.capability_keys]);
+    if (!createName.trim()) onNameChange(bundle.role_name);
+    if (!createDept.trim()) onDeptChange(bundle.role_name);
   };
 
   return (
@@ -4282,8 +4764,30 @@ function CreateAgentModal({
         onChange={(event) => onDescChange(event.currentTarget.value)}
       />
 
+      {bundles.length > 0 && (
+        <>
+          <FieldLabel>按职位快速配置（可选）</FieldLabel>
+          <div className="role-bundle-row">
+            {bundles.map((bundle) => (
+              <button
+                key={bundle.role_name}
+                type="button"
+                className={
+                  bundleActive(bundle)
+                    ? 'role-bundle-chip active'
+                    : 'role-bundle-chip'
+                }
+                onClick={() => pickBundle(bundle)}
+              >
+                {bundle.role_name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       <FieldLabel>能力配置</FieldLabel>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
         {CAPABILITY_OPTIONS.map((cap) => {
           const selected = createCapKeys.includes(cap.key);
           const badge = RISK_BADGE[cap.risk];
@@ -4292,29 +4796,13 @@ function CreateAgentModal({
               key={cap.key}
               type="button"
               title={cap.desc}
+              className={selected ? 'cap-chip selected' : 'cap-chip'}
               onClick={() => toggleCap(cap.key)}
-              style={{
-                padding: '6px 12px',
-                borderRadius: 6,
-                border: `1.5px solid ${selected ? '#6c5ce7' : '#ddd'}`,
-                background: selected ? '#f0edff' : '#fff',
-                cursor: 'pointer',
-                fontSize: 13,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
             >
-              <span style={{ fontWeight: selected ? 600 : 400 }}>{cap.label}</span>
+              <span>{cap.label}</span>
               <span
-                style={{
-                  fontSize: 10,
-                  padding: '1px 5px',
-                  borderRadius: 4,
-                  background: badge.color + '22',
-                  color: badge.color,
-                  fontWeight: 600,
-                }}
+                className="risk-badge"
+                style={{ background: badge.color + '22', color: badge.color }}
               >
                 {badge.label}
               </span>
@@ -4322,6 +4810,11 @@ function CreateAgentModal({
           );
         })}
       </div>
+      {createCapKeys.length > 0 && (
+        <p className="cap-summary">
+          已选 {createCapKeys.length} 项能力：{createCapKeys.join(' · ')}
+        </p>
+      )}
 
       <FieldLabel>工作职责 Prompt</FieldLabel>
       <textarea

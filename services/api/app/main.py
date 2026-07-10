@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes.admin import router as admin_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.briefs import router as briefs_router
+from app.api.routes.catalog import router as catalog_router
 from app.api.routes.channels import router as channels_router
 from app.api.routes.health import router as health_router
 from app.api.routes.ideas import router as ideas_router
@@ -33,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(runs_router, prefix="/api")
     app.include_router(ideas_router, prefix="/api")
     app.include_router(channels_router, prefix="/api")
+    app.include_router(catalog_router, prefix="/api")
     # Public webhook endpoints are intentionally NOT under /api (no JWT).
     app.include_router(webhooks_router)
 

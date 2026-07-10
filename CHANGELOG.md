@@ -5,6 +5,39 @@
 
 ## [Unreleased]
 
+### 2026-07-10（Idea 中心前端：桌面端「想法」视图）
+- **feat(desktop)**: 把 TD-08-T1 的 idea API 接成界面（TD-08-T3 前端半），落地北极星"没有 idle 员工 → idea 中心"的用户界面。
+  - `main.tsx`：`View` 增加 `ideas`，侧栏新增「想法」入口（lightbulb 图标）；新增 `IdeasView` 组件——自取 `GET /api/ideas`，顶部摘要（共 N 条 / 来自几位员工）+ 分类过滤 tabs（改进/机会/风险/学习）+ 想法卡片（员工头像取 per-agent hue、分类标签配色、标题、正文、时间）+ 三个动作：转为讨论 / 接受 / 忽略。
+  - "转为讨论"走 `POST /api/ideas/{id}/convert` → 由 App 回调重载 bootstrap 并 `openChat` 跳进新建的讨论群（首条系统消息=想法内容）。
+  - `styles.css`：新增想法视图样式，全部用 teal 设计 token。
+  - 验证：`tsc --noEmit` 无错；浏览器实测经 API 播种 2 条想法 → 列表正确渲染、分类标签/头像正常 → 点"转为讨论"成功建群并自动跳转、群里第一条即想法内容、无 console 报错。idle 自动产 idea（TD-08-T2）仍待 Hermes。
+
+### 2026-07-10（TD-07-T2 前端半：创建员工"按职位快速配置"）
+- **feat(desktop)**: 把"按职位一键招人"接到创建员工弹窗，TD-07-T2 完整闭环。
+  - `CreateAgentModal` 新增 `token` 入参 + 拉取 `GET /api/role-bundles`；顶部新增"按职位快速配置（可选）"芯片行（12 个预配角色），点选即把该角色的能力清单写入选择、并在名称/部门为空时自动填成角色名；再点一次取消。
+  - 新增"已选 N 项能力：…"摘要行，让通过角色选中的业务能力（即使不在手动能力网格里）也可见。
+  - 顺手清理：该弹窗残留的写死紫色（`#6c5ce7`/`#f0edff`）能力芯片改用 teal 设计 token（`.cap-chip` / `.role-bundle-chip` 类 + `styles.css`），与全局重做一致。
+  - 验证：`tsc --noEmit` 无错；浏览器实测点"数据分析师"→ 芯片高亮、名称/部门自动填、摘要显示 `data_query · data_analysis · report_generation`、无 console 报错。
+
+### 2026-07-10（渠道管理前端：桌面端「渠道」视图）
+- **feat(desktop)**: 把 TD-09-T2 的渠道 API 接成界面（TD-09-T3 前端半）。
+  - `apps/desktop/src/main.tsx`：`View` 增加 `channels`，侧栏新增「渠道」入口（hub 图标）；新增 `ChannelsView` 组件——自取 `GET /api/channels`，含创建表单（名称/类型/默认分配员工）、渠道卡片列表（类型标签、启用状态带 pulse 点、webhook 完整 URL + 一键复制、停用），全部走 `apiRequest`。
+  - `styles.css`：新增渠道视图样式（表单/卡片/URL 行/状态点），全部用现有 teal token 与 pulse-ring 动画。
+  - 验证：`tsc --noEmit` 无错；浏览器实测创建 2 个渠道 → 卡片正确渲染带完整 webhook URL、复制/停用可用、无 console 报错。TD-09-T3 仅剩 ChannelReply 回发 + 微信/widget 适配器（需真实账号）。
+
+### 2026-07-10（TD-07-T2 API 半：按职位招人的后端契约）
+- **feat(api)**: 为"按职位一键招人"提供后端契约（前端"按职位选"UI 待做）。
+  - `GET /api/role-bundles`（`routes/catalog.py`，认证）：列出 12 个预配角色及其 `capability_keys` 与 `resolved`（合并后的 toolsets/mcp/creds/risk_gate），供创建员工弹窗渲染选项。
+  - `POST /api/agents` 的 `role_spec` 新增可选 `role_bundle_key`：有值时经 `get_role_bundle` 展开并"bundle 优先去重"并入 `capability_keys`（可与手动勾选叠加）；未知角色 → 400。
+  - 测试：新增 `test_role_bundles_api.py` 5 例（列角色 + 认证要求、按角色建员工能力自动填齐、bundle 与显式 key 合并、未知角色 400）。全套 **199 测试通过**（+5）。
+
+### 2026-07-10（TD-07-T1：业务岗位能力目录扩展）
+- **feat(api)**: 让"用一句话招人"覆盖业务岗，不只是技术岗。
+  - `orchestration/capability_catalog.py` 在技术岗种子外补齐 **7 大类 31 个业务能力**：客服（customer_service/ticket_management/refund_processing/customer_data_lookup）、内容运营（content_writing/image_creation/email_drafting/email_sending/seo_content/ad_analysis/ad_bidding）、数据（data_query/data_analysis/report_generation/web_scraping）、HR、法务、财务（含 `payment_execution` = `prohibited_auto`，花钱不可逆永不自动）、项目管理。
+  - 新增 `ROLE_BUNDLES`（12 个预配角色：客服专员/数据分析师/HR 专员…→ 能力清单）+ `get_role_bundle(name)`/`list_role_bundles()` 访问器；供 TD-07-T2"按职位一键招人"用。
+  - 对齐修正：种子里 `social_content` 的 toolsets 由代码侧 `[web,vision]` 补成与 DATA-MODEL §6.3 真相源一致的 `[web,vision,image_gen]`（此前 TD-05 代码与真相源不一致）。
+  - 测试：`test_capability_catalog.py` 扩到 33 例——把"CATALOG 恰好 8 个种子键"的断言改为"种子键 ⊆ CATALOG"，新增业务条目合法性（description/risk_gate 合法、有 MCP 必声明凭证）、`ROLE_BUNDLES` 全部 key 都在 catalog、每个角色能 resolve_bundle 不报错、未知角色报错。全套 **194 测试通过**（+10）。DATA-MODEL §6.3 同步。
+
 ### 2026-07-10（TD-09-T2：渠道管理 API + 公开 Webhook 端点）
 - **feat(api)**: 把 TD-09-T1 的 channel router 接成一条可 curl 验证的完整入站链路。
   - `app/services/channels.py`：渠道 CRUD（create 生成 `token` + 返回 `webhook_url`、list、get+stats、patch、软删 active=0）、`channel_stats`（今日入站数 / 活跃外部用户数）、`verify_signature`（URL token 为主凭证；config 里配了 `secret` 则额外校验 `X-Signature` = HMAC-SHA256(raw_body)）。

@@ -20,8 +20,11 @@ from app.orchestration.brief import (
 )
 from app.orchestration.capability_catalog import (
     CATALOG,
+    ROLE_BUNDLES,
     CapabilityDef,
     get_capability,
+    get_role_bundle,
+    list_role_bundles,
     resolve_bundle,
     validate_capability_keys,
 )
@@ -77,8 +80,11 @@ __all__ = [
     "validate_task_creation_gate",
     "TaskCreationGateError",
     "CATALOG",
+    "ROLE_BUNDLES",
     "CapabilityDef",
     "get_capability",
+    "get_role_bundle",
+    "list_role_bundles",
     "resolve_bundle",
     "validate_capability_keys",
     "RoleSpecDraft",

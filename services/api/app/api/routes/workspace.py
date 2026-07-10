@@ -101,6 +101,18 @@ def create_custom_agent(
         raise HTTPException(status_code=404, detail="工作区不存在")
     department = ensure_department(conn, workspace["id"], payload.department_name)
 
+    # "Hire by role" (TD-07-T2): a role_bundle_key expands into its preset
+    # capability list, merged (dedup, bundle-first) with any explicit keys.
+    if payload.role_spec and payload.role_spec.role_bundle_key:
+        from app.orchestration.capability_catalog import get_role_bundle
+        try:
+            bundle_keys = get_role_bundle(payload.role_spec.role_bundle_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        payload.role_spec.capability_keys = list(
+            dict.fromkeys(bundle_keys + payload.role_spec.capability_keys)
+        )
+
     # Collect skills from role_spec capability keys if provided
     skills: list[str] = []
     if payload.role_spec and payload.role_spec.capability_keys:

@@ -19,6 +19,28 @@ class RoleSpecIn(BaseModel):
     capability_keys: list[str] = Field(
         default_factory=list, description="能力 key 列表，来自 catalog"
     )
+    role_bundle_key: str | None = Field(
+        default=None,
+        description="预配角色名（如'数据分析师'）；有值时其能力清单会并入 capability_keys",
+    )
+
+
+class ResolvedBundleOut(BaseModel):
+    """The merged effect of a set of capabilities."""
+
+    skills: list[str] = Field(default_factory=list)
+    toolsets: list[str] = Field(default_factory=list)
+    mcp: list[str] = Field(default_factory=list)
+    required_credentials: list[str] = Field(default_factory=list)
+    risk_gate: str
+
+
+class RoleBundleOut(BaseModel):
+    """A preset role and the capabilities it grants (for 'hire by role' UI)."""
+
+    role_name: str
+    capability_keys: list[str]
+    resolved: ResolvedBundleOut
 
 
 class AgentCapabilityOut(BaseModel):
