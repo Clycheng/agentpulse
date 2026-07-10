@@ -4028,3 +4028,72 @@ textarea::placeholder {
 .channel-link-button:hover {
   text-decoration: underline;
 }
+
+/* --- Create-agent: role bundles + capability chips (TD-07-T2) --- */
+.role-bundle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.role-bundle-chip {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.role-bundle-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary-strong);
+}
+
+.role-bundle-chip.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 600;
+}
+
+.cap-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.cap-chip:hover {
+  border-color: var(--primary);
+}
+
+.cap-chip.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 600;
+}
+
+.cap-chip .risk-badge {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.cap-summary {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}

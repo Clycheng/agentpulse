@@ -1847,6 +1847,7 @@ function App() {
 
       {createOpen && (
         <CreateAgentModal
+          token={token ?? ''}
           departments={depts
             .filter((dept) => dept.name !== '老板办公室')
             .map((dept) => dept.name)}
@@ -4435,7 +4436,14 @@ const RISK_BADGE: Record<string, { label: string; color: string }> = {
   prohibited_auto: { label: '仅人工', color: '#f44336' },
 };
 
+type RoleBundle = {
+  role_name: string;
+  capability_keys: string[];
+  resolved: { risk_gate: string };
+};
+
 function CreateAgentModal({
+  token,
   departments,
   createName,
   createDesc,
@@ -4450,6 +4458,7 @@ function CreateAgentModal({
   onClose,
   onSubmit,
 }: {
+  token: string;
   departments: string[];
   createName: string;
   createDesc: string;
@@ -4464,12 +4473,39 @@ function CreateAgentModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const [bundles, setBundles] = useState<RoleBundle[]>([]);
+
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    apiRequest<RoleBundle[]>('/role-bundles', { token })
+      .then((data) => {
+        if (alive) setBundles(data);
+      })
+      .catch(() => {
+        /* catalog unavailable — manual capability picking still works */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
   const toggleCap = (key: string) => {
     onCapKeysChange(
       createCapKeys.includes(key)
         ? createCapKeys.filter((k) => k !== key)
         : [...createCapKeys, key],
     );
+  };
+
+  const bundleActive = (bundle: RoleBundle) =>
+    bundle.capability_keys.length === createCapKeys.length &&
+    bundle.capability_keys.every((key) => createCapKeys.includes(key));
+
+  const pickBundle = (bundle: RoleBundle) => {
+    onCapKeysChange(bundleActive(bundle) ? [] : [...bundle.capability_keys]);
+    if (!createName.trim()) onNameChange(bundle.role_name);
+    if (!createDept.trim()) onDeptChange(bundle.role_name);
   };
 
   return (
@@ -4511,8 +4547,30 @@ function CreateAgentModal({
         onChange={(event) => onDescChange(event.currentTarget.value)}
       />
 
+      {bundles.length > 0 && (
+        <>
+          <FieldLabel>按职位快速配置（可选）</FieldLabel>
+          <div className="role-bundle-row">
+            {bundles.map((bundle) => (
+              <button
+                key={bundle.role_name}
+                type="button"
+                className={
+                  bundleActive(bundle)
+                    ? 'role-bundle-chip active'
+                    : 'role-bundle-chip'
+                }
+                onClick={() => pickBundle(bundle)}
+              >
+                {bundle.role_name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       <FieldLabel>能力配置</FieldLabel>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
         {CAPABILITY_OPTIONS.map((cap) => {
           const selected = createCapKeys.includes(cap.key);
           const badge = RISK_BADGE[cap.risk];
@@ -4521,29 +4579,13 @@ function CreateAgentModal({
               key={cap.key}
               type="button"
               title={cap.desc}
+              className={selected ? 'cap-chip selected' : 'cap-chip'}
               onClick={() => toggleCap(cap.key)}
-              style={{
-                padding: '6px 12px',
-                borderRadius: 6,
-                border: `1.5px solid ${selected ? '#6c5ce7' : '#ddd'}`,
-                background: selected ? '#f0edff' : '#fff',
-                cursor: 'pointer',
-                fontSize: 13,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
             >
-              <span style={{ fontWeight: selected ? 600 : 400 }}>{cap.label}</span>
+              <span>{cap.label}</span>
               <span
-                style={{
-                  fontSize: 10,
-                  padding: '1px 5px',
-                  borderRadius: 4,
-                  background: badge.color + '22',
-                  color: badge.color,
-                  fontWeight: 600,
-                }}
+                className="risk-badge"
+                style={{ background: badge.color + '22', color: badge.color }}
               >
                 {badge.label}
               </span>
@@ -4551,6 +4593,11 @@ function CreateAgentModal({
           );
         })}
       </div>
+      {createCapKeys.length > 0 && (
+        <p className="cap-summary">
+          已选 {createCapKeys.length} 项能力：{createCapKeys.join(' · ')}
+        </p>
+      )}
 
       <FieldLabel>工作职责 Prompt</FieldLabel>
       <textarea

@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 2026-07-10（TD-07-T2 前端半：创建员工"按职位快速配置"）
+- **feat(desktop)**: 把"按职位一键招人"接到创建员工弹窗，TD-07-T2 完整闭环。
+  - `CreateAgentModal` 新增 `token` 入参 + 拉取 `GET /api/role-bundles`；顶部新增"按职位快速配置（可选）"芯片行（12 个预配角色），点选即把该角色的能力清单写入选择、并在名称/部门为空时自动填成角色名；再点一次取消。
+  - 新增"已选 N 项能力：…"摘要行，让通过角色选中的业务能力（即使不在手动能力网格里）也可见。
+  - 顺手清理：该弹窗残留的写死紫色（`#6c5ce7`/`#f0edff`）能力芯片改用 teal 设计 token（`.cap-chip` / `.role-bundle-chip` 类 + `styles.css`），与全局重做一致。
+  - 验证：`tsc --noEmit` 无错；浏览器实测点"数据分析师"→ 芯片高亮、名称/部门自动填、摘要显示 `data_query · data_analysis · report_generation`、无 console 报错。
+
 ### 2026-07-10（渠道管理前端：桌面端「渠道」视图）
 - **feat(desktop)**: 把 TD-09-T2 的渠道 API 接成界面（TD-09-T3 前端半）。
   - `apps/desktop/src/main.tsx`：`View` 增加 `channels`，侧栏新增「渠道」入口（hub 图标）；新增 `ChannelsView` 组件——自取 `GET /api/channels`，含创建表单（名称/类型/默认分配员工）、渠道卡片列表（类型标签、启用状态带 pulse 点、webhook 完整 URL + 一键复制、停用），全部走 `apiRequest`。
