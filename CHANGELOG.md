@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### 2026-07-10（TD-07-T2 API 半：按职位招人的后端契约）
+- **feat(api)**: 为"按职位一键招人"提供后端契约（前端"按职位选"UI 待做）。
+  - `GET /api/role-bundles`（`routes/catalog.py`，认证）：列出 12 个预配角色及其 `capability_keys` 与 `resolved`（合并后的 toolsets/mcp/creds/risk_gate），供创建员工弹窗渲染选项。
+  - `POST /api/agents` 的 `role_spec` 新增可选 `role_bundle_key`：有值时经 `get_role_bundle` 展开并"bundle 优先去重"并入 `capability_keys`（可与手动勾选叠加）；未知角色 → 400。
+  - 测试：新增 `test_role_bundles_api.py` 5 例（列角色 + 认证要求、按角色建员工能力自动填齐、bundle 与显式 key 合并、未知角色 400）。全套 **199 测试通过**（+5）。
+
 ### 2026-07-10（TD-07-T1：业务岗位能力目录扩展）
 - **feat(api)**: 让"用一句话招人"覆盖业务岗，不只是技术岗。
   - `orchestration/capability_catalog.py` 在技术岗种子外补齐 **7 大类 31 个业务能力**：客服（customer_service/ticket_management/refund_processing/customer_data_lookup）、内容运营（content_writing/image_creation/email_drafting/email_sending/seo_content/ad_analysis/ad_bidding）、数据（data_query/data_analysis/report_generation/web_scraping）、HR、法务、财务（含 `payment_execution` = `prohibited_auto`，花钱不可逆永不自动）、项目管理。
