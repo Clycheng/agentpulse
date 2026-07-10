@@ -26,7 +26,7 @@
 | [TD-06-T2](TD-06-agent-self-evolution.md)(主动能力升级申请) | TD-03-T4 + TD-04-T6 | **agentpulse** |
 | TD-06-T3(SOUL 模板注入 + 成长轨迹 UI) | TD-06-T1 + TD-06-T2 | 否（前端）/ agentpulse（验 SOUL） |
 | TD-08-T2(IdleThinkService + cron) | TD-03-T2 + TD-04-T6 | **agentpulse** |
-| TD-08-T3(Idea 中心前端) | TD-08-T1 + TD-08-T2 | 否 |
+| TD-08-T3 **剩余**(idle 触发生成 idea = TD-08-T2 部分) | TD-03-T2 + TD-04-T6（前端页面已完成✅） | **agentpulse** |
 | TD-09-T3 **剩余**(ChannelReply 把回复发回原渠道 + 微信/widget 适配器) | 渠道管理前端已完成✅ | 否（微信/widget 验证需真实账号）|
 | TD-09-T3(ChannelReply + 网页 Widget) | TD-09-T2 | 否 |
 
@@ -34,6 +34,7 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| Idea 中心前端（TD-08-T3 前端半）：桌面端新增「想法」视图（侧栏入口 + 摘要 + 分类过滤 + 想法卡片 + 接受/忽略/转为讨论）；转为讨论走 `/api/ideas/{id}/convert` 后自动重载并跳进新群。接 TD-08-T1 API | 2026-07-10(见 CHANGELOG) | 纯前端；tsc 无错、浏览器实测 seed 2 条→列出→转讨论跳转全走通、无 console 报错。idle 自动生成 idea 仍等 Hermes(TD-08-T2) |
 | TD-07-T2 前端半（创建员工"按职位快速配置"）：CreateAgentModal 拉 `/api/role-bundles` 渲染 12 个角色芯片，点选自动填能力+名称+部门 + "已选 N 项能力"摘要；顺手把该弹窗残留的写死紫色能力芯片改成 teal token。**TD-07-T2 全部完成** | 2026-07-10(见 CHANGELOG) | 纯前端；tsc 无错、浏览器实测选角色自动配好、无 console 报错 |
 | 渠道管理前端（TD-09-T3 前端半）：桌面端新增「渠道」视图（侧栏入口 + 创建表单 + 列表卡片 + webhook URL 复制 + 启停），接 TD-09-T2 的 `/api/channels`；tsc 通过、浏览器实测创建/列出/复制/停用全走通 | 2026-07-10(见 CHANGELOG) | 纯前端；tsc 无错、无 console 报错 |
 | TD-07-T2 API 半：`GET /api/role-bundles`(列 12 预配角色+resolved 效果) + `POST /api/agents` 新增 `role_spec.role_bundle_key`(展开并入 capability_keys) | 2026-07-10(见 CHANGELOG) | 199 测试全过；只差"按职位选"前端 UI |

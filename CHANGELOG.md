@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 2026-07-10（Idea 中心前端：桌面端「想法」视图）
+- **feat(desktop)**: 把 TD-08-T1 的 idea API 接成界面（TD-08-T3 前端半），落地北极星"没有 idle 员工 → idea 中心"的用户界面。
+  - `main.tsx`：`View` 增加 `ideas`，侧栏新增「想法」入口（lightbulb 图标）；新增 `IdeasView` 组件——自取 `GET /api/ideas`，顶部摘要（共 N 条 / 来自几位员工）+ 分类过滤 tabs（改进/机会/风险/学习）+ 想法卡片（员工头像取 per-agent hue、分类标签配色、标题、正文、时间）+ 三个动作：转为讨论 / 接受 / 忽略。
+  - "转为讨论"走 `POST /api/ideas/{id}/convert` → 由 App 回调重载 bootstrap 并 `openChat` 跳进新建的讨论群（首条系统消息=想法内容）。
+  - `styles.css`：新增想法视图样式，全部用 teal 设计 token。
+  - 验证：`tsc --noEmit` 无错；浏览器实测经 API 播种 2 条想法 → 列表正确渲染、分类标签/头像正常 → 点"转为讨论"成功建群并自动跳转、群里第一条即想法内容、无 console 报错。idle 自动产 idea（TD-08-T2）仍待 Hermes。
+
 ### 2026-07-10（TD-07-T2 前端半：创建员工"按职位快速配置"）
 - **feat(desktop)**: 把"按职位一键招人"接到创建员工弹窗，TD-07-T2 完整闭环。
   - `CreateAgentModal` 新增 `token` 入参 + 拉取 `GET /api/role-bundles`；顶部新增"按职位快速配置（可选）"芯片行（12 个预配角色），点选即把该角色的能力清单写入选择、并在名称/部门为空时自动填成角色名；再点一次取消。

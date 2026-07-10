@@ -3,7 +3,7 @@ import type { ReactNode, RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-type View = 'chat' | 'staff' | 'market' | 'tasks' | 'lib' | 'channels';
+type View = 'chat' | 'staff' | 'market' | 'tasks' | 'ideas' | 'lib' | 'channels';
 type ThemeMode = 'system' | 'light' | 'dark';
 type EffectiveTheme = 'light' | 'dark';
 type AgentStatus = 'busy' | 'wait' | 'stuck' | 'idle';
@@ -1801,6 +1801,18 @@ function App() {
           />
         )}
 
+        {view === 'ideas' && token && (
+          <IdeasView
+            token={token}
+            agents={agents}
+            onConverted={async (conversationId) => {
+              await loadBootstrap(token);
+              openChat(conversationId);
+              showToast('已根据想法拉起讨论');
+            }}
+          />
+        )}
+
         {view === 'channels' && token && (
           <ChannelsView token={token} agents={agents} />
         )}
@@ -2240,6 +2252,7 @@ function Sidebar({
     { key: 'staff', icon: 'group', label: '员工', badge: 0 },
     { key: 'market', icon: 'storefront', label: '人才市场', badge: 0 },
     { key: 'tasks', icon: 'task_alt', label: '任务', badge: taskAlerts },
+    { key: 'ideas', icon: 'lightbulb', label: '想法', badge: 0 },
     { key: 'channels', icon: 'hub', label: '渠道', badge: 0 },
     { key: 'lib', icon: 'folder_open', label: '资料库', badge: 0 },
   ];
@@ -2286,6 +2299,210 @@ function Sidebar({
         {materialIcon('logout')}
       </button>
     </aside>
+  );
+}
+
+type Idea = {
+  id: string;
+  source_agent_id: string;
+  source_agent_name: string;
+  title: string;
+  description: string;
+  category: string;
+  status: string;
+  converted_brief_id: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+};
+
+const IDEA_CATEGORIES: Record<string, { label: string; color: string }> = {
+  improvement: { label: '改进', color: 'var(--primary)' },
+  opportunity: { label: '机会', color: 'var(--success)' },
+  risk: { label: '风险', color: 'var(--danger)' },
+  learning: { label: '学习', color: 'var(--warning)' },
+};
+
+const IDEA_STATUS_LABEL: Record<string, string> = {
+  new: '待处理',
+  accepted: '已接受',
+  dismissed: '已忽略',
+  converted: '已转讨论',
+  reviewed: '已查看',
+};
+
+function IdeasView({
+  token,
+  agents,
+  onConverted,
+}: {
+  token: string;
+  agents: Agent[];
+  onConverted: (conversationId: string) => void;
+}) {
+  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState('all');
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    apiRequest<Idea[]>('/ideas', { token })
+      .then((data) => {
+        if (alive) setIdeas(data);
+      })
+      .catch((err: unknown) => {
+        if (alive) setError(err instanceof Error ? err.message : '加载失败');
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
+  const review = async (id: string, action: 'accept' | 'dismiss') => {
+    try {
+      const updated = await apiRequest<Idea>(`/ideas/${id}/review`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ action }),
+      });
+      setIdeas((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '操作失败');
+    }
+  };
+
+  const convert = async (id: string) => {
+    try {
+      const res = await apiRequest<{ conversation_id: string; idea: Idea }>(
+        `/ideas/${id}/convert`,
+        { method: 'POST', token },
+      );
+      setIdeas((prev) => prev.map((item) => (item.id === id ? res.idea : item)));
+      onConverted(res.conversation_id);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '转化失败');
+    }
+  };
+
+  const agentColor = (id: string) => {
+    const agent = agents.find((item) => item.id === id);
+    return agent ? avatarColor(agent) : 'var(--primary)';
+  };
+
+  const filtered =
+    filter === 'all' ? ideas : ideas.filter((idea) => idea.category === filter);
+  const summary = ideas.length
+    ? `共 ${ideas.length} 条想法，来自 ${new Set(ideas.map((i) => i.source_agent_id)).size} 位员工`
+    : '员工空闲时会主动琢磨业务，把想法沉淀到这里';
+
+  return (
+    <div className="screen-scroll">
+      <div className="screen-inner">
+        <header className="page-header">
+          <div>
+            <h1>想法中心</h1>
+            <p>{summary}</p>
+          </div>
+        </header>
+
+        <div className="tabs">
+          {[
+            { key: 'all', label: '全部' },
+            ...Object.entries(IDEA_CATEGORIES).map(([key, meta]) => ({
+              key,
+              label: meta.label,
+            })),
+          ].map((tab) => (
+            <button
+              className={filter === tab.key ? 'tab active' : 'tab'}
+              key={tab.key}
+              type="button"
+              onClick={() => setFilter(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {error && <div className="auth-error">{error}</div>}
+
+        {loading ? (
+          <div className="empty-state">加载中…</div>
+        ) : filtered.length === 0 ? (
+          <div className="empty-state">
+            还没有想法。员工空闲时会主动复盘、发现机会与风险，产出的 idea 会出现在这里，
+            你可以一键转成讨论。
+          </div>
+        ) : (
+          <div className="idea-list">
+            {filtered.map((idea) => {
+              const cat = IDEA_CATEGORIES[idea.category] ?? {
+                label: idea.category,
+                color: 'var(--muted)',
+              };
+              return (
+                <article className="card idea-card" key={idea.id}>
+                  <div className="idea-head">
+                    <span
+                      className="idea-avatar"
+                      style={{ background: agentColor(idea.source_agent_id) }}
+                    >
+                      {avatarText(idea.source_agent_name)}
+                    </span>
+                    <div className="idea-byline">
+                      <strong>{idea.source_agent_name}</strong>
+                      <em>{formatTime(idea.created_at)}</em>
+                    </div>
+                    <span
+                      className="idea-cat"
+                      style={{ background: cat.color + '1f', color: cat.color }}
+                    >
+                      {cat.label}
+                    </span>
+                    {idea.status !== 'new' && (
+                      <span className="idea-status-tag">
+                        {IDEA_STATUS_LABEL[idea.status] ?? idea.status}
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="idea-title">{idea.title}</h3>
+                  <p className="idea-desc">{idea.description}</p>
+                  {idea.status === 'new' && (
+                    <div className="idea-actions">
+                      <button
+                        className="small-button primary"
+                        type="button"
+                        onClick={() => convert(idea.id)}
+                      >
+                        {materialIcon('forum')}转为讨论
+                      </button>
+                      <button
+                        className="small-button"
+                        type="button"
+                        onClick={() => review(idea.id, 'accept')}
+                      >
+                        接受
+                      </button>
+                      <button
+                        className="small-button"
+                        type="button"
+                        onClick={() => review(idea.id, 'dismiss')}
+                      >
+                        忽略
+                      </button>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
