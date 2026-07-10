@@ -28,13 +28,14 @@
 | TD-07-T2 **前端半**(创建员工弹窗"按职位选"标签页) | API 半已完成✅（GET /api/role-bundles + role_bundle_key），只差 UI | 否 |
 | TD-08-T2(IdleThinkService + cron) | TD-03-T2 + TD-04-T6 | **agentpulse** |
 | TD-08-T3(Idea 中心前端) | TD-08-T1 + TD-08-T2 | 否 |
-| TD-09-T3(ChannelReply 回发 + 微信/widget 适配器 + 渠道管理前端) | TD-09-T2（已完成✅） | 否 |
+| TD-09-T3 **剩余**(ChannelReply 把回复发回原渠道 + 微信/widget 适配器) | 渠道管理前端已完成✅ | 否（微信/widget 验证需真实账号）|
 | TD-09-T3(ChannelReply + 网页 Widget) | TD-09-T2 | 否 |
 
 ## 已完成
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| 渠道管理前端（TD-09-T3 前端半）：桌面端新增「渠道」视图（侧栏入口 + 创建表单 + 列表卡片 + webhook URL 复制 + 启停），接 TD-09-T2 的 `/api/channels`；tsc 通过、浏览器实测创建/列出/复制/停用全走通 | 2026-07-10(见 CHANGELOG) | 纯前端；tsc 无错、无 console 报错 |
 | TD-07-T2 API 半：`GET /api/role-bundles`(列 12 预配角色+resolved 效果) + `POST /api/agents` 新增 `role_spec.role_bundle_key`(展开并入 capability_keys) | 2026-07-10(见 CHANGELOG) | 199 测试全过；只差"按职位选"前端 UI |
 | TD-07-T1(业务能力目录扩展)：`capability_catalog.py` 补 31 个业务能力(客服/内容/数据/HR/法务/财务/项目) + `ROLE_BUNDLES`(12 预配角色) + `get_role_bundle`/`list_role_bundles`；对齐 social_content 与真相源；10 新单测(条目合法性/MCP 必带 creds/角色 bundle key 全在 catalog/解析不报错) | 2026-07-10(见 CHANGELOG) | 纯常量+单测；194 测试全过；TD-07-T2 解锁 |
 | TD-09-T2(渠道管理 API + 公开 webhook 端点)：`services/channels.py`(CRUD/stats/HMAC 验签/token) + `routes/channels.py`(/api/channels 认证 CRUD + 软删) + `routes/webhooks.py`(公开 `/webhooks/{type}/{token}` 验签→route_inbound→尽力触发 agent 回复) + email 适配器；8 单测(CRUD/webhook 入站/去重/验签/未知或停用 token/不支持类型/mock LLM 触发回复) | 2026-07-10(见 CHANGELOG) | 纯 API，可 curl 验证；184 测试全过；TD-09-T3 解锁 |

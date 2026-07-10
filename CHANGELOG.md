@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### 2026-07-10（渠道管理前端：桌面端「渠道」视图）
+- **feat(desktop)**: 把 TD-09-T2 的渠道 API 接成界面（TD-09-T3 前端半）。
+  - `apps/desktop/src/main.tsx`：`View` 增加 `channels`，侧栏新增「渠道」入口（hub 图标）；新增 `ChannelsView` 组件——自取 `GET /api/channels`，含创建表单（名称/类型/默认分配员工）、渠道卡片列表（类型标签、启用状态带 pulse 点、webhook 完整 URL + 一键复制、停用），全部走 `apiRequest`。
+  - `styles.css`：新增渠道视图样式（表单/卡片/URL 行/状态点），全部用现有 teal token 与 pulse-ring 动画。
+  - 验证：`tsc --noEmit` 无错；浏览器实测创建 2 个渠道 → 卡片正确渲染带完整 webhook URL、复制/停用可用、无 console 报错。TD-09-T3 仅剩 ChannelReply 回发 + 微信/widget 适配器（需真实账号）。
+
 ### 2026-07-10（TD-07-T2 API 半：按职位招人的后端契约）
 - **feat(api)**: 为"按职位一键招人"提供后端契约（前端"按职位选"UI 待做）。
   - `GET /api/role-bundles`（`routes/catalog.py`，认证）：列出 12 个预配角色及其 `capability_keys` 与 `resolved`（合并后的 toolsets/mcp/creds/risk_gate），供创建员工弹窗渲染选项。

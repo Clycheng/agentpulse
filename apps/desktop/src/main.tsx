@@ -3,7 +3,7 @@ import type { ReactNode, RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-type View = 'chat' | 'staff' | 'market' | 'tasks' | 'lib';
+type View = 'chat' | 'staff' | 'market' | 'tasks' | 'lib' | 'channels';
 type ThemeMode = 'system' | 'light' | 'dark';
 type EffectiveTheme = 'light' | 'dark';
 type AgentStatus = 'busy' | 'wait' | 'stuck' | 'idle';
@@ -1800,6 +1800,10 @@ function App() {
             onOpenKnowledge={() => setKnowledgeOpen(true)}
           />
         )}
+
+        {view === 'channels' && token && (
+          <ChannelsView token={token} agents={agents} />
+        )}
       </section>
 
       {detailAgent && (
@@ -2235,6 +2239,7 @@ function Sidebar({
     { key: 'staff', icon: 'group', label: '员工', badge: 0 },
     { key: 'market', icon: 'storefront', label: '人才市场', badge: 0 },
     { key: 'tasks', icon: 'task_alt', label: '任务', badge: taskAlerts },
+    { key: 'channels', icon: 'hub', label: '渠道', badge: 0 },
     { key: 'lib', icon: 'folder_open', label: '资料库', badge: 0 },
   ];
 
@@ -2280,6 +2285,230 @@ function Sidebar({
         {materialIcon('logout')}
       </button>
     </aside>
+  );
+}
+
+type ChannelConfig = {
+  id: string;
+  channel_type: string;
+  name: string;
+  token: string;
+  config: Record<string, unknown>;
+  target_agent_id: string | null;
+  target_conversation_id: string | null;
+  active: boolean;
+  created_at: string;
+  webhook_url: string;
+};
+
+const CHANNEL_TYPES: Array<{ value: string; label: string }> = [
+  { value: 'generic_webhook', label: '通用 Webhook' },
+  { value: 'email', label: '邮件' },
+  { value: 'web_widget', label: '网页 Widget' },
+  { value: 'wechat', label: '微信' },
+];
+
+function channelTypeLabel(type: string) {
+  return CHANNEL_TYPES.find((item) => item.value === type)?.label ?? type;
+}
+
+function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
+  const [channels, setChannels] = useState<ChannelConfig[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [name, setName] = useState('');
+  const [channelType, setChannelType] = useState('generic_webhook');
+  const [targetAgentId, setTargetAgentId] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [copiedId, setCopiedId] = useState('');
+
+  const webhookOrigin = apiBaseUrl.replace(/\/api\/?$/, '');
+  const fullUrl = (path: string) => `${webhookOrigin}${path}`;
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    apiRequest<ChannelConfig[]>('/channels', { token })
+      .then((data) => {
+        if (alive) setChannels(data);
+      })
+      .catch((err: unknown) => {
+        if (alive) setError(err instanceof Error ? err.message : '加载失败');
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
+  const create = async () => {
+    if (!name.trim() || creating) return;
+    setCreating(true);
+    setError('');
+    try {
+      const created = await apiRequest<ChannelConfig>('/channels', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          channel_type: channelType,
+          name: name.trim(),
+          target_agent_id: targetAgentId || null,
+        }),
+      });
+      setChannels((prev) => [created, ...prev]);
+      setName('');
+      setTargetAgentId('');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '创建失败');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const deactivate = async (id: string) => {
+    setError('');
+    try {
+      const updated = await apiRequest<ChannelConfig>(`/channels/${id}`, {
+        method: 'DELETE',
+        token,
+      });
+      setChannels((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '操作失败');
+    }
+  };
+
+  const copyUrl = async (channel: ChannelConfig) => {
+    try {
+      await navigator.clipboard.writeText(fullUrl(channel.webhook_url));
+      setCopiedId(channel.id);
+      window.setTimeout(() => setCopiedId(''), 1500);
+    } catch {
+      /* clipboard blocked — user can select the text manually */
+    }
+  };
+
+  const agentName = (id: string | null) =>
+    id ? (agents.find((agent) => agent.id === id)?.name ?? id) : '按路由决定';
+
+  return (
+    <div className="screen-scroll">
+      <div className="screen-inner">
+        <header className="page-header">
+          <div>
+            <h1>渠道接入</h1>
+            <p>
+              把微信 / 邮件 / 网页 / 通用 webhook 接进来，外部消息自动进入会话，
+              AI 员工像内部对话一样处理——渠道对员工完全透明。
+            </p>
+          </div>
+        </header>
+
+        <section className="card channel-create" aria-label="创建渠道">
+          <div className="channel-form-row">
+            <label className="channel-field">
+              <span>渠道名称</span>
+              <input
+                value={name}
+                placeholder="例如：官网客服入口"
+                onChange={(event) => setName(event.target.value)}
+              />
+            </label>
+            <label className="channel-field">
+              <span>类型</span>
+              <select
+                value={channelType}
+                onChange={(event) => setChannelType(event.target.value)}
+              >
+                {CHANNEL_TYPES.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="channel-field">
+              <span>默认分配员工</span>
+              <select
+                value={targetAgentId}
+                onChange={(event) => setTargetAgentId(event.target.value)}
+              >
+                <option value="">（按路由决定）</option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="button primary"
+              type="button"
+              onClick={create}
+              disabled={creating || !name.trim()}
+            >
+              {materialIcon('add_link')}
+              {creating ? '创建中…' : '创建渠道'}
+            </button>
+          </div>
+        </section>
+
+        {error && <div className="auth-error">{error}</div>}
+
+        {loading ? (
+          <div className="empty-state">加载中…</div>
+        ) : channels.length === 0 ? (
+          <div className="empty-state">
+            还没有渠道。创建一个通用 Webhook，把它的地址填到你的官网表单或客服系统，
+            外部消息就会自动进来。
+          </div>
+        ) : (
+          <div className="channel-list">
+            {channels.map((channel) => (
+              <article className="card channel-card" key={channel.id}>
+                <div className="channel-card-head">
+                  <strong>{channel.name}</strong>
+                  <span className="channel-type-tag">
+                    {channelTypeLabel(channel.channel_type)}
+                  </span>
+                  <span
+                    className={channel.active ? 'channel-status on' : 'channel-status off'}
+                  >
+                    <i className="channel-dot" />
+                    {channel.active ? '已启用' : '已停用'}
+                  </span>
+                </div>
+                <div className="channel-url">
+                  {materialIcon('link')}
+                  <code>{fullUrl(channel.webhook_url)}</code>
+                  <button
+                    className="small-button"
+                    type="button"
+                    onClick={() => copyUrl(channel)}
+                  >
+                    {copiedId === channel.id ? '已复制' : '复制'}
+                  </button>
+                </div>
+                <div className="channel-meta">
+                  <span>默认员工：{agentName(channel.target_agent_id)}</span>
+                  {channel.active && (
+                    <button
+                      className="channel-link-button"
+                      type="button"
+                      onClick={() => deactivate(channel.id)}
+                    >
+                      停用
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

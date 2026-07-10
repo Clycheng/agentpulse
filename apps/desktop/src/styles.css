@@ -3880,3 +3880,151 @@ textarea::placeholder {
     padding: 28px;
   }
 }
+
+/* --- Channels view (TD-09) --- */
+.channel-create {
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+
+.channel-form-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.channel-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.channel-field span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.channel-field input,
+.channel-field select {
+  min-width: 190px;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.channel-field input:focus,
+.channel-field select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--ring);
+}
+
+.channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.channel-card {
+  padding: 16px 18px;
+}
+
+.channel-card:hover {
+  border-color: var(--primary-soft-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.channel-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.channel-card-head strong {
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.channel-type-tag {
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.channel-status {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.channel-status .channel-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.channel-status.on {
+  color: var(--success);
+}
+
+.channel-status.on .channel-dot {
+  animation: pulse-ring 2s var(--ease-out) infinite;
+}
+
+.channel-status.off {
+  color: var(--subtle);
+}
+
+.channel-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-subtle);
+}
+
+.channel-url code {
+  overflow: hidden;
+  flex: 1;
+  color: var(--muted);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-meta {
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.channel-link-button {
+  margin-left: auto;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+.channel-link-button:hover {
+  text-decoration: underline;
+}
