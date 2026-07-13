@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 2026-07-10（TD-03-T2：HermesBackend —— 员工经 ACP 真执行）
+- **feat(runtime)**: `app/runtime/hermes_client.py` —— 让 AI 员工**真正跑起来**（照 [ADR 0007](docs/decisions/0007-hermes-v0.18-interface-acp.md) 走 ACP，不是 REST）。
+  - 起 `hermes --profile <p> acp` 子进程，用官方 `agent-client-protocol==0.9.0`（已入 requirements）走 ACP（newline JSON-RPC，`use_unstable_protocol=True` 对齐 agent 侧）：`initialize` → `session/new(cwd=绝对 workdir)` → `session/prompt`。
+  - 把 ACP `session_update` 流映射成统一 `AgentEvent`（message / thinking / tool_call / tool_result / usage / status / final）；`request_permission` → 发 `approval_required` 事件 + 由注入的 resolver 决策并**总是选中 agent 提供的某个选项**（默认 deny=选 reject_once）；`read/write_text_file` 限制在 `workdir` 内（ADR 0005，路径逃逸即抛错）；terminal 工具默认拒绝。
+  - `RunContext`/`AgentEvent` 数据类；`run()` 是 async 生成器，子进程/连接在 finally 里干净收尾，带超时。
+  - **真机 e2e 实测通过**：`agentpulse` profile 收到 "reply OK" → 流式 thinking（"The user wants me to…"）+ message "OK" + usage(tokens) + final(end_turn)，16 事件映射正确。
+  - 测试：新增 `test_hermes_backend.py`——2 常开安全测（workdir 必须绝对、`_safe_path` 拒绝逃逸）+ 1 guarded 真机 e2e（`HERMES_E2E=1`，实测过：断言到 final + message 含 "OK"）。全套 **203 通过 + 2 skipped**。
+  - 解锁 TD-03-T3（RunService：消费事件流写 run_steps + 结果回写 + 审批挂起/续跑）。
+
 ### 2026-07-10（Hermes 接入地基 + TD-04-T6 供给器 + ADR 0007 接口修正）
 - **feat(runtime)**: 真正把 Hermes 接进项目的第一步（本机 Hermes v0.18.2，项目所有者提供真实 DeepSeek key）。
   - **key 验证**：新建 isolated profile `agentpulse`（`deepseek/deepseek-v4-flash`、绝对 workdir、key 写进 profile 的 gitignored `.env`），`hermes --profile agentpulse -z "..."` 实测返回结果——key + 模型 + agent loop 全通。key 存 `services/api/.env`（gitignored），未入库/日志/commit。
