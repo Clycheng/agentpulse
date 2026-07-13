@@ -11,9 +11,8 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | [TD-04-T6](TD-04-agent-provisioning.md) | LocalHermesProvisioner 真实现(语法已实测解锁，注意 import 写 wrapper 要清理) | **agentpulse** | ⚪ 待领 |
+| 1 | [TD-03-T2](TD-03-hermes-execution.md) | **HermesBackend 照 ACP 重写**（`hermes acp` stdio JSON-RPC → AgentEvent；**不是** REST，见 [ADR 0007](../decisions/0007-hermes-v0.18-interface-acp.md)）。Hermes 已装、key 已验、provisioner 已就绪 | **agentpulse**(起 Hermes) | ⚪ 待领 |
 | 2 | [TD-01-T2/T3](TD-01-verify-and-harden-slice-1.md) | 端到端手测：brief 全流程 + 多 agent 讨论流(起后端+桌面端真跑一遍；TD-02-T5 已重构完，现在测的就是最终路径) | **agentpulse** | ⚪ 待领 |
-| 3 | [TD-03-T2](TD-03-hermes-execution.md) | HermesBackend 适配层(HTTP Runs API + SSE → AgentEvent，强制 workdir 绝对路径)。TD-03-T1 已完成✅ | **agentpulse**(起 Hermes) | ⚪ 待领 |
 
 ## 有依赖，等前置完成后做
 
@@ -34,6 +33,7 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| **Hermes 接入地基**：本机 Hermes v0.18.2 验证——真实 DeepSeek key 经 isolated profile 一次性跑通("OK")；**发现 REST /v1/runs 已不存在**→ 新增 [ADR 0007](../decisions/0007-hermes-v0.18-interface-acp.md)(改用 ACP 传输、作废端口模型)；实现 **TD-04-T6 `LocalHermesProvisioner`**(真 CLI 建/配/删 profile，强制绝对 workdir)+ 2 always-on 安全单测 + 1 guarded e2e(HERMES_E2E=1 实测过) | 2026-07-10(见 CHANGELOG) | 201 测试全过；DeepSeek key 存 gitignored .env |
 | Idea 中心前端（TD-08-T3 前端半）：桌面端新增「想法」视图（侧栏入口 + 摘要 + 分类过滤 + 想法卡片 + 接受/忽略/转为讨论）；转为讨论走 `/api/ideas/{id}/convert` 后自动重载并跳进新群。接 TD-08-T1 API | 2026-07-10(见 CHANGELOG) | 纯前端；tsc 无错、浏览器实测 seed 2 条→列出→转讨论跳转全走通、无 console 报错。idle 自动生成 idea 仍等 Hermes(TD-08-T2) |
 | TD-07-T2 前端半（创建员工"按职位快速配置"）：CreateAgentModal 拉 `/api/role-bundles` 渲染 12 个角色芯片，点选自动填能力+名称+部门 + "已选 N 项能力"摘要；顺手把该弹窗残留的写死紫色能力芯片改成 teal token。**TD-07-T2 全部完成** | 2026-07-10(见 CHANGELOG) | 纯前端；tsc 无错、浏览器实测选角色自动配好、无 console 报错 |
 | 渠道管理前端（TD-09-T3 前端半）：桌面端新增「渠道」视图（侧栏入口 + 创建表单 + 列表卡片 + webhook URL 复制 + 启停），接 TD-09-T2 的 `/api/channels`；tsc 通过、浏览器实测创建/列出/复制/停用全走通 | 2026-07-10(见 CHANGELOG) | 纯前端；tsc 无错、无 console 报错 |

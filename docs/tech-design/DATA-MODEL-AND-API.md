@@ -198,6 +198,9 @@ async def run_discussion_round_stream(conn, *, workspace_id: str, conversation_i
 | `created_at` | TEXT | NOT NULL |
 
 ### 5.3 `HermesBackend` 接口（`services/api/app/runtime/hermes_client.py`）
+
+> ⚠️ **2026-07-10 作废重写中（见 [ADR 0007](../decisions/0007-hermes-v0.18-interface-acp.md)）**：本机实测 Hermes v0.18.2 **没有** REST `/v1/runs`+SSE 接口——`hermes gateway` 现在是消息平台网关。执行传输改用 **ACP（`hermes acp`，stdio JSON-RPC）**，供给用 CLI（`LocalHermesProvisioner` 已实现并过 e2e）。下方 REST 形状的描述仅作历史保留，实现以 ADR 0007 为准；`agents.hermes_gateway_port`（端口/一员工一网关）随之作废。DeepSeek 实测：provider `deepseek`、key env `DEEPSEEK_API_KEY`、模型 `deepseek/deepseek-v4-flash`。
+
 ```python
 @dataclass
 class RunContext:
