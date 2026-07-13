@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### 2026-07-13（许可证改用 PolyForm Noncommercial + README 截图）
+- **docs(license)**: 把自写的"学习免费/商业需授权"自定义协议换成业界成熟标准 **[PolyForm Noncommercial License 1.0.0](LICENSE)**（非商业用途免费、商业另需授权），法律措辞更规范可靠。商业授权联系方式从 README 移到独立的 [COMMERCIAL.md](COMMERCIAL.md)；README 不再出现商业授权招揽内容，License 徽章/段落同步更新。
+- **docs(readme)**: 新增桌面工作台真实截图——顶部 hero（群讨论 → 共识纪要 → 老板拍板）+「界面预览」画廊（任务中心 / 人才市场 / 想法中心 / 深色主题），图存 `docs/images/`。截图前把后端(SQLite)+前端端到端跑通并走查了登录→群讨论→共识纪要卡→任务→人才市场→想法全流程，生产 UI 路径均正常。
+
 ### 2026-07-10（TD-03-T5：自动供给 —— 招人即真员工）
 - **feat(api+runtime)**: 招一个员工（带 role_spec）就自动创建一个**可运行的 Hermes profile**，热路径随即自动路由到它——不再手动置 spec。
   - `profile_provisioner.build_provisioner_from_settings()`：按 `settings.hermes_provisioning` 选 `LocalHermesProvisioner`（真 CLI）或 `RecordOnlyProvisioner`（默认，测试/无 Hermes 环境）。
