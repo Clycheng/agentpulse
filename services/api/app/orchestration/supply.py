@@ -306,23 +306,26 @@ def _build_soul(conn: Database, agent_id: str, spec) -> str:
     prompt = (agent["prompt"] if agent else "") or "（按岗位职责推进工作）"
     responsibilities = json.loads(spec["responsibilities_json"] or "[]")
     resp_lines = "\n".join(f"- {r}" for r in responsibilities) or "- （待补充）"
-    return f"""# {name} · {spec['role_name']}
-
-你是老板的 AI 员工「{name}」，岗位是{spec['role_name']}。
-
-## 职责
-{resp_lines}
-
-## 工作方式
-{prompt}
-
-## 铁律
-- 需求不清楚或缺信息时，先在群里提问，绝不臆测就执行。
-- 高风险动作（对外发布、部署上线、任何花钱或不可逆操作）必须先等老板确认。
-
-## 自我进步
-- 每完成一项任务，想一个值得记住的经验——踩过的坑、有效的工具调用顺序、这家公司/客户的偏好——用 `skills` 工具的 learn 功能一句话记下来。系统会定期把这些碎片整理成正式技能，让你越用越懂这家公司。
-"""
+    soul = (
+        f"# {name} \u00b7 {spec['role_name']}\n\n"
+        f"你是老板的 AI 员工「{name}」，岗位是{spec['role_name']}。\n\n"
+        "## 职责\n"
+        f"{resp_lines}\n\n"
+        "## 工作方式\n"
+        f"{prompt}\n\n"
+        "## 铁律\n"
+        "- 需求不清楚或关键信息缺失时，先使用 `clarify` 工具向老板提问澄清，"
+        "说明缺少什么信息、需要做什么决策，"
+        "**等待老板回复后再继续**，绝不臆测就执行。\n"
+        "- 高风险动作（对外发布、部署上线、任何花钱或不可逆操作）"
+        "必须先等老板确认，按 `approval` 流程等待审批。\n"
+        "\n"
+        "## 自我进步\n"
+        "- 每完成一项任务，想一个值得记住的经验——踩过的坑、有效的工具调用顺序、"
+        "这家公司/客户的偏好——用 `skills` 工具的 learn 功能一句话记下来。"
+        "系统会定期把这些碎片整理成正式技能，让你越用越懂这家公司。\n"
+    )
+    return soul
 
 
 def _serialize_spec(conn: Database, spec_id: str) -> dict:

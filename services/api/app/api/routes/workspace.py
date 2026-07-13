@@ -994,69 +994,70 @@ def resolve_approval(
         raise HTTPException(status_code=409, detail="确认请求已处理")
 
     resolved_at = now_iso()
+    decision = payload.status
     conn.execute(
         """
         UPDATE approvals
         SET status = ?, resolved_by = ?, resolved_at = ?
         WHERE id = ? AND workspace_id = ?
         """,
-        (
-            payload.status,
-            current_user["id"],
-            resolved_at,
-            approval_id,
-            workspace["id"],
-        ),
+        (decision, current_user["id"], resolved_at, approval_id, workspace["id"]),
     )
-    # TD-03-T4: run-linked approval → wake the suspended Hermes run in place.
-    # (These are Tirith high-risk gates, not the manual task-completion cards, so
-    # they must NOT auto-complete a task — the agent resumes and does that.)
-    run_id = approval["run_id"]
-    if run_id:
-        decision = "allow_once" if payload.status == "approved" else "deny"
-        try:
-            transition_run(conn, run_id, RunStatus.RUNNING)
-            conn.commit()
-        except RunStateError:
-            pass  # run already moved on (completed/failed); still wake the bridge
-        approval_bridge.resolve_pending(approval_id, decision)
-        updated = conn.execute(
-            "SELECT * FROM approvals WHERE id = ?", (approval_id,)
-        ).fetchone()
-        return serialize_approval(updated)
 
-    task_id = approval["task_id"]
-    if task_id:
+    # TD-03-T4: wake a suspended run (high_risk approvals created by the Hermes
+    # approval_resolver). The in-process permission_resolver callback is blocked
+    # on an approval_bridge Future; waking it lets the ACP stream continue.
+    run_id = approval.get("run_id")
+    if run_id and approval.get("type") == "high_risk":
+        from app.runtime.approval_bridge import resolve_pending
+
+        resolve_pending(approval_id, decision)
+        # Log a task event for the run-linked approval.
         add_task_event(
             conn,
             workspace_id=workspace["id"],
-            task_id=task_id,
+            task_id=approval["task_id"] or "",
             kind="approval_resolved",
-            title="老板已确认" if payload.status == "approved" else "老板已驳回",
+            title="老板已确认通过" if decision == "approved" else "老板已驳回",
             content=approval["title"],
             conversation_id=approval["conversation_id"],
             agent_id=approval["agent_id"],
         )
-        capture_agent_experience_from_approval(
-            conn,
-            workspace_id=workspace["id"],
-            approval=approval,
-            resolution=payload.status,
-        )
-        if payload.status == "approved":
-            update_task(
+    else:
+        # Legacy approval (attached to a task, not a run): update task + capture
+        # agent experience as before.
+        task_id = approval["task_id"]
+        if task_id:
+            add_task_event(
                 conn,
                 workspace_id=workspace["id"],
                 task_id=task_id,
-                changes={"status": "已完成", "progress": 100},
+                kind="approval_resolved",
+                title="老板已确认" if decision == "approved" else "老板已驳回",
+                content=approval["title"],
+                conversation_id=approval["conversation_id"],
+                agent_id=approval["agent_id"],
             )
-        else:
-            update_task(
+            capture_agent_experience_from_approval(
                 conn,
                 workspace_id=workspace["id"],
-                task_id=task_id,
-                changes={"status": "阻塞", "progress": 80},
+                approval=approval,
+                resolution=decision,
             )
+            if decision == "approved":
+                update_task(
+                    conn,
+                    workspace_id=workspace["id"],
+                    task_id=task_id,
+                    changes={"status": "已完成", "progress": 100},
+                )
+            else:
+                update_task(
+                    conn,
+                    workspace_id=workspace["id"],
+                    task_id=task_id,
+                    changes={"status": "阻塞", "progress": 80},
+                )
 
     updated = conn.execute(
         "SELECT * FROM approvals WHERE id = ?", (approval_id,)
