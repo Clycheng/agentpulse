@@ -24,8 +24,7 @@
 | [TD-06-T1](TD-06-agent-self-evolution.md)(技能自动沉淀) | TD-03-T3 + TD-04-T6 | **agentpulse** |
 | [TD-06-T2](TD-06-agent-self-evolution.md)(主动能力升级申请) | TD-03-T4 + TD-04-T6 | **agentpulse** |
 | TD-06-T3(SOUL 模板注入 + 成长轨迹 UI) | TD-06-T1 + TD-06-T2 | 否（前端）/ agentpulse（验 SOUL） |
-| TD-08-T2(IdleThinkService + cron) | TD-03-T2 + TD-04-T6 | **agentpulse** |
-| TD-08-T3 **剩余**(idle 触发生成 idea = TD-08-T2 部分) | TD-03-T2 + TD-04-T6（前端页面已完成✅） | **agentpulse** |
+| TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）|
 | TD-09-T3 **剩余**(ChannelReply 把回复发回原渠道 + 微信/widget 适配器) | 渠道管理前端已完成✅ | 否（微信/widget 验证需真实账号）|
 | TD-09-T3(ChannelReply + 网页 Widget) | TD-09-T2 | 否 |
 
@@ -33,6 +32,7 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| **TD-08-T2 IdleThinkService + cron（空闲即想 idea）**：`runtime/idle_think.py`——`find_due_idle_agents`(ready+enabled+有 profile+距上次超 interval+无活跃 run) → `trigger_reflection`(注入反思 prompt→经同一 RunBackend 接口调 Hermes→`parse_ideas` 容错解析严格 JSON→写 `ideas` 表→stamp `last_idle_think_at`，空/解析失败/后端异常都 stamp 不 hot-loop) → `run_idle_tick` 一轮扫全部 due 员工；cron 在 `main.py` startup 起后台 asyncio 循环（`AGENTPULSE_IDLE_THINKING_CRON=true` 开，默认关）。idle reflection 不绑会话故不建 runs 行（直接 drain backend）。**零回归**：新增 12 常开单测(parse/due 选取/reflection 落 idea+stamp/空+错处理/tick 汇总)+1 guarded e2e；全套 **219 通过 + 6 skipped** | 2026-07-13(见 CHANGELOG) | 北极星⑤「没有 idle 员工」后端闭环打通；配 flag 开启即 7×24 自发攒 idea |
 | **TD-03-T5 员工↔profile 生命周期（自动供给）**：`build_provisioner_from_settings` 按 `hermes_provisioning` 选 LocalHermes/RecordOnly；`supply.provision` 走真 provisioner——建 profile+写 SOUL(角色/职责/铁律)+配 model(`deepseek/deepseek-v4-flash`)+toolsets+装 skills+写 DeepSeek key→回填 `hermes_profile`/status=ready；profile 名合法化(lowercase alnum)。**真机 e2e 过**：provision→真 Hermes profile(model+SOUL+key)可跑，spec ready。招人→真员工全自动 | 2026-07-10(见 CHANGELOG) | 配 `AGENTPULSE_HERMES_PROVISIONING=true` 开启 |
 | **TD-03-T3 后半：热路径切换**：`send_message_stream` 的 DM + 群讨论两条路径都改成经 `runner.stream_agent_run` 调 Hermes（员工有 ready profile 时），否则回退临时 DeepSeek——**零回归**（现有 205 测试全过，无 profile 的 agent 走原路径）；`runner` 加 `resolve_hermes_profile` + 流式 `stream_agent_run`；approval_required 走 deny-by-default + SSE `approval` 事件。**真机 e2e 过**：DM 经 `/messages/stream` → runs(provider=hermes,completed)+run_steps(message,final)+agent 消息 "OK" 落库 | 2026-07-10(见 CHANGELOG) | 审批 suspend/resume 与自动供给留 T4/T5 |
 | **TD-03-T3 写半：RunService**（`runtime/runner.py`）：`start_run` 消费 backend 事件流→按 TD-03-T1 生命周期建 run/转状态、聚合 thinking/message 各落 1 run_step、tool 逐条落、结果写回 agent message；**真机 e2e 过**（RunService→HermesBackend→真 Hermes→run_steps+message"OK"）。2 常开(fake backend)+1 guarded e2e；全套 205 过 | 2026-07-10(见 CHANGELOG) | 剩热路径切换+审批闭环 |

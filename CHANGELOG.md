@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 2026-07-13（TD-08-T2：空闲员工主动想 idea —— 北极星⑤后端闭环）
+- **feat(runtime)**: `app/runtime/idle_think.py` —— 落地"没有 idle 员工"：员工空闲够久就自发反思并产出 idea。
+  - `find_due_idle_agents`：选出符合条件的员工（`agent_specs.status='ready'` + `idle_thinking_enabled` + 有 `hermes_profile` + 距 `last_idle_think_at` 超过 `idle_think_interval_hours` + 无活跃 run）。
+  - `trigger_reflection`：注入反思 prompt（改进/机会/风险/学习，强制严格 JSON 输出）→ 经与 RunService 相同的 `RunBackend` 接口调 Hermes → `parse_ideas` 容错解析（去 ```json 围栏/取首个 JSON 数组/校验 category 白名单/裁剪长度/最多 3 条）→ 写入 `ideas` 表 → stamp `last_idle_think_at`。空数组/解析失败/后端异常都会 stamp 且不抛，避免 cron hot-loop。idle reflection 不绑会话，故**不建 `runs` 行**（`runs.conversation_id` NOT NULL），直接 drain backend 聚合输出。
+  - `run_idle_tick`：一轮扫描所有 due 员工逐个反思，返回 `{agents_processed, ideas_created}`。
+  - cron：`main.py` startup 起后台 asyncio 循环，`config.py` 加 `idle_thinking_cron`（默认 false）+ `idle_cron_interval_seconds`（默认 3600）；默认关，测试/无 Hermes 环境不受影响。
+  - **零回归**：新增 `test_idle_think.py` 12 常开单测（parse_ideas 各种输入、due 选取的 5 条排除规则、reflection 落 idea+stamp、空输出/后端异常仍 stamp、tick 汇总与二次不重复触发）+ 1 guarded e2e（`HERMES_E2E=1`）；全套 **219 通过 + 6 skipped**（较基线 +12）。三条架构 grep 干净。
+  - 剩余：桌面端"空闲思考开关"设置项 UI（可选，TD-08-T3 收尾）；live e2e 待 agentpulse 会话起 Hermes 实测。
+  - Verified: run_idle_tick 经生产路径 `main.py::_idle_cron_loop`（startup 后台循环，`idle_thinking_cron` 开启时）驱动。
+
 ### 2026-07-13（许可证改用 PolyForm Noncommercial + README 截图）
 - **docs(license)**: 把自写的"学习免费/商业需授权"自定义协议换成业界成熟标准 **[PolyForm Noncommercial License 1.0.0](LICENSE)**（非商业用途免费、商业另需授权），法律措辞更规范可靠。商业授权联系方式从 README 移到独立的 [COMMERCIAL.md](COMMERCIAL.md)；README 不再出现商业授权招揽内容，License 徽章/段落同步更新。
 - **docs(readme)**: 新增桌面工作台真实截图——顶部 hero（群讨论 → 共识纪要 → 老板拍板）+「界面预览」画廊（任务中心 / 人才市场 / 想法中心 / 深色主题），图存 `docs/images/`。截图前把后端(SQLite)+前端端到端跑通并走查了登录→群讨论→共识纪要卡→任务→人才市场→想法全流程，生产 UI 路径均正常。

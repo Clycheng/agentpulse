@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # When true, provisioning drives the real `hermes` CLI (creates profiles).
     # Off by default so tests / non-Hermes envs use the record-only provisioner.
     hermes_provisioning: bool = False
+    # TD-08-T2: idle-reflection cron. Off by default so tests / non-Hermes envs
+    # don't spawn the background loop; enable in the desktop deployment.
+    idle_thinking_cron: bool = False
+    idle_cron_interval_seconds: int = 3600
     auth_secret_key: str = "agentpulse-local-dev-secret"
     access_token_ttl_hours: int = 24 * 14
     password_iterations: int = 260_000

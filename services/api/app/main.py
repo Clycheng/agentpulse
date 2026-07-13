@@ -11,7 +11,7 @@ from app.api.routes.ideas import router as ideas_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.webhooks import router as webhooks_router
 from app.api.routes.workspace import router as workspace_router
-from app.core.database import init_db
+from app.core.database import connect, init_db
 from app.core.config import settings
 
 
@@ -39,10 +39,42 @@ def create_app() -> FastAPI:
     app.include_router(webhooks_router)
 
     @app.on_event("startup")
-    def startup() -> None:
+    async def startup() -> None:
         init_db()
+        if settings.idle_thinking_cron:
+            import asyncio
+
+            asyncio.create_task(_idle_cron_loop())
 
     return app
+
+
+async def _idle_cron_loop() -> None:
+    """TD-08-T2: periodically reflect for idle employees (desktop deployment).
+
+    Guarded by ``settings.idle_thinking_cron``. Each pass opens its own
+    connection, runs one tick with a real Hermes backend, and never lets an
+    error kill the loop.
+    """
+    import asyncio
+
+    from app.runtime.hermes_client import HermesBackend
+    from app.runtime.idle_think import run_idle_tick
+
+    while True:
+        await asyncio.sleep(settings.idle_cron_interval_seconds)
+        try:
+            conn = connect()
+            try:
+                await run_idle_tick(
+                    conn,
+                    backend=HermesBackend(hermes_bin=settings.hermes_bin),
+                    hermes_work_root=settings.hermes_work_root,
+                )
+            finally:
+                conn.close()
+        except Exception:  # never let the cron loop die
+            continue
 
 
 app = create_app()
