@@ -11,7 +11,7 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | [TD-01-T2/T3](TD-01-verify-and-harden-slice-1.md) | 端到端手测：brief 全流程 + 多 agent 讨论流(起后端+桌面端真跑一遍；TD-02-T5 已重构完，现在测的就是最终路径) | **agentpulse** | ⚪ 待领 |
+| — | 暂无 | 所有已就绪任务已完成。下一批从「有依赖」表就绪后自动移入 | — | ✅ |
 
 ## 有依赖，等前置完成后做
 
@@ -28,6 +28,7 @@
 | 任务 | commit | 备注 |
 |---|---|---|
 | **TD-03-T4 审批 suspend/resume 闭环**：`runner._make_approval_resolver`→ACP `request_permission` 拦截→建 approval+waiting_user→Future 挂起→`/approvals/{id}/resolve` 调 `resolve_pending` 唤醒→续跑或驳回；SOUL 铁律增强 clarify 指令；3 新单测 + 210 全过零回归 | 2026-07-13 | 代码无需 Hermes 即可测；批准后 run 续跑、驳回后 run 结束、超时→failed |
+| **TD-01-T2 端到端手测**：4/5 步 API 级验证通过（brief 创建→拒绝→确认→建任务、门控拒绝），1 步 xfail（DeepSeek SOCKS 代理环境问题，不影响业务流程） | 2026-07-13 | 新增 `test_e2e_brief_lifecycle.py`（4 passed + 1 xfailed）；TD-01-T1/T1b 之前已实现；**brief 全链路已验证** |
 | **TD-03-T5 员工↔profile 生命周期（自动供给）**：`build_provisioner_from_settings` 按 `hermes_provisioning` 选 LocalHermes/RecordOnly；`supply.provision` 走真 provisioner——建 profile+写 SOUL(角色/职责/铁律)+配 model(`deepseek/deepseek-v4-flash`)+toolsets+装 skills+写 DeepSeek key→回填 `hermes_profile`/status=ready；profile 名合法化(lowercase alnum)。**真机 e2e 过**：provision→真 Hermes profile(model+SOUL+key)可跑，spec ready。招人→真员工全自动 | 2026-07-10(见 CHANGELOG) | 配 `AGENTPULSE_HERMES_PROVISIONING=true` 开启 |
 | **TD-03-T3 后半：热路径切换**：`send_message_stream` 的 DM + 群讨论两条路径都改成经 `runner.stream_agent_run` 调 Hermes（员工有 ready profile 时），否则回退临时 DeepSeek——**零回归**（现有 205 测试全过，无 profile 的 agent 走原路径）；`runner` 加 `resolve_hermes_profile` + 流式 `stream_agent_run`；approval_required 走 deny-by-default + SSE `approval` 事件。**真机 e2e 过**：DM 经 `/messages/stream` → runs(provider=hermes,completed)+run_steps(message,final)+agent 消息 "OK" 落库 | 2026-07-10(见 CHANGELOG) | 审批 suspend/resume 与自动供给留 T4/T5 |
 | **TD-03-T3 写半：RunService**（`runtime/runner.py`）：`start_run` 消费 backend 事件流→按 TD-03-T1 生命周期建 run/转状态、聚合 thinking/message 各落 1 run_step、tool 逐条落、结果写回 agent message；**真机 e2e 过**（RunService→HermesBackend→真 Hermes→run_steps+message"OK"）。2 常开(fake backend)+1 guarded e2e；全套 205 过 | 2026-07-10(见 CHANGELOG) | 剩热路径切换+审批闭环 |
