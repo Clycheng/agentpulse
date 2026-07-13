@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 2026-07-10（TD-03-T5：自动供给 —— 招人即真员工）
+- **feat(api+runtime)**: 招一个员工（带 role_spec）就自动创建一个**可运行的 Hermes profile**，热路径随即自动路由到它——不再手动置 spec。
+  - `profile_provisioner.build_provisioner_from_settings()`：按 `settings.hermes_provisioning` 选 `LocalHermesProvisioner`（真 CLI）或 `RecordOnlyProvisioner`（默认，测试/无 Hermes 环境）。
+  - `orchestration/supply.provision`：默认走配置选出的 provisioner；能力就绪时——建 profile → **写 SOUL.md**（`_build_soul`：角色/职责/工作方式 + "不清楚先问、高风险等老板"铁律）→ 配 `deepseek/deepseek-v4-flash`+toolsets → 装 skills → **写 DeepSeek key 进 profile .env**（员工即刻可跑）→ 回填 `agent_specs.hermes_profile`+status=ready；profile 名合法化为 lowercase alnum（Hermes 要求）。
+  - `config.py`：加 `hermes_provisioning`（默认 false）。
+  - **真机 e2e 过**（`test_auto_provision.py`，`HERMES_E2E=1`）：`provision` 开供给开关 → 真 Hermes profile 落地（config 有 v4-flash、SOUL 含角色、.env 有 key）、spec ready，然后清理。
+  - **零回归**：默认 RecordOnly，全套 **207 通过 + 5 skipped**；新增 2 常开 wiring 测（SOUL/credentials 被记录、profile 名格式、flag off→RecordOnly）。
+  - 至此 TD-03 主链闭环：**招人→自动建真 profile→发消息→Hermes 执行→run_steps+回写**，全部真机验证过。只剩 TD-03-T4 审批 suspend/resume（现 deny-by-default，安全）。
+
 ### 2026-07-10（TD-03-T3 后半：热路径切换 —— 员工在 App 里真的经 Hermes 干活）
 - **feat(api+runtime)**: 把跑着的消息流从"临时 DeepSeek"切成"经 RunService 调 Hermes"，**有 ready profile 的员工走 Hermes、其余回退 DeepSeek（零回归）**。
   - `runtime/runner.py`：`start_run` 重构为流式 `stream_agent_run`（边持久化 run_steps + 回写 message，边 yield `{type:chunk|message|tool_call|...}` 给 SSE）；新增 `resolve_hermes_profile(agent_id)`（`agent_specs.hermes_profile` 且 status=ready 才走 Hermes）。

@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # to an absolute ".hermes-data" under the server's cwd at run time.
     hermes_work_root: str = ""
     hermes_bin: str = "hermes"
+    # When true, provisioning drives the real `hermes` CLI (creates profiles).
+    # Off by default so tests / non-Hermes envs use the record-only provisioner.
+    hermes_provisioning: bool = False
     auth_secret_key: str = "agentpulse-local-dev-secret"
     access_token_ttl_hours: int = 24 * 14
     password_iterations: int = 260_000

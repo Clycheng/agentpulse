@@ -24,7 +24,12 @@ from app.orchestration.capability_catalog import (
     resolve_bundle,
     validate_capability_keys,
 )
-from app.runtime.profile_provisioner import ProfileProvisioner, RecordOnlyProvisioner
+from app.runtime.profile_provisioner import (
+    ProfileProvisioner,
+    build_provisioner_from_settings,
+)
+
+HERMES_MODEL = "deepseek/deepseek-v4-flash"
 
 
 class ProvisioningError(Exception):
@@ -144,7 +149,7 @@ def provision(
         ProvisioningError: If spec not found or not in provisionable state
     """
     if provisioner is None:
-        provisioner = RecordOnlyProvisioner()
+        provisioner = build_provisioner_from_settings()
 
     spec = conn.execute(
         "SELECT * FROM agent_specs WHERE agent_id = ?", (agent_id,)
@@ -231,16 +236,25 @@ def provision(
             ]
             bundle = resolve_bundle(enabled_keys)
 
-            # Call provisioner
+            # Call provisioner: create profile, write persona (SOUL), configure
+            # model/tools, install skills, and hand it the DeepSeek key so the
+            # employee can actually run the moment it's ready.
+            from app.core.config import settings
+
             provisioner.create_profile(profile_name)
+            provisioner.write_soul(profile_name, _build_soul(conn, agent_id, spec))
             provisioner.configure(
                 profile_name,
-                model="deepseek/deepseek-chat",
+                model=HERMES_MODEL,
                 toolsets=bundle["toolsets"],
                 mcp=bundle["mcp"],
             )
             if bundle["skills"]:
                 provisioner.install_skills(profile_name, bundle["skills"])
+            if settings.deepseek_api_key:
+                provisioner.write_credentials(
+                    profile_name, {"DEEPSEEK_API_KEY": settings.deepseek_api_key}
+                )
 
             # Update spec
             conn.execute(
@@ -267,11 +281,45 @@ def provision(
 
 
 def _generate_profile_name(conn: Database, agent_id: str, workspace_id: str) -> str:
-    """Generate a unique Hermes profile name: wk<ws6>-<agent6>."""
-    ws_short = workspace_id.replace("wk_", "")[:6]
-    ag_short = agent_id.replace("agent_", "")[:6]
-    base = f"wk{ws_short}-{ag_short}"
-    return base
+    """Generate a unique Hermes profile name.
+
+    Hermes requires lowercase alphanumeric names, so strip everything else.
+    """
+    import re
+
+    ws_short = re.sub(r"[^a-z0-9]", "", workspace_id.lower())[-6:]
+    ag_short = re.sub(r"[^a-z0-9]", "", agent_id.lower())[-8:]
+    return f"ap{ws_short}{ag_short}"
+
+
+def _build_soul(conn: Database, agent_id: str, spec) -> str:
+    """Build the employee's SOUL.md from its role + responsibilities + prompt.
+
+    Persona is deterministic (no LLM call); the boundary rules encode the
+    product's "ask when unclear / boss approves risky actions" norms.
+    """
+    agent = conn.execute(
+        "SELECT name, role, description, prompt FROM agents WHERE id = ?",
+        (agent_id,),
+    ).fetchone()
+    name = agent["name"] if agent else spec["role_name"]
+    prompt = (agent["prompt"] if agent else "") or "（按岗位职责推进工作）"
+    responsibilities = json.loads(spec["responsibilities_json"] or "[]")
+    resp_lines = "\n".join(f"- {r}" for r in responsibilities) or "- （待补充）"
+    return f"""# {name} · {spec['role_name']}
+
+你是老板的 AI 员工「{name}」，岗位是{spec['role_name']}。
+
+## 职责
+{resp_lines}
+
+## 工作方式
+{prompt}
+
+## 铁律
+- 需求不清楚或缺信息时，先在群里提问，绝不臆测就执行。
+- 高风险动作（对外发布、部署上线、任何花钱或不可逆操作）必须先等老板确认。
+"""
 
 
 def _serialize_spec(conn: Database, spec_id: str) -> dict:

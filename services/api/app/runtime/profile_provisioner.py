@@ -270,3 +270,14 @@ class LocalHermesProvisioner:
         """Tear down a profile (employee removed). Best-effort."""
         if self._profile_exists(profile_name):
             self._run(["profile", "delete", profile_name, "--yes"])
+
+
+def build_provisioner_from_settings() -> ProfileProvisioner:
+    """Pick the provisioner from config: LocalHermes when hermes_provisioning is
+    on (real `hermes` CLI), else RecordOnly (tests / non-Hermes envs)."""
+    from app.core.config import settings
+
+    if settings.hermes_provisioning:
+        work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
+        return LocalHermesProvisioner(work_root=work_root, hermes_bin=settings.hermes_bin)
+    return RecordOnlyProvisioner()
