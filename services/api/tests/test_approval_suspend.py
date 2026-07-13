@@ -76,21 +76,28 @@ def _insert_run(db: Database, run_id: str, status: str = "running") -> None:
 
 
 class _PermBackend:
-    """Fake backend that fires a permission_resolver call mid-stream."""
+    """Fake backend that emits an approval_required event then calls the resolver."""
 
     async def run(self, ctx, *, permission_resolver=None):
         yield AgentEvent("thinking", {"content": {"text": "thinking..."}})
         yield AgentEvent("message", {"content": {"text": "About to publish"}})
+        # Emit an approval_required event (stream_agent_run persists + transitions)
+        yield AgentEvent(
+            "approval_required",
+            {"approval_id": "appr_stream", "category": "high_risk",
+             "tool_call": {"title": "deploy"}},
+        )
+        # Now call the resolver so it blocks until resolved (simulates ACP flow)
         if permission_resolver is not None:
             decision = await permission_resolver(
-                {"title": "publish", "tool": "deploy"}
+                {"approval_id": "appr_stream", "category": "high_risk"}
             )
             yield AgentEvent(
                 "tool_result",
                 {
                     "title": "deploy",
                     "content": {
-                        "text": "done" if decision == "allow_once" else "blocked"
+                        "text": "done" if str(decision).startswith("allow") else "blocked"
                     },
                 },
             )
@@ -221,7 +228,13 @@ def test_stream_approval_suspend_resume():
                     "SELECT * FROM approvals WHERE workspace_id='ws_1'"
                 ).fetchone()
             assert appr is not None, "expected an approval to be created"
-            resolve_pending(appr["id"], "approved")
+            # The approval should be persisted by _persist_run_approval
+            assert appr["type"] == "high_risk"
+            # The resolver is blocked on approval_bridge via make_bridge_resolver
+            from app.runtime.approval_bridge import has_pending, resolve_pending, discard_pending
+
+            assert has_pending(appr["id"]), "expected pending in bridge"
+            resolve_pending(appr["id"], "allow_once")
             discard_pending(appr["id"])
 
         async def consume():

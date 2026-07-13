@@ -1010,19 +1010,31 @@ def resolve_approval(
     run_id = approval.get("run_id")
     if run_id and approval.get("type") == "high_risk":
         from app.runtime.approval_bridge import resolve_pending
+        from app.runtime.runs import RunStatus, transition_run
+
+        # Transition the run (in case no resolver is waiting — detached wake).
+        try:
+            transition_run(
+                conn, run_id,
+                RunStatus.RUNNING if decision == "approved" else RunStatus.COMPLETED,
+            )
+        except Exception:
+            pass  # run may have already moved on; bridge wake is still needed.
 
         resolve_pending(approval_id, decision)
-        # Log a task event for the run-linked approval.
-        add_task_event(
-            conn,
-            workspace_id=workspace["id"],
-            task_id=approval["task_id"] or "",
-            kind="approval_resolved",
-            title="老板已确认通过" if decision == "approved" else "老板已驳回",
-            content=approval["title"],
-            conversation_id=approval["conversation_id"],
-            agent_id=approval["agent_id"],
-        )
+        # Log a task event if the approval has a task_id.
+        task_id = approval.get("task_id")
+        if task_id:
+            add_task_event(
+                conn,
+                workspace_id=workspace["id"],
+                task_id=task_id,
+                kind="approval_resolved",
+                title="老板已确认通过" if decision == "approved" else "老板已驳回",
+                content=approval["title"],
+                conversation_id=approval["conversation_id"],
+                agent_id=approval["agent_id"],
+            )
     else:
         # Legacy approval (attached to a task, not a run): update task + capture
         # agent experience as before.

@@ -243,15 +243,11 @@ async def stream_agent_run(
     conn.commit()
 
     # Build the approval suspension resolver (TD-03-T4) if not injected.
+    # Uses make_bridge_resolver which only awaits the bridge — the
+    # approval row + run transition are handled by _persist_run_approval
+    # inside stream_agent_run's approval_required event handler.
     if permission_resolver is None and ctx.workspace_id and ctx.conversation_id:
-        permission_resolver = _make_approval_resolver(
-            conn,
-            run_id=run_id,
-            workspace_id=ctx.workspace_id,
-            conversation_id=ctx.conversation_id,
-            agent_id=ctx.agent_id,
-            task_id=ctx.task_id,
-        )
+        permission_resolver = make_bridge_resolver()
 
     message_parts: list[str] = []
     thought_parts: list[str] = []
