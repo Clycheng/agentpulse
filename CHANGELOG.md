@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 2026-07-10（TD-03-T3 写半：RunService —— run→run_steps→回写消息）
+- **feat(runtime)**: `app/runtime/runner.py::start_run` —— 把一次 Hermes 执行完整落库。
+  - 消费 backend（`HermesBackend` 或测试用 fake）的 `AgentEvent` 流：按 TD-03-T1 生命周期建 `runs`(queued→running→completed/failed)；thinking/message 分别缓冲、每轮各落 1 条 `run_steps`；tool_call/tool_result/approval_required 逐条落；聚合出的 agent 回复经 `add_message` 写回会话；`final` 步 + 状态转移 + `output_message_id` 回填；错误→run=failed 记 error。
+  - **真机 e2e 过**：RunService → HermesBackend(ACP) → 真 Hermes(`agentpulse` profile, DeepSeek) → run 完成、run_steps 有 message+final、agent 消息 "OK" 落库。
+  - 测试：新增 `test_runner.py`——2 常开（fake backend：断言 thinking 聚合成一条、tool_call 逐条、message 回写、run 完成并回填 output_message_id；error→failed）+ 1 guarded 真机 e2e（`HERMES_E2E=1`，实测过）。全套 **205 通过 + 3 skipped**。
+  - 剩余（TD-03-T3 后半，需 agentpulse 会话）：把群讨论/回复热路径的执行从临时 DeepSeek 切成经 RunService 调 Hermes（员工↔profile 映射）+ approval 挂起/续跑闭环。
+
 ### 2026-07-10（TD-03-T2：HermesBackend —— 员工经 ACP 真执行）
 - **feat(runtime)**: `app/runtime/hermes_client.py` —— 让 AI 员工**真正跑起来**（照 [ADR 0007](docs/decisions/0007-hermes-v0.18-interface-acp.md) 走 ACP，不是 REST）。
   - 起 `hermes --profile <p> acp` 子进程，用官方 `agent-client-protocol==0.9.0`（已入 requirements）走 ACP（newline JSON-RPC，`use_unstable_protocol=True` 对齐 agent 侧）：`initialize` → `session/new(cwd=绝对 workdir)` → `session/prompt`。
