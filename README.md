@@ -10,7 +10,7 @@
 
 [什么是 AgentPulse](#-什么是-agentpulse) · [核心特性](#-核心特性) · [适合谁用](#-适合谁用) · [快速开始](#-快速开始) · [常见问题](#-常见问题) · [开发者](#-开发者)
 
-<!-- TODO: 此处放桌面工作台 hero 截图/演示 GIF（群聊讨论 + 共识纪要卡片 + 任务看板一屏） -->
+<img src="docs/images/hero-discussion.png" alt="AgentPulse 桌面工作台：AI 员工在群里讨论，生成共识纪要，等老板拍板后再开工" width="900" />
 
 </div>
 
@@ -50,6 +50,33 @@
 4. 你确认共识纪要    →  一键生成任务，员工开始执行
 5. 关键节点你拍板    →  发布前、花钱前，必须经过你
 ```
+
+## 🖼 界面预览
+
+> 桌面工作台（Electron + React），支持浅色 / 深色主题。以下为一家「小红书内容工作室」的真实使用场景。
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/tasks.png" alt="任务中心：谁在做、做到哪、什么状态一目了然" /><br />
+      <sub><b>任务中心</b> · 共识确认后自动生成任务，进度/负责人/状态全程留痕</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/talent-market.png" alt="人才市场：按岗位招募 AI 员工，确认技能与 MCP 后入职" /><br />
+      <sub><b>人才市场</b> · 按岗位招募 AI 员工，确认 Prompt / 技能 / MCP 后入职</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/images/ideas.png" alt="想法中心：空闲员工主动沉淀改进、机会、风险、学习" /><br />
+      <sub><b>想法中心</b> · 没有 idle 员工——空闲时也在攒改进 / 机会 / 风险 / 学习</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/images/hero-discussion-dark.png" alt="深色主题下的群讨论与共识纪要" /><br />
+      <sub><b>深色主题</b> · 同一套群讨论 + 共识纪要，深色「驾驶舱」质感</sub>
+    </td>
+  </tr>
+</table>
 
 ## 🚀 快速开始
 

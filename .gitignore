@@ -27,5 +27,6 @@ npm-debug.log*
 
 # local runtime data
 services/api/data/
+services/api/demo.db
 .hermes-verify/
 .dev-logs/
