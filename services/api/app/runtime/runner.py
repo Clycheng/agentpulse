@@ -10,18 +10,17 @@ it for non-streaming callers.
 Message/thinking deltas are buffered and stored once per turn (not per delta);
 tool activity + approvals get one step each — matching the run_steps design.
 
-TD-03-T4 suspension: when a Heremes backend fires ``request_permission``, the
-built-in ``_make_approval_resolver`` creates an ``approvals`` row + transitions
-the run to ``waiting_user``, then awaits an ``approval_bridge`` Future. The
-``/approvals/{id}/resolve`` HTTP endpoint wakes that Future, and the resolver
-returns ``allow_once`` / ``deny`` to the ACP callback — all without dropping the
-run's ACP connection across HTTP requests.
+TD-03-T4 suspension: when a Hermes backend fires ``request_permission`` it emits
+an ``approval_required`` event; ``stream_agent_run`` persists an ``approvals`` row
+(via ``_persist_run_approval``) and transitions the run to ``waiting_user`` /
+``waiting_clarify``, while the injected ``make_bridge_resolver`` awaits an
+``approval_bridge`` Future. The ``/approvals/{id}/resolve`` (or ``/answer``) HTTP
+endpoint wakes that Future, and the resolver returns ``allow_once`` / ``deny`` to
+the ACP callback — all without dropping the run's ACP connection across requests.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -36,7 +35,7 @@ from app.runtime.runs import (
     get_run,
     transition_run,
 )
-from app.services.workspace import add_message, new_id
+from app.services.workspace import add_message
 
 
 def _now_iso() -> str:
@@ -98,12 +97,6 @@ def _persist_run_approval(
     )
 
 
-def _now_iso() -> str:
-    from app.services.workspace import now_iso
-
-    return now_iso()
-
-
 def resolve_hermes_profile(conn: Database, agent_id: str) -> str | None:
     """Return the ready Hermes profile for an agent, or None (→ DeepSeek fallback)."""
     row = conn.execute(
@@ -120,94 +113,6 @@ def _chunk_text(payload: dict) -> str:
     if isinstance(content, dict):
         return content.get("text", "") or ""
     return ""
-
-
-def _make_approval_resolver(
-    conn: Database,
-    *,
-    run_id: str,
-    workspace_id: str,
-    conversation_id: str,
-    agent_id: str,
-    task_id: str | None,
-) -> Any:
-    """Build a ``permission_resolver`` for ``HermesBackend`` (TD-03-T4).
-
-    When Hermes hits a high-risk action (ACP ``request_permission``):
-    1. Create ``approvals`` row (type=high_risk) linked to this run.
-    2. Transition run status → ``waiting_user``.
-    3. Register a pending Future via ``approval_bridge``.
-    4. Block until ``/approvals/{id}/resolve`` wakes the Future.
-    5. On ``approved`` → transition back to ``running`` → return ``allow_once``.
-    6. On ``rejected``/timeout → transition to ``completed``/``failed`` → return ``deny``.
-
-    The resolver runs in the same event loop as the ACP stream, so awaiting a
-    Future is safe — the Future is woken via ``call_soon_threadsafe`` from the
-    sync HTTP handler.
-    """
-    from app.runtime.approval_bridge import (
-        discard_pending,
-        register_pending,
-    )
-
-    async def _resolve(info: dict) -> str:
-        now = _now_iso()
-        title = (
-            info.get("title")
-            or info.get("tool")
-            or info.get("function")
-            or "高风险操作"
-        )
-        tool_str = json.dumps(info, ensure_ascii=False)[:2000]
-
-        approval_id = new_id("appr")
-        conn.execute(
-            """INSERT INTO approvals
-               (id, workspace_id, conversation_id, agent_id, task_id,
-                title, description, status, risk_level, run_id, type, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'high', ?, 'high_risk', ?)""",
-            (
-                approval_id,
-                workspace_id,
-                conversation_id,
-                agent_id,
-                task_id,
-                f"审批：{title}",
-                tool_str,
-                run_id,
-                now,
-            ),
-        )
-        append_run_step(
-            conn,
-            run_id=run_id,
-            type=RunStepType.APPROVAL_REQUIRED,
-            payload={"approval_id": approval_id, "tool": info},
-        )
-        transition_run(conn, run_id, RunStatus.WAITING_USER)
-        conn.commit()
-
-        fut = register_pending(approval_id)
-        try:
-            decision = await asyncio.wait_for(fut, timeout=300)
-        except asyncio.TimeoutError:
-            discard_pending(approval_id)
-            transition_run(
-                conn, run_id, RunStatus.FAILED, error="approval timed out"
-            )
-            conn.commit()
-            return "deny"
-
-        if decision == "approved":
-            transition_run(conn, run_id, RunStatus.RUNNING)
-            conn.commit()
-            return "allow_once"
-        else:
-            transition_run(conn, run_id, RunStatus.COMPLETED)
-            conn.commit()
-            return "deny"
-
-    return _resolve
 
 
 async def stream_agent_run(

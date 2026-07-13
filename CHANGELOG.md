@@ -5,14 +5,51 @@
 
 ## [Unreleased]
 
-### 2026-07-13（TD-03-T4：审批 suspend/resume 闭环）
+### 2026-07-13（清理：合并两套 TD-03-T4 的残留债务）
+- **chore(cleanup)**: 两个会话平行实现了 TD-03-T4，快进合并后留下债务，本次清理（方向未跑偏——三条架构 grep 干净、生产路径已收敛到 `make_bridge_resolver`）：
+  - 删除死码 `runner._make_approval_resolver`（已被 `make_bridge_resolver`+`_persist_run_approval` 取代、不在生产路径）及其 `tests/test_approval_suspend.py`（258 行只测死码，正是 AGENTS.md §5 警告的反模式）；去掉 `runner.py` 重复定义的 `_now_iso` 与随之无用的 `asyncio`/`json`/`new_id` import。
+  - 恢复被 `a7d3227` 从 CHANGELOG 误删的 5 条 2026-07-13 记录（下列 T4/TD-06-T1/TD-08-T2/许可证/截图）。
+  - 全套 **测试通过、零回归**。
 
-- **feat(runtime+api)**: 完成高风审批 suspend/resume 闭环。Hermes ACP `request_permission` 触发时，不再简单 deny，而是：
-  - `runner._make_approval_resolver()` 新建 `approvals` 行（type=high_risk）+ `append_run_step` → `transition_run(run_id, waiting_user)` → **Future 挂起**（`approval_bridge.register_pending`）。
-  - `stream_agent_run` 在 `create_run` 后自动构建此 resolver（有 workspace/conversation 时），route 层无需手动传参。
-  - `/approvals/{id}/resolve` 改造成识别 run 级审批：有 `run_id` 且 `type=high_risk` 时调 `resolve_pending` 唤醒 Future → resolver 返回 `allow_once`（run 续跑）或 `deny`（run 结束）。
-  - SOUL 模板铁律增强：要求使用 `clarify` 工具提问澄清、高风险操作走 `approval` 流程等待审批。
-  - 3 新单测（批准/驳回/全流集成）+ **210 全部通过，零回归**。
+### 2026-07-13（TD-03-T4：审批 suspend/resume + 求援 —— 北极星「老板拍板制」双向闭环）
+- **feat(runtime+api)**: 高风险动作现在能**挂起 run → 等老板批 → 原地续跑同一个 run**（此前是 deny-by-default 只能拒）。
+  - `runtime/approval_bridge.py`：进程内 Future 注册表（单 uvicorn 进程）。`await_decision(approval_id)` 挂起、`resolve_pending(approval_id, decision)` 用 `call_soon_threadsafe` 线程安全唤醒。因 ACP 是 stdio 子进程、run 状态活在子进程里，**只能唤醒活协程、不能 detach 重连**——所以续跑=唤醒挂起中的 `request_permission`，不是重发 Hermes。
+  - `hermes_client.py`：`request_permission` 生成 `approval_id`、发 `approval_required` 事件（带 approval_id + category）、`await permission_resolver(...)` **原地挂起**（ACP 会话与 run 一起停住），拿到决定再映射成 allow/deny 选项返回；run() 事件循环在挂起期**禁用超时**。
+  - `runner.py`：`make_bridge_resolver()`（resolver 注册并 await 桥）；`stream_agent_run` 收到 approval_required → 落 `approvals`(带 `run_id`+`type`) + 转 run 到 `waiting_user`/`waiting_clarify` + commit + 推 SSE。`_persist_run_approval` 按 category 生成标题/风险级。
+  - 热路径 `_stream_reply_events` 注入 `make_bridge_resolver()`，员工高危动作真正挂起等批（idle/reflection 仍传 None → deny-by-default，安全）。
+  - `/api/approvals/{id}/resolve`：run 关联审批 → 转 run 回 `running` + `resolve_pending(allow_once/deny)`，**跳过**旧的"审批即完成任务"逻辑（那是给非 run 的手动审批卡的）；批准→agent 续跑执行，驳回→agent 收到 reject 走替代/收尾。
+  - `/api/approvals/{id}/answer`（新）：clarification 类——记录答复为会话消息 + 唤醒续跑。**已知限制**：ACP permission 响应只带 allow/deny，答复**文本**目前经会话历史带回（agent 下一轮读到），真·inline 注入待 Hermes resume API，跟进项。
+  - SOUL 已含"需求不清先问 / 高危等老板"铁律（无需改）。
+  - **零回归**：`test_approval_flow.py` 9 例（桥 await/resolve、未知 resolve 返回 False、fake backend 全链路挂起→approve 续跑 / deny 走替代、resolve 端点转 run、answer 记录消息+续跑、非 clarification /answer→404）。三条架构 grep 干净。
+  - Verified: make_bridge_resolver 经生产路径 `workspace.py::_stream_reply_events` → `stream_agent_run` 注入；resolve/answer 经 `POST /api/approvals/{id}/resolve|answer` 驱动 `approval_bridge.resolve_pending`。
+
+### 2026-07-13（TD-06-T1：技能自动沉淀 —— 北极星④「越用越懂你」后端闭环）
+- **feat(runtime)**: `app/runtime/reflection.py` —— 员工把最近工作提炼成可复用技能，沉淀进自己的 Hermes profile。
+  - `_summarize_recent_steps`：拉该员工最近 N 个 completed run 的 `run_steps`（tool_call/tool_result/message/final）压成流水文本。
+  - `run_reflection`：注入提炼 prompt（强制严格 JSON）→ 经员工自己的 Hermes profile 执行 → `parse_skills` 容错解析（去围栏/取数组/校验/裁剪/最多 3 条）→ 逐条 `ProfileProvisioner.update_skill` 写进 profile `skills/auto/<name>.md` → 重置 `runs_since_last_reflection` + stamp `last_skill_reflection_at`（空输出/后端异常/无流水也会 stamp，不 hot-loop）。不绑会话、不建 runs 行。
+  - `bump_reflection_counter`：`runner.stream_agent_run` 每完成一个 run 给该 agent +1，到 `reflection_interval`（默认 5）触发；实际反思由后台 `run_reflection_tick` 跑（off hot path）。
+  - `ProfileProvisioner` 加 `update_skill` / `list_skills`（RecordOnly 记内存 + LocalHermes 读写 `skills/auto/`；**修复**：全中文技能名会 sanitize 成空导致文件名 `skill.md` 互相覆盖 → 空 slug 时用名字 sha1 哈希保唯一）。
+  - schema：`agent_specs` 加 `runs_since_last_reflection`/`last_skill_reflection_at`/`reflection_interval`（双 schema，ensure_column 迁移）。
+  - API：`GET /api/agents/{id}/skills`（成长轨迹）+ `POST /api/agents/{id}/reflect`（手动触发，调试/演示）。
+  - SOUL：`_build_soul` 追加"每完成一项任务就用 skills.learn 记一条经验"的自我进步指令。
+  - cron：后台循环在 idle tick 后追加 `run_reflection_tick`（复用 `idle_thinking_cron` 开关 + 同一 backend/provisioner）。
+  - **真机验证**：LocalHermesProvisioner 对真 agentpulse profile 的 `update_skill`/`list_skills` 物理写读通过（并清理）；`test_run_reflection_real_hermes`（`HERMES_E2E=1`）跑通。
+  - **零回归**：新增 `test_reflection.py` 14 单测；三条架构 grep 干净。
+  - 偏差说明：TD-06 设计里的 `run_steps(type='skill_learned')` 因 `run_steps.type` 有 CHECK 白名单**暂略**；技能可见性改由 `GET /skills` 读 profile 技能目录提供，不影响 DoD。
+  - Verified: bump_reflection_counter 经生产路径 `runner.stream_agent_run` 完成分支调用；run_reflection 经 `POST /api/agents/{id}/reflect` 与后台 `main.py::_idle_cron_loop` 驱动。
+
+### 2026-07-13（TD-08-T2：空闲员工主动想 idea —— 北极星⑤后端闭环）
+- **feat(runtime)**: `app/runtime/idle_think.py` —— 落地"没有 idle 员工"：员工空闲够久就自发反思并产出 idea。
+  - `find_due_idle_agents`：选出符合条件的员工（`agent_specs.status='ready'` + `idle_thinking_enabled` + 有 `hermes_profile` + 距 `last_idle_think_at` 超过 `idle_think_interval_hours` + 无活跃 run）。
+  - `trigger_reflection`：注入反思 prompt（改进/机会/风险/学习，强制严格 JSON 输出）→ 经与 RunService 相同的 `RunBackend` 接口调 Hermes → `parse_ideas` 容错解析 → 写入 `ideas` 表 → stamp `last_idle_think_at`。空数组/解析失败/后端异常都会 stamp 且不抛，避免 cron hot-loop。不绑会话、不建 runs 行。
+  - `run_idle_tick`：一轮扫描所有 due 员工逐个反思，返回 `{agents_processed, ideas_created}`。
+  - cron：`main.py` startup 起后台 asyncio 循环，`config.py` 加 `idle_thinking_cron`（默认 false）+ `idle_cron_interval_seconds`（默认 3600）；默认关，测试/无 Hermes 环境不受影响。
+  - **零回归**：新增 `test_idle_think.py` 12 常开单测 + 1 guarded e2e（`HERMES_E2E=1`，真机跑通）。三条架构 grep 干净。
+  - Verified: run_idle_tick 经生产路径 `main.py::_idle_cron_loop`（startup 后台循环，`idle_thinking_cron` 开启时）驱动。
+
+### 2026-07-13（许可证改用 PolyForm Noncommercial + README 截图）
+- **docs(license)**: 把自写的"学习免费/商业需授权"自定义协议换成业界成熟标准 **[PolyForm Noncommercial License 1.0.0](LICENSE)**（非商业用途免费、商业另需授权），法律措辞更规范可靠。商业授权联系方式从 README 移到独立的 [COMMERCIAL.md](COMMERCIAL.md)；README 不再出现商业授权招揽内容，License 徽章/段落同步更新。
+- **docs(readme)**: 新增桌面工作台真实截图——顶部 hero（群讨论 → 共识纪要 → 老板拍板）+「界面预览」画廊（任务中心 / 人才市场 / 想法中心 / 深色主题），图存 `docs/images/`。截图前把后端(SQLite)+前端端到端跑通并走查了登录→群讨论→共识纪要卡→任务→人才市场→想法全流程，生产 UI 路径均正常。
 
 ### 2026-07-10（TD-03-T5：自动供给 —— 招人即真员工）
 - **feat(api+runtime)**: 招一个员工（带 role_spec）就自动创建一个**可运行的 Hermes profile**，热路径随即自动路由到它——不再手动置 spec。
