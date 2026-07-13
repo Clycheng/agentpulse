@@ -286,6 +286,7 @@ def init_postgres(conn: Database) -> None:
         CREATE TABLE IF NOT EXISTS approvals (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
           task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
           conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
           agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
@@ -293,6 +294,9 @@ def init_postgres(conn: Database) -> None:
           description TEXT NOT NULL DEFAULT '',
           status TEXT NOT NULL DEFAULT 'pending',
           risk_level TEXT NOT NULL DEFAULT 'medium',
+          type TEXT NOT NULL DEFAULT 'high_risk'
+            CHECK(type IN ('high_risk','clarification','capability_upgrade')),
+          payload_json TEXT NOT NULL DEFAULT '{}',
           resolved_by TEXT NOT NULL DEFAULT '',
           resolved_at TEXT,
           created_at TEXT NOT NULL
@@ -448,6 +452,9 @@ def init_postgres(conn: Database) -> None:
         "type",
         "TEXT NOT NULL DEFAULT 'high_risk' "
         "CHECK(type IN ('high_risk','clarification','capability_upgrade'))",
+    )
+    ensure_column(
+        conn, "approvals", "payload_json", "TEXT NOT NULL DEFAULT '{}'"
     )
     ensure_column(conn, "agents", "hermes_gateway_port", "INTEGER")
     # TD-08-T1: idea center (idle reflection). idle_thinking_enabled stored as
@@ -634,6 +641,7 @@ def init_sqlite(conn: Database) -> None:
         CREATE TABLE IF NOT EXISTS approvals (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
           task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
           conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
           agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
@@ -641,6 +649,9 @@ def init_sqlite(conn: Database) -> None:
           description TEXT NOT NULL DEFAULT '',
           status TEXT NOT NULL DEFAULT 'pending',
           risk_level TEXT NOT NULL DEFAULT 'medium',
+          type TEXT NOT NULL DEFAULT 'high_risk'
+            CHECK(type IN ('high_risk','clarification','capability_upgrade')),
+          payload_json TEXT NOT NULL DEFAULT '{}',
           resolved_by TEXT NOT NULL DEFAULT '',
           resolved_at TEXT,
           created_at TEXT NOT NULL
@@ -796,6 +807,9 @@ def init_sqlite(conn: Database) -> None:
         "type",
         "TEXT NOT NULL DEFAULT 'high_risk' "
         "CHECK(type IN ('high_risk','clarification','capability_upgrade'))",
+    )
+    ensure_column(
+        conn, "approvals", "payload_json", "TEXT NOT NULL DEFAULT '{}'"
     )
     ensure_column(conn, "agents", "hermes_gateway_port", "INTEGER")
     # TD-08-T1: idea center (idle reflection). idle_thinking_enabled stored as
