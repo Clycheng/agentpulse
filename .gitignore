@@ -31,3 +31,4 @@ services/api/demo.db
 .hermes-verify/
 .hermes-data/
 .dev-logs/
+*.sqlite3
