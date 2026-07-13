@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 2026-07-13（TD-03-T4：审批 suspend/resume + 求援 —— 北极星「老板拍板制」双向闭环）
+- **feat(runtime+api)**: 高风险动作现在能**挂起 run → 等老板批 → 原地续跑同一个 run**（此前是 deny-by-default 只能拒）。
+  - `runtime/approval_bridge.py`：进程内 Future 注册表（单 uvicorn 进程）。`await_decision(approval_id)` 挂起、`resolve_pending(approval_id, decision)` 用 `call_soon_threadsafe` 线程安全唤醒。因 ACP 是 stdio 子进程、run 状态活在子进程里，**只能唤醒活协程、不能 detach 重连**——所以续跑=唤醒挂起中的 `request_permission`，不是重发 Hermes。
+  - `hermes_client.py`：`request_permission` 生成 `approval_id`、发 `approval_required` 事件（带 approval_id + category）、`await permission_resolver(...)` **原地挂起**（ACP 会话与 run 一起停住），拿到决定再映射成 allow/deny 选项返回；run() 事件循环在挂起期**禁用超时**。
+  - `runner.py`：`make_bridge_resolver()`（resolver 注册并 await 桥）；`stream_agent_run` 收到 approval_required → 落 `approvals`(带 `run_id`+`type`) + 转 run 到 `waiting_user`/`waiting_clarify` + commit + 推 SSE。`_persist_run_approval` 按 category 生成标题/风险级。
+  - 热路径 `_stream_reply_events` 注入 `make_bridge_resolver()`，员工高危动作真正挂起等批（idle/reflection 仍传 None → deny-by-default，安全）。
+  - `/api/approvals/{id}/resolve`：run 关联审批 → 转 run 回 `running` + `resolve_pending(allow_once/deny)`，**跳过**旧的"审批即完成任务"逻辑（那是给非 run 的手动审批卡的）；批准→agent 续跑执行，驳回→agent 收到 reject 走替代/收尾。
+  - `/api/approvals/{id}/answer`（新）：clarification 类——记录答复为会话消息 + 唤醒续跑。**已知限制**：ACP permission 响应只带 allow/deny，答复**文本**目前经会话历史带回（agent 下一轮读到），真·inline 注入待 Hermes resume API，跟进项。
+  - SOUL 已含"需求不清先问 / 高危等老板"铁律（无需改）。
+  - **零回归**：新增 `test_approval_flow.py` 9 例（桥 await/resolve、未知 resolve 返回 False、fake backend 全链路挂起→approve 续跑 / deny 走替代、resolve 端点转 run、answer 记录消息+续跑、非 clarification /answer→404）；全套 **237 通过 + 7 skipped**。三条架构 grep 干净。
+  - 说明：`approval_bridge.py` 的进程内桥设计沿用了另一会话留在主 worktree 的未提交草稿（同一仓库），在其上补齐了 HermesBackend/RunService/端点集成与测试。
+  - Verified: make_bridge_resolver 经生产路径 `workspace.py::_stream_reply_events` → `stream_agent_run` 注入；resolve/answer 经 `POST /api/approvals/{id}/resolve|answer` 驱动 `approval_bridge.resolve_pending`。
+
 ### 2026-07-13（TD-06-T1：技能自动沉淀 —— 北极星④「越用越懂你」后端闭环）
 - **feat(runtime)**: `app/runtime/reflection.py` —— 员工把最近工作提炼成可复用技能，沉淀进自己的 Hermes profile。
   - `_summarize_recent_steps`：拉该员工最近 N 个 completed run 的 `run_steps`（tool_call/tool_result/message/final）压成流水文本。

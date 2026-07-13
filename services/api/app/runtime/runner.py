@@ -33,6 +33,63 @@ class RunBackend(Protocol):
     def run(self, ctx: RunContext, *, permission_resolver: Any = None): ...
 
 
+def make_bridge_resolver():
+    """Permission resolver that suspends the run until the owner resolves it.
+
+    Registers a Future on the in-process approval bridge keyed by the request's
+    approval_id and awaits it, so the ACP session (and the run) stays paused in
+    place. Returns the owner's decision string ("allow_once" | "deny").
+    """
+    from app.runtime.approval_bridge import await_decision
+
+    async def resolver(info: dict) -> str:
+        return await await_decision(info["approval_id"])
+
+    return resolver
+
+
+def _persist_run_approval(
+    conn: Database, *, approval_id: str, ctx: RunContext, run_id: str,
+    category: str, payload: dict,
+) -> None:
+    """Insert a pending approval row keyed to this exact permission request."""
+    tool = payload.get("tool_call") or {}
+    tool_name = str(tool.get("title") or tool.get("name") or "高风险动作")
+    if category == "clarification":
+        title = "员工请求澄清"
+        description = str(tool.get("question") or tool.get("text") or tool_name)
+    else:
+        title = f"高风险动作需确认：{tool_name}"
+        description = str(tool.get("text") or tool_name)
+    conn.execute(
+        """
+        INSERT INTO approvals (
+          id, workspace_id, task_id, conversation_id, agent_id,
+          title, description, status, risk_level, type, run_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+        """,
+        (
+            approval_id,
+            ctx.workspace_id,
+            ctx.task_id or None,
+            ctx.conversation_id or None,
+            ctx.agent_id or None,
+            title,
+            description,
+            "high" if category != "clarification" else "low",
+            "clarification" if category == "clarification" else "high_risk",
+            run_id,
+            _now_iso(),
+        ),
+    )
+
+
+def _now_iso() -> str:
+    from app.services.workspace import now_iso
+
+    return now_iso()
+
+
 def resolve_hermes_profile(conn: Database, agent_id: str) -> str | None:
     """Return the ready Hermes profile for an agent, or None (→ DeepSeek fallback)."""
     row = conn.execute(
@@ -115,6 +172,23 @@ async def stream_agent_run(
                     conn, run_id=run_id, type=RunStepType.APPROVAL_REQUIRED,
                     payload=event.payload,
                 )
+                approval_id = event.payload.get("approval_id")
+                category = event.payload.get("category", "high_risk")
+                if approval_id:
+                    # TD-03-T4: persist an approval and suspend the run; the ACP
+                    # session stays paused (resolver awaits the bridge) until the
+                    # owner resolves, which resumes this same run in place.
+                    _persist_run_approval(
+                        conn, approval_id=approval_id, ctx=ctx, run_id=run_id,
+                        category=category, payload=event.payload,
+                    )
+                    waiting = (
+                        RunStatus.WAITING_CLARIFY
+                        if category == "clarification"
+                        else RunStatus.WAITING_USER
+                    )
+                    transition_run(conn, run_id, waiting)
+                    conn.commit()
                 yield {"type": "approval_required", "payload": event.payload}
             elif etype == "usage":
                 usage = event.payload

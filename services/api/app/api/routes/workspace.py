@@ -2,7 +2,7 @@ import json
 import os
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from starlette.responses import StreamingResponse
 
 from app.api.deps import get_current_user
@@ -10,9 +10,15 @@ from app.core.config import settings
 from app.core.database import Database, Row, get_db
 from app.runtime.deepseek import DeepSeekAPIError, DeepSeekChatClient, DeepSeekNotConfigured
 from app.runtime.hermes_client import HermesBackend, RunContext
-from app.runtime.runner import resolve_hermes_profile, stream_agent_run
+from app.runtime.runner import (
+    make_bridge_resolver,
+    resolve_hermes_profile,
+    stream_agent_run,
+)
 from app.runtime.profile_provisioner import build_provisioner_from_settings
 from app.runtime.reflection import run_reflection
+from app.runtime import approval_bridge
+from app.runtime.runs import RunStatus, RunStateError, transition_run
 from app.schemas.run import (
     LlmAgentExperience,
     LlmChatAgent,
@@ -1002,6 +1008,23 @@ def resolve_approval(
             workspace["id"],
         ),
     )
+    # TD-03-T4: run-linked approval → wake the suspended Hermes run in place.
+    # (These are Tirith high-risk gates, not the manual task-completion cards, so
+    # they must NOT auto-complete a task — the agent resumes and does that.)
+    run_id = approval["run_id"]
+    if run_id:
+        decision = "allow_once" if payload.status == "approved" else "deny"
+        try:
+            transition_run(conn, run_id, RunStatus.RUNNING)
+            conn.commit()
+        except RunStateError:
+            pass  # run already moved on (completed/failed); still wake the bridge
+        approval_bridge.resolve_pending(approval_id, decision)
+        updated = conn.execute(
+            "SELECT * FROM approvals WHERE id = ?", (approval_id,)
+        ).fetchone()
+        return serialize_approval(updated)
+
     task_id = approval["task_id"]
     if task_id:
         add_task_event(
@@ -1035,6 +1058,63 @@ def resolve_approval(
                 changes={"status": "阻塞", "progress": 80},
             )
 
+    updated = conn.execute(
+        "SELECT * FROM approvals WHERE id = ?", (approval_id,)
+    ).fetchone()
+    return serialize_approval(updated)
+
+
+@router.post("/approvals/{approval_id}/answer")
+def answer_clarification(
+    approval_id: str,
+    answer: str = Body(..., embed=True),
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    """TD-03-T4: answer an employee's clarification request and resume its run.
+
+    The answer is recorded as a chat message (so it enters conversation history)
+    and the suspended run is woken to continue. NOTE: ACP permission responses
+    carry only allow/deny, so the paused run resumes as "proceed" rather than
+    receiving the answer text inline — the employee picks the answer up from
+    conversation history on its next turn. Full inline injection needs a Hermes
+    resume API and is tracked as a follow-up.
+    """
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    approval = conn.execute(
+        "SELECT * FROM approvals WHERE id = ? AND workspace_id = ? AND type = 'clarification'",
+        (approval_id, workspace["id"]),
+    ).fetchone()
+    if approval is None:
+        raise HTTPException(status_code=404, detail="澄清请求不存在")
+    if approval["status"] != "pending":
+        raise HTTPException(status_code=409, detail="澄清请求已处理")
+
+    conn.execute(
+        "UPDATE approvals SET status = 'answered', resolved_by = ?, resolved_at = ? "
+        "WHERE id = ?",
+        (current_user["id"], now_iso(), approval_id),
+    )
+    if approval["conversation_id"]:
+        add_message(
+            conn,
+            conversation_id=approval["conversation_id"],
+            sender_type="user",
+            sender_id=current_user["id"],
+            content=answer,
+        )
+    run_id = approval["run_id"]
+    if run_id:
+        try:
+            transition_run(conn, run_id, RunStatus.RUNNING)
+        except RunStateError:
+            pass
+        conn.commit()
+        approval_bridge.resolve_pending(approval_id, "allow_once")
+    else:
+        conn.commit()
     updated = conn.execute(
         "SELECT * FROM approvals WHERE id = ?", (approval_id,)
     ).fetchone()
@@ -1137,6 +1217,7 @@ async def _stream_reply_events(
             ctx=ctx,
             backend=HermesBackend(hermes_bin=settings.hermes_bin),
             input_message_id=user_message["id"],
+            permission_resolver=make_bridge_resolver(),  # TD-03-T4: suspend/resume
         ):
             yield event
         return

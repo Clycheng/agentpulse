@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -100,10 +101,22 @@ def _make_client(
                 info = tool_call.model_dump(by_alias=True, exclude_none=True)
             except Exception:
                 info = {"repr": repr(tool_call)}
-            await queue.put(AgentEvent("approval_required", {"tool_call": info}))
+            # Correlate the emitted event with the resolver's wait via one id, so
+            # RunService can persist an approval row keyed to this exact request
+            # and the /resolve endpoint can wake the same suspended run.
+            approval_id = "appr_" + secrets.token_hex(8)
+            category = str(info.get("category") or "high_risk")
+            await queue.put(
+                AgentEvent(
+                    "approval_required",
+                    {"approval_id": approval_id, "category": category, "tool_call": info},
+                )
+            )
             decision = "deny"
             if permission_resolver is not None:
-                decision = await permission_resolver(info)
+                decision = await permission_resolver(
+                    {"approval_id": approval_id, "category": category, **info}
+                )
             # Options offer kinds allow_once/allow_always/reject_once/reject_always.
             # A decision always resolves to one of the OFFERED options (safe default
             # = a reject option). The client always selects; it never leaves the
@@ -227,16 +240,21 @@ class HermesBackend:
             return AgentEvent("final", {"stop_reason": str(stop)})
 
         drive_task = asyncio.create_task(drive())
+        suspended = False  # awaiting owner approval — don't apply the run timeout
         try:
             while True:
                 queue_get = asyncio.create_task(queue.get())
                 done, _ = await asyncio.wait(
                     {queue_get, drive_task},
-                    timeout=ctx.timeout,
+                    timeout=None if suspended else ctx.timeout,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if queue_get in done:
-                    yield queue_get.result()
+                    ev = queue_get.result()
+                    # An approval request suspends the run until the owner resolves
+                    # it (could take minutes); resumption arrives as the next event.
+                    suspended = ev.type == "approval_required"
+                    yield ev
                     continue
                 queue_get.cancel()
                 if drive_task in done:
