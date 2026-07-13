@@ -11,7 +11,7 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | [TD-06-T2](TD-06-agent-self-evolution.md)(主动能力升级申请) | approvals.payload_json schema done; next: ProfileProvisioner add_capability/reload_gateway | **agentpulse** | 🔵 进行中(step 1/6) |
+| 1 | [TD-06-T2](TD-06-agent-self-evolution.md)(主动能力升级申请) | approvals.payload_json schema done; +add_capability/reload_gateway to ProfileProvisioner | **agentpulse** | 🔵 进行中(step 2/6) |
 | 2 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
 
 ## 有依赖，等前置完成后做
