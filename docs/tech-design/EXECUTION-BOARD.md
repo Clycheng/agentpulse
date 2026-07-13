@@ -11,7 +11,7 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | [TD-03-T3](TD-03-hermes-execution.md) | **RunService + 替换执行层**：消费 `HermesBackend.run()` 事件流 → 写 `run_steps` + 结果回写 message/task；把群讨论/回复的执行从临时 DeepSeek 切到 Hermes；approval_required→approvals 挂起、老板批准后续跑 | **agentpulse**(起 Hermes) | ⚪ 待领 |
+| 1 | [TD-03-T3 **剩余**](TD-03-hermes-execution.md) | **热路径切换 + 审批闭环**：RunService 写半已完成✅（run→run_steps→回写 message，真机过）；剩：把群讨论/回复的执行从临时 DeepSeek 切成经 RunService 调 Hermes（员工↔profile 映射）+ approval_required 挂起 waiting_user→老板批准续跑 | **agentpulse**(起 Hermes) | ⚪ 待领 |
 | 2 | [TD-01-T2/T3](TD-01-verify-and-harden-slice-1.md) | 端到端手测：brief 全流程 + 多 agent 讨论流(起后端+桌面端真跑一遍；TD-02-T5 已重构完，现在测的就是最终路径) | **agentpulse** | ⚪ 待领 |
 
 ## 有依赖，等前置完成后做
@@ -33,6 +33,7 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| **TD-03-T3 写半：RunService**（`runtime/runner.py`）：`start_run` 消费 backend 事件流→按 TD-03-T1 生命周期建 run/转状态、聚合 thinking/message 各落 1 run_step、tool 逐条落、结果写回 agent message；**真机 e2e 过**（RunService→HermesBackend→真 Hermes→run_steps+message"OK"）。2 常开(fake backend)+1 guarded e2e；全套 205 过 | 2026-07-10(见 CHANGELOG) | 剩热路径切换+审批闭环 |
 | **TD-03-T2 HermesBackend（ACP 传输）**：`runtime/hermes_client.py`——起 `hermes --profile <p> acp` 子进程、用 `agent-client-protocol==0.9.0` 走 ACP、把 session_update 流映射成 `AgentEvent`(message/thinking/tool_call/tool_result/approval_required/usage/final)；approval→选 offered option；fs 读写限制在 workdir 内(ADR 0005)。**真机 e2e 实测通过**：agentpulse profile 跑"reply OK"→收到 thinking 流+message"OK"+usage+final。3 e2e 单测(HERMES_E2E=1) + 2 常开安全测；全套 203 过 | 2026-07-10(见 CHANGELOG) | agent-client-protocol 入 requirements |
 | **Hermes 接入地基**：本机 Hermes v0.18.2 验证——真实 DeepSeek key 经 isolated profile 一次性跑通("OK")；**发现 REST /v1/runs 已不存在**→ 新增 [ADR 0007](../decisions/0007-hermes-v0.18-interface-acp.md)(改用 ACP 传输、作废端口模型)；实现 **TD-04-T6 `LocalHermesProvisioner`**(真 CLI 建/配/删 profile，强制绝对 workdir)+ 2 always-on 安全单测 + 1 guarded e2e(HERMES_E2E=1 实测过) | 2026-07-10(见 CHANGELOG) | 201 测试全过；DeepSeek key 存 gitignored .env |
 | Idea 中心前端（TD-08-T3 前端半）：桌面端新增「想法」视图（侧栏入口 + 摘要 + 分类过滤 + 想法卡片 + 接受/忽略/转为讨论）；转为讨论走 `/api/ideas/{id}/convert` 后自动重载并跳进新群。接 TD-08-T1 API | 2026-07-10(见 CHANGELOG) | 纯前端；tsc 无错、浏览器实测 seed 2 条→列出→转讨论跳转全走通、无 console 报错。idle 自动生成 idea 仍等 Hermes(TD-08-T2) |
