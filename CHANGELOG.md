@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### 2026-07-13（TD-06-T1：技能自动沉淀 —— 北极星④「越用越懂你」后端闭环）
+- **feat(runtime)**: `app/runtime/reflection.py` —— 员工把最近工作提炼成可复用技能，沉淀进自己的 Hermes profile。
+  - `_summarize_recent_steps`：拉该员工最近 N 个 completed run 的 `run_steps`（tool_call/tool_result/message/final）压成流水文本。
+  - `run_reflection`：注入提炼 prompt（强制严格 JSON）→ 经员工自己的 Hermes profile 执行 → `parse_skills` 容错解析（去围栏/取数组/校验/裁剪/最多 3 条）→ 逐条 `ProfileProvisioner.update_skill` 写进 profile `skills/auto/<name>.md` → 重置 `runs_since_last_reflection` + stamp `last_skill_reflection_at`（空输出/后端异常/无流水也会 stamp，不 hot-loop）。不绑会话、不建 runs 行。
+  - `bump_reflection_counter`：`runner.stream_agent_run` 每完成一个 run 给该 agent +1，到 `reflection_interval`（默认 5）触发；实际反思由后台 `run_reflection_tick` 跑（off hot path）。
+  - `ProfileProvisioner` 加 `update_skill` / `list_skills`（RecordOnly 记内存 + LocalHermes 读写 `skills/auto/`；**修复**：全中文技能名会 sanitize 成空导致文件名 `skill.md` 互相覆盖 → 空 slug 时用名字 sha1 哈希保唯一）。
+  - schema：`agent_specs` 加 `runs_since_last_reflection`/`last_skill_reflection_at`/`reflection_interval`（双 schema，ensure_column 迁移）。
+  - API：`GET /api/agents/{id}/skills`（成长轨迹）+ `POST /api/agents/{id}/reflect`（手动触发，调试/演示）。
+  - SOUL：`_build_soul` 追加"每完成一项任务就用 skills.learn 记一条经验"的自我进步指令。
+  - cron：后台循环在 idle tick 后追加 `run_reflection_tick`（复用 `idle_thinking_cron` 开关 + 同一 backend/provisioner）。
+  - **真机验证**：LocalHermesProvisioner 对真 agentpulse profile 的 `update_skill`/`list_skills` 物理写读通过（并清理）；`test_run_reflection_real_hermes`（`HERMES_E2E=1`）跑通。
+  - **零回归**：新增 `test_reflection.py` 14 单测（parse/counter/due 选取/reflection 落技能+重置/无流水跳过/后端异常仍 stamp/tick 汇总/中文文件名不碰撞）；全套 **230 通过 + 7 skipped**。三条架构 grep 干净。
+  - 偏差说明：TD-06 设计里的 `run_steps(type='skill_learned')` 因 `run_steps.type` 有 CHECK 白名单（不含该值、SQLite 改 CHECK 需重建表、且可能撞在做的 T4/T6）**暂略**；技能可见性改由 `GET /skills` 读 profile 技能目录提供，不影响 DoD。
+  - Verified: bump_reflection_counter 经生产路径 `runner.stream_agent_run` 完成分支调用；run_reflection 经 `POST /api/agents/{id}/reflect` 与后台 `main.py::_idle_cron_loop` 驱动。
+
 ### 2026-07-13（TD-08-T2：空闲员工主动想 idea —— 北极星⑤后端闭环）
 - **feat(runtime)**: `app/runtime/idle_think.py` —— 落地"没有 idle 员工"：员工空闲够久就自发反思并产出 idea。
   - `find_due_idle_agents`：选出符合条件的员工（`agent_specs.status='ready'` + `idle_thinking_enabled` + 有 `hermes_profile` + 距 `last_idle_think_at` 超过 `idle_think_interval_hours` + 无活跃 run）。

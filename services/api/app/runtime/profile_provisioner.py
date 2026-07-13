@@ -9,7 +9,9 @@ See TD-04 for design details.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,6 +67,14 @@ class ProfileProvisioner(Protocol):
         """
         ...
 
+    def update_skill(self, profile_name: str, skill_name: str, content: str) -> None:
+        """Persist an auto-learned skill (TD-06-T1) into the profile."""
+        ...
+
+    def list_skills(self, profile_name: str) -> list[dict]:
+        """List auto-learned skills for a profile ({name, content})."""
+        ...
+
 
 class RecordOnlyProvisioner:
     """Provisioner that records all actions without side effects.
@@ -75,6 +85,7 @@ class RecordOnlyProvisioner:
 
     def __init__(self) -> None:
         self.actions: list[ProvisioningAction] = []
+        self.skills: dict[str, dict[str, str]] = {}
 
     def create_profile(self, profile_name: str) -> None:
         self.actions.append(
@@ -134,6 +145,22 @@ class RecordOnlyProvisioner:
             )
         )
 
+    def update_skill(self, profile_name: str, skill_name: str, content: str) -> None:
+        self.skills.setdefault(profile_name, {})[skill_name] = content
+        self.actions.append(
+            ProvisioningAction(
+                action="update_skill",
+                profile_name=profile_name,
+                details={"skill_name": skill_name, "content_length": len(content)},
+            )
+        )
+
+    def list_skills(self, profile_name: str) -> list[dict]:
+        return [
+            {"name": name, "content": content}
+            for name, content in self.skills.get(profile_name, {}).items()
+        ]
+
     def get_actions(self) -> list[ProvisioningAction]:
         """Return recorded actions (for test assertions)."""
         return list(self.actions)
@@ -141,6 +168,7 @@ class RecordOnlyProvisioner:
     def clear(self) -> None:
         """Clear recorded actions."""
         self.actions.clear()
+        self.skills.clear()
 
 
 class HermesProvisionError(RuntimeError):
@@ -265,6 +293,38 @@ class LocalHermesProvisioner:
         with env_path.open("a", encoding="utf-8") as handle:
             for key, value in creds.items():
                 handle.write(f"{key}={value}\n")
+
+    def _auto_skills_dir(self, profile_name: str) -> Path:
+        return self._profile_dir(profile_name) / "skills" / "auto"
+
+    @staticmethod
+    def _skill_filename(skill_name: str) -> str:
+        safe = re.sub(r"[^a-zA-Z0-9_-]+", "-", skill_name.strip()).strip("-").lower()
+        if not safe:
+            # All-CJK (or otherwise non-ASCII) names sanitize to empty; hash the
+            # original so distinct names get distinct files instead of colliding.
+            digest = hashlib.sha1(skill_name.strip().encode("utf-8")).hexdigest()[:10]
+            safe = f"skill-{digest}"
+        return safe[:64] + ".md"
+
+    def update_skill(self, profile_name: str, skill_name: str, content: str) -> None:
+        # TD-06-T1: auto-learned skills live under skills/auto/ as SKILL.md fragments.
+        skills_dir = self._auto_skills_dir(profile_name)
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        (skills_dir / self._skill_filename(skill_name)).write_text(
+            content, encoding="utf-8"
+        )
+
+    def list_skills(self, profile_name: str) -> list[dict]:
+        skills_dir = self._auto_skills_dir(profile_name)
+        if not skills_dir.is_dir():
+            return []
+        out: list[dict] = []
+        for path in sorted(skills_dir.glob("*.md")):
+            out.append(
+                {"name": path.stem, "content": path.read_text(encoding="utf-8")}
+            )
+        return out
 
     def delete_profile(self, profile_name: str) -> None:
         """Tear down a profile (employee removed). Best-effort."""

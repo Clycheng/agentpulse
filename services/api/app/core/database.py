@@ -459,6 +459,14 @@ def init_postgres(conn: Database) -> None:
     ensure_column(
         conn, "agent_specs", "idle_thinking_enabled", "INTEGER NOT NULL DEFAULT 1"
     )
+    # TD-06-T1: skill self-sedimentation (reflection cron).
+    ensure_column(
+        conn, "agent_specs", "runs_since_last_reflection", "INTEGER NOT NULL DEFAULT 0"
+    )
+    ensure_column(conn, "agent_specs", "last_skill_reflection_at", "TEXT")
+    ensure_column(
+        conn, "agent_specs", "reflection_interval", "INTEGER NOT NULL DEFAULT 5"
+    )
     ensure_column(
         conn, "conversations", "idea_id", "TEXT REFERENCES ideas(id) ON DELETE SET NULL"
     )
@@ -798,6 +806,14 @@ def init_sqlite(conn: Database) -> None:
     )
     ensure_column(
         conn, "agent_specs", "idle_thinking_enabled", "INTEGER NOT NULL DEFAULT 1"
+    )
+    # TD-06-T1: skill self-sedimentation (reflection cron).
+    ensure_column(
+        conn, "agent_specs", "runs_since_last_reflection", "INTEGER NOT NULL DEFAULT 0"
+    )
+    ensure_column(conn, "agent_specs", "last_skill_reflection_at", "TEXT")
+    ensure_column(
+        conn, "agent_specs", "reflection_interval", "INTEGER NOT NULL DEFAULT 5"
     )
     ensure_column(
         conn, "conversations", "idea_id", "TEXT REFERENCES ideas(id) ON DELETE SET NULL"

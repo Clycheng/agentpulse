@@ -29,4 +29,5 @@ npm-debug.log*
 services/api/data/
 services/api/demo.db
 .hermes-verify/
+.hermes-data/
 .dev-logs/

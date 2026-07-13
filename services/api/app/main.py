@@ -50,25 +50,33 @@ def create_app() -> FastAPI:
 
 
 async def _idle_cron_loop() -> None:
-    """TD-08-T2: periodically reflect for idle employees (desktop deployment).
+    """Background self-evolution loop (desktop deployment).
 
     Guarded by ``settings.idle_thinking_cron``. Each pass opens its own
-    connection, runs one tick with a real Hermes backend, and never lets an
-    error kill the loop.
+    connection and runs (1) idle idea reflection (TD-08-T2) and (2) skill
+    sedimentation for employees that hit their run interval (TD-06-T1), with a
+    real Hermes backend. Never lets an error kill the loop.
     """
     import asyncio
 
     from app.runtime.hermes_client import HermesBackend
     from app.runtime.idle_think import run_idle_tick
+    from app.runtime.profile_provisioner import build_provisioner_from_settings
+    from app.runtime.reflection import run_reflection_tick
 
     while True:
         await asyncio.sleep(settings.idle_cron_interval_seconds)
         try:
             conn = connect()
             try:
+                backend = HermesBackend(hermes_bin=settings.hermes_bin)
                 await run_idle_tick(
+                    conn, backend=backend, hermes_work_root=settings.hermes_work_root
+                )
+                await run_reflection_tick(
                     conn,
-                    backend=HermesBackend(hermes_bin=settings.hermes_bin),
+                    backend=backend,
+                    provisioner=build_provisioner_from_settings(),
                     hermes_work_root=settings.hermes_work_root,
                 )
             finally:

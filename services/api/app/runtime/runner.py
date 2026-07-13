@@ -155,6 +155,15 @@ async def stream_agent_run(
         conn, run_id, final_status, error=error,
         output_message_id=(message_row["id"] if message_row else None),
     )
+    if final_status == RunStatus.COMPLETED and ctx.agent_id:
+        # TD-06-T1: count completed runs toward skill reflection (a background
+        # tick runs the actual, expensive reflection off the hot path).
+        try:
+            from app.runtime.reflection import bump_reflection_counter
+
+            bump_reflection_counter(conn, ctx.agent_id)
+        except Exception:
+            pass
     conn.commit()
     yield {"type": "message", "message": message_row}
 

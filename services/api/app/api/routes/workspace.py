@@ -11,6 +11,8 @@ from app.core.database import Database, Row, get_db
 from app.runtime.deepseek import DeepSeekAPIError, DeepSeekChatClient, DeepSeekNotConfigured
 from app.runtime.hermes_client import HermesBackend, RunContext
 from app.runtime.runner import resolve_hermes_profile, stream_agent_run
+from app.runtime.profile_provisioner import build_provisioner_from_settings
+from app.runtime.reflection import run_reflection
 from app.schemas.run import (
     LlmAgentExperience,
     LlmChatAgent,
@@ -209,6 +211,64 @@ def get_agent_spec(
     if spec is None:
         raise HTTPException(status_code=404, detail="该员工尚未配置角色规格")
     return _serialize_spec_from_row(conn, spec)
+
+
+def _verify_agent_in_workspace(conn: Database, current_user: Row, agent_id: str) -> Row:
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    agent = conn.execute(
+        "SELECT id FROM agents WHERE id = ? AND workspace_id = ?",
+        (agent_id, workspace["id"]),
+    ).fetchone()
+    if agent is None:
+        raise HTTPException(status_code=404, detail="员工不存在")
+    return agent
+
+
+@router.get("/agents/{agent_id}/skills")
+def list_agent_skills(
+    agent_id: str,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    """TD-06-T1: auto-sedimented skills for an employee (growth trajectory)."""
+    _verify_agent_in_workspace(conn, current_user, agent_id)
+    spec = conn.execute(
+        "SELECT hermes_profile FROM agent_specs WHERE agent_id = ?", (agent_id,)
+    ).fetchone()
+    if spec is None or not spec["hermes_profile"]:
+        return {"skills": []}
+    provisioner = build_provisioner_from_settings()
+    try:
+        skills = provisioner.list_skills(spec["hermes_profile"])
+    except Exception:
+        skills = []
+    return {"skills": skills}
+
+
+@router.post("/agents/{agent_id}/reflect")
+async def reflect_agent(
+    agent_id: str,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    """TD-06-T1: manually trigger one skill-reflection pass (debug/demo)."""
+    _verify_agent_in_workspace(conn, current_user, agent_id)
+    spec = conn.execute(
+        "SELECT status, hermes_profile FROM agent_specs WHERE agent_id = ?",
+        (agent_id,),
+    ).fetchone()
+    if spec is None or spec["status"] != "ready" or not spec["hermes_profile"]:
+        raise HTTPException(status_code=400, detail="该员工尚无可运行的 Hermes profile")
+    names = await run_reflection(
+        conn,
+        agent_id=agent_id,
+        backend=HermesBackend(hermes_bin=settings.hermes_bin),
+        provisioner=build_provisioner_from_settings(),
+        hermes_work_root=settings.hermes_work_root,
+    )
+    return {"skills_learned": names}
 
 
 @router.post("/agents/{agent_id}/credentials", response_model=AgentSpecOut)
