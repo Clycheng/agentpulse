@@ -41,3 +41,4 @@
 - [0004](0004-multimodal-via-hermes.md) — 多模态经 Hermes 辅助模型处理（DeepSeek 文本主模型）
 - [0005](0005-hermes-poc-safety-findings.md) — Hermes 地基验证发现：workdir 隔离是硬需求，讨论对齐门不能只靠人格指令
 - [0006](0006-group-discussion-v1-first-slice.md) — 群讨论协议 v1 第一片：讨论态 + 共识 brief + Task 创建门（对齐用人工确认），含待敲定清单
+- [0007](0007-hermes-v0.18-interface-acp.md) — Hermes v0.18 集成接口：REST /v1/runs 已不存在 → 用 ACP(stdio) 驱动执行、CLI 做供给（`LocalHermesProvisioner` 已实现）；作废 DATA-MODEL/TD-03 §5.3 的 REST 假设

@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 2026-07-10（Hermes 接入地基 + TD-04-T6 供给器 + ADR 0007 接口修正）
+- **feat(runtime)**: 真正把 Hermes 接进项目的第一步（本机 Hermes v0.18.2，项目所有者提供真实 DeepSeek key）。
+  - **key 验证**：新建 isolated profile `agentpulse`（`deepseek/deepseek-v4-flash`、绝对 workdir、key 写进 profile 的 gitignored `.env`），`hermes --profile agentpulse -z "..."` 实测返回结果——key + 模型 + agent loop 全通。key 存 `services/api/.env`（gitignored），未入库/日志/commit。
+  - **重大接口修正（[ADR 0007](docs/decisions/0007-hermes-v0.18-interface-acp.md)）**：v0.18.2 **没有** 旧设计假设的 REST `POST /v1/runs`+SSE（`hermes gateway` 现在是消息平台网关）。程序化接口是 `hermes acp`（ACP，stdio JSON-RPC，`--check` OK）与 `hermes serve`（JSON-RPC/WS）。决定 `HermesBackend` **改用 ACP** 传输；`agents.hermes_gateway_port`（端口/一员工一网关）作废；作废 DATA-MODEL/TD-03 §5.3 的 REST 段（已加醒目标注）。
+  - **TD-04-T6 `LocalHermesProvisioner`**（`app/runtime/profile_provisioner.py`）：用实测过的 `hermes` CLI 真建/配/删 profile——`profile create --no-alias --no-skills`、`config set model`、`config set terminal.working_dir <绝对路径>`（ADR 0005 硬约束，构造函数强制 `work_root` 绝对）、`tools enable`、`skills install --yes`、凭证追加进 profile `.env`（值不入日志）。
+  - 测试：新增 `test_local_provisioner.py`——2 条 always-on（work_root 必须绝对、hermes 不存在报错），1 条 guarded e2e（`HERMES_E2E=1` 真跑 hermes：建 profile→配 model+绝对 workdir+toolsets→写 SOUL/creds→删，已实测通过）。全套 **201 通过 + 1 skipped**。
+  - DeepSeek 实测事实：provider `deepseek`、key env `DEEPSEEK_API_KEY`、base `https://api.deepseek.com/v1`、模型 `deepseek/deepseek-v4-flash`|`-pro`。
+
 ### 2026-07-10（Idea 中心前端：桌面端「想法」视图）
 - **feat(desktop)**: 把 TD-08-T1 的 idea API 接成界面（TD-08-T3 前端半），落地北极星"没有 idle 员工 → idea 中心"的用户界面。
   - `main.tsx`：`View` 增加 `ideas`，侧栏新增「想法」入口（lightbulb 图标）；新增 `IdeasView` 组件——自取 `GET /api/ideas`，顶部摘要（共 N 条 / 来自几位员工）+ 分类过滤 tabs（改进/机会/风险/学习）+ 想法卡片（员工头像取 per-agent hue、分类标签配色、标题、正文、时间）+ 三个动作：转为讨论 / 接受 / 忽略。
