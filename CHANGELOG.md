@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 2026-07-10（TD-03-T3 后半：热路径切换 —— 员工在 App 里真的经 Hermes 干活）
+- **feat(api+runtime)**: 把跑着的消息流从"临时 DeepSeek"切成"经 RunService 调 Hermes"，**有 ready profile 的员工走 Hermes、其余回退 DeepSeek（零回归）**。
+  - `runtime/runner.py`：`start_run` 重构为流式 `stream_agent_run`（边持久化 run_steps + 回写 message，边 yield `{type:chunk|message|tool_call|...}` 给 SSE）；新增 `resolve_hermes_profile(agent_id)`（`agent_specs.hermes_profile` 且 status=ready 才走 Hermes）。
+  - `routes/workspace.py`：新增共享 `_stream_reply_events`——按 agent 是否有 ready profile 选 Hermes(`stream_agent_run`+`HermesBackend`) 或 DeepSeek 回退；`send_message_stream` 的**群讨论 turn_executor 与 DM/单人两条分支都改用它**（run_discussion_round 契约不变）。Hermes prompt = 讨论上下文 + 老板消息（人格来自 profile SOUL）。approval_required → SSE `approval` 事件（deny-by-default，安全）。
+  - `core/config.py`：加 `hermes_work_root`（绝对，空则运行时解析为 cwd 下绝对 `.hermes-data`）+ `hermes_bin`。
+  - **真机 e2e 过**（`test_hot_path_hermes.py`，`HERMES_E2E=1`）：把一个 agent 的 `agent_specs` 置 `hermes_profile=agentpulse`/ready → DM 经 `/messages/stream` 发消息 → 断言产生 `runs(provider='hermes',completed)` + `run_steps(message,final)` + agent 消息 "OK" 落库。
+  - **零回归**：现有 205 测试全过（无 profile 的 agent 一律走原 DeepSeek 路径，行为不变）；4 guarded e2e。
+  - 剩余：审批 suspend/resume 闭环（TD-03-T4）、招人自动建 profile（`LocalHermesProvisioner` 接进 supply，TD-03-T5）——现在要手动置 spec。
+
 ### 2026-07-10（TD-03-T3 写半：RunService —— run→run_steps→回写消息）
 - **feat(runtime)**: `app/runtime/runner.py::start_run` —— 把一次 Hermes 执行完整落库。
   - 消费 backend（`HermesBackend` 或测试用 fake）的 `AgentEvent` 流：按 TD-03-T1 生命周期建 `runs`(queued→running→completed/failed)；thinking/message 分别缓冲、每轮各落 1 条 `run_steps`；tool_call/tool_result/approval_required 逐条落；聚合出的 agent 回复经 `add_message` 写回会话；`final` 步 + 状态转移 + `output_message_id` 回填；错误→run=failed 记 error。

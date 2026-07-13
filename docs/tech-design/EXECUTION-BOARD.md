@@ -11,7 +11,8 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | [TD-03-T3 **剩余**](TD-03-hermes-execution.md) | **热路径切换 + 审批闭环**：RunService 写半已完成✅（run→run_steps→回写 message，真机过）；剩：把群讨论/回复的执行从临时 DeepSeek 切成经 RunService 调 Hermes（员工↔profile 映射）+ approval_required 挂起 waiting_user→老板批准续跑 | **agentpulse**(起 Hermes) | ⚪ 待领 |
+| 1 | [TD-03-T5](TD-03-hermes-execution.md) | **员工↔profile 生命周期**：把 `LocalHermesProvisioner` 接进 supply（招人→自动建 Hermes profile+写 SOUL+配能力+回填 `agent_specs.hermes_profile`/status=ready），这样热路径自动路由到 Hermes（现在要手动置 spec）；删员工清理 profile | **agentpulse**(起 Hermes) | ⚪ 待领 |
+| 2 | [TD-03-T4](TD-03-hermes-execution.md) | **审批 suspend/resume 闭环**：approval_required 现在是 deny-by-default（安全）；做成挂起 `runs.status=waiting_user`+建 approval → 老板批准 → 续跑同一 run（跨请求恢复）；+ clarification_required | **agentpulse**(起 Hermes) | ⚪ 待领 |
 | 2 | [TD-01-T2/T3](TD-01-verify-and-harden-slice-1.md) | 端到端手测：brief 全流程 + 多 agent 讨论流(起后端+桌面端真跑一遍；TD-02-T5 已重构完，现在测的就是最终路径) | **agentpulse** | ⚪ 待领 |
 
 ## 有依赖，等前置完成后做
@@ -33,6 +34,7 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| **TD-03-T3 后半：热路径切换**：`send_message_stream` 的 DM + 群讨论两条路径都改成经 `runner.stream_agent_run` 调 Hermes（员工有 ready profile 时），否则回退临时 DeepSeek——**零回归**（现有 205 测试全过，无 profile 的 agent 走原路径）；`runner` 加 `resolve_hermes_profile` + 流式 `stream_agent_run`；approval_required 走 deny-by-default + SSE `approval` 事件。**真机 e2e 过**：DM 经 `/messages/stream` → runs(provider=hermes,completed)+run_steps(message,final)+agent 消息 "OK" 落库 | 2026-07-10(见 CHANGELOG) | 审批 suspend/resume 与自动供给留 T4/T5 |
 | **TD-03-T3 写半：RunService**（`runtime/runner.py`）：`start_run` 消费 backend 事件流→按 TD-03-T1 生命周期建 run/转状态、聚合 thinking/message 各落 1 run_step、tool 逐条落、结果写回 agent message；**真机 e2e 过**（RunService→HermesBackend→真 Hermes→run_steps+message"OK"）。2 常开(fake backend)+1 guarded e2e；全套 205 过 | 2026-07-10(见 CHANGELOG) | 剩热路径切换+审批闭环 |
 | **TD-03-T2 HermesBackend（ACP 传输）**：`runtime/hermes_client.py`——起 `hermes --profile <p> acp` 子进程、用 `agent-client-protocol==0.9.0` 走 ACP、把 session_update 流映射成 `AgentEvent`(message/thinking/tool_call/tool_result/approval_required/usage/final)；approval→选 offered option；fs 读写限制在 workdir 内(ADR 0005)。**真机 e2e 实测通过**：agentpulse profile 跑"reply OK"→收到 thinking 流+message"OK"+usage+final。3 e2e 单测(HERMES_E2E=1) + 2 常开安全测；全套 203 过 | 2026-07-10(见 CHANGELOG) | agent-client-protocol 入 requirements |
 | **Hermes 接入地基**：本机 Hermes v0.18.2 验证——真实 DeepSeek key 经 isolated profile 一次性跑通("OK")；**发现 REST /v1/runs 已不存在**→ 新增 [ADR 0007](../decisions/0007-hermes-v0.18-interface-acp.md)(改用 ACP 传输、作废端口模型)；实现 **TD-04-T6 `LocalHermesProvisioner`**(真 CLI 建/配/删 profile，强制绝对 workdir)+ 2 always-on 安全单测 + 1 guarded e2e(HERMES_E2E=1 实测过) | 2026-07-10(见 CHANGELOG) | 201 测试全过；DeepSeek key 存 gitignored .env |

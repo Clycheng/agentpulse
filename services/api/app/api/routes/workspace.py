@@ -1,12 +1,16 @@
 import json
+import os
 from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.responses import StreamingResponse
 
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.core.database import Database, Row, get_db
 from app.runtime.deepseek import DeepSeekAPIError, DeepSeekChatClient, DeepSeekNotConfigured
+from app.runtime.hermes_client import HermesBackend, RunContext
+from app.runtime.runner import resolve_hermes_profile, stream_agent_run
 from app.schemas.run import (
     LlmAgentExperience,
     LlmChatAgent,
@@ -831,30 +835,15 @@ async def send_message_stream(
                 discussion_ctx = build_discussion_context(
                     conn, conversation_id, next_agent, reply_agents
                 )
-                full_reply = ""
-                async for chunk_text in await _stream_agent_reply(
+                async for event in _stream_reply_events(
                     conn,
                     workspace=workspace,
                     conversation=conversation,
-                    conversation_id=conversation_id,
                     agent=next_agent,
                     user_message=user_message,
                     discussion_context=discussion_ctx,
                 ):
-                    full_reply += chunk_text
-                    yield {"type": "chunk", "content": chunk_text}
-
-                msg = add_message(
-                    conn,
-                    conversation_id=conversation_id,
-                    sender_type="agent",
-                    sender_id=next_agent["id"],
-                    content=full_reply,
-                    provider="deepseek",
-                    model="deepseek-v4-flash",
-                )
-                conn.commit()
-                yield {"type": "message", "message": msg}
+                    yield event
 
             async for event in run_discussion_round(
                 conn,
@@ -874,38 +863,31 @@ async def send_message_stream(
                         yield f"event: speaking\ndata: {json.dumps({'agent_id': speaker['id'], 'agent_name': speaker['name'], 'agent_role': speaker['role']}, ensure_ascii=False)}\n\n"
                 elif etype == "chunk":
                     yield f"event: chunk\ndata: {json.dumps({'content': event['content']}, ensure_ascii=False)}\n\n"
-                elif etype == "message":
+                elif etype == "message" and event.get("message"):
                     yield f"event: done\ndata: {json.dumps(serialize_message(event['message']), ensure_ascii=False)}\n\n"
+                elif etype == "approval_required":
+                    yield f"event: approval\ndata: {json.dumps(event.get('payload', {}), ensure_ascii=False)}\n\n"
                 elif etype == "error":
                     yield f"event: error\ndata: {json.dumps({'detail': event['detail']}, ensure_ascii=False)}\n\n"
         else:
-            # DM or single-agent: stream normally
+            # DM or single-agent: stream the reply (Hermes or DeepSeek fallback).
             for agent in reply_agents:
                 yield f"event: speaking\ndata: {json.dumps({'agent_id': agent['id'], 'agent_name': agent['name'], 'agent_role': agent['role']}, ensure_ascii=False)}\n\n"
                 try:
-                    full_reply = ""
-                    async for chunk_text in await _stream_agent_reply(
+                    async for event in _stream_reply_events(
                         conn,
                         workspace=workspace,
                         conversation=conversation,
-                        conversation_id=conversation_id,
                         agent=agent,
                         user_message=user_message,
                     ):
-                        full_reply += chunk_text
-                        yield f"event: chunk\ndata: {json.dumps({'content': chunk_text}, ensure_ascii=False)}\n\n"
-
-                    msg = add_message(
-                        conn,
-                        conversation_id=conversation_id,
-                        sender_type="agent",
-                        sender_id=agent["id"],
-                        content=full_reply,
-                        provider="deepseek",
-                        model="deepseek-v4-flash",
-                    )
-                    conn.commit()
-                    yield f"event: done\ndata: {json.dumps(serialize_message(msg), ensure_ascii=False)}\n\n"
+                        etype = event["type"]
+                        if etype == "chunk":
+                            yield f"event: chunk\ndata: {json.dumps({'content': event['content']}, ensure_ascii=False)}\n\n"
+                        elif etype == "message" and event.get("message"):
+                            yield f"event: done\ndata: {json.dumps(serialize_message(event['message']), ensure_ascii=False)}\n\n"
+                        elif etype == "approval_required":
+                            yield f"event: approval\ndata: {json.dumps(event.get('payload', {}), ensure_ascii=False)}\n\n"
                 except (DeepSeekNotConfigured, DeepSeekAPIError) as exc:
                     yield f"event: error\ndata: {json.dumps({'detail': str(exc)}, ensure_ascii=False)}\n\n"
                     break
@@ -1052,6 +1034,77 @@ def capture_agent_experience_from_approval(
         summary=summary,
         lessons=lessons,
     )
+
+
+def _build_hermes_prompt(user_message: Row, discussion_context: str) -> str:
+    """Prompt fed to a Hermes employee. Persona comes from the profile's SOUL;
+    this carries the situational context + the boss's message."""
+    latest = user_message["content"]
+    if discussion_context:
+        return f"{discussion_context}\n\n老板刚说：{latest}\n\n请以你的角色简洁发言。"
+    return latest
+
+
+async def _stream_reply_events(
+    conn: Database,
+    *,
+    workspace: Row,
+    conversation: Row,
+    agent: Row,
+    user_message: Row,
+    discussion_context: str = "",
+) -> AsyncGenerator:
+    """Produce an agent's reply as {type: chunk|message|...} events.
+
+    Routes execution to Hermes when the employee has a ready profile
+    (TD-03-T3), else falls back to the temporary DeepSeek path. Both persist an
+    agent message and end with a single {"type": "message", "message": row|None}.
+    """
+    profile = resolve_hermes_profile(conn, agent["id"])
+    if profile:
+        work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
+        ctx = RunContext(
+            run_id="",
+            prompt=_build_hermes_prompt(user_message, discussion_context),
+            workdir=os.path.join(work_root, profile, "work", "runs", new_id("run")),
+            profile=profile,
+            agent_id=agent["id"],
+            workspace_id=workspace["id"],
+            conversation_id=conversation["id"],
+        )
+        async for event in stream_agent_run(
+            conn,
+            ctx=ctx,
+            backend=HermesBackend(hermes_bin=settings.hermes_bin),
+            input_message_id=user_message["id"],
+        ):
+            yield event
+        return
+
+    # Temporary DeepSeek execution layer (employees without a Hermes profile).
+    full_reply = ""
+    async for chunk_text in await _stream_agent_reply(
+        conn,
+        workspace=workspace,
+        conversation=conversation,
+        conversation_id=conversation["id"],
+        agent=agent,
+        user_message=user_message,
+        discussion_context=discussion_context,
+    ):
+        full_reply += chunk_text
+        yield {"type": "chunk", "content": chunk_text}
+    msg = add_message(
+        conn,
+        conversation_id=conversation["id"],
+        sender_type="agent",
+        sender_id=agent["id"],
+        content=full_reply,
+        provider="deepseek",
+        model="deepseek-v4-flash",
+    )
+    conn.commit()
+    yield {"type": "message", "message": msg}
 
 
 async def _stream_agent_reply(

@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     deepseek_temperature: float = 0.7
     deepseek_thinking_enabled: bool = False
     database_url: str = "postgresql://agentpulse:agentpulse@127.0.0.1:55432/agentpulse"
+    # Absolute root for Hermes per-employee work dirs (ADR 0005). Empty → resolved
+    # to an absolute ".hermes-data" under the server's cwd at run time.
+    hermes_work_root: str = ""
+    hermes_bin: str = "hermes"
     auth_secret_key: str = "agentpulse-local-dev-secret"
     access_token_ttl_hours: int = 24 * 14
     password_iterations: int = 260_000
