@@ -1,6 +1,6 @@
 # 0007. Hermes v0.18 集成接口：REST /v1/runs 已不存在 → 用 ACP（stdio）驱动；供给用 CLI
 
-- 状态: 已接受并部分实现（2026-07-10；本机实测 Hermes v0.18.2；`LocalHermesProvisioner` 已实现并过 e2e）
+- 状态: 已接受并实现（2026-07-10；本机实测 Hermes v0.18.2；`LocalHermesProvisioner` + `HermesBackend`(ACP) 均已实现并过真机 e2e——agentpulse profile 经 ACP 跑通 thinking 流+message+usage+final）
 - 日期: 2026-07-10
 - 决策者: 项目所有者授权接入 Hermes（提供 DeepSeek key，要求自装 + 集成）
 - supersedes: [DATA-MODEL §5.3](../tech-design/DATA-MODEL-AND-API.md) 与 [TD-03 §5.3](../tech-design/TD-03-hermes-execution.md) 中"REST `POST /v1/runs` + SSE `GET /v1/runs/{id}/events`"的接口假设；相关 [验证报告 2026-07-07](../research/hermes-verification-2026-07-07.md) 的 API 形状部分作废。
