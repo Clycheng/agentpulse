@@ -11,17 +11,16 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| — | 暂无 | 所有已就绪任务已完成。下一批从「有依赖」表就绪后自动移入 | — | ✅ |
+| 1 | [TD-06-T2](TD-06-agent-self-evolution.md)(主动能力升级申请) | approvals.payload_json schema done; next: ProfileProvisioner add_capability/reload_gateway | **agentpulse** | 🔵 进行中(step 1/6) |
+| 2 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
 
 ## 有依赖，等前置完成后做
 
 | 任务 | 等什么 | 会话要求 |
 |---|---|---|
-| [TD-06-T2](TD-06-agent-self-evolution.md)(主动能力升级申请) | 前置全就绪✅（TD-03-T4✅ + TD-04-T6✅ + `approvals.type=capability_upgrade` 已在 schema✅）——**可开工** | **agentpulse** |
 | TD-06-T3(成长轨迹 UI) | TD-06-T1✅ + TD-06-T2；`GET /api/agents/{id}/skills` 已就绪✅ | 否（前端）/ agentpulse（验 SOUL） |
-| TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）|
-| TD-09-T3 **剩余**(ChannelReply 把回复发回原渠道 + 微信/widget 适配器) | 渠道管理前端已完成✅ | 否（微信/widget 验证需真实账号）|
-| TD-09-T3(ChannelReply + 网页 Widget) | TD-09-T2 | 否 |
+| TD-09-T3 **剩余**(ChannelReply 把回复发回原渠道 + 微信/widget 适配器) | **agentpulse**（需 Hermes 集成验证）|
+| TD-09-T3(ChannelReply + 网页 Widget) | TD-09-T2✅ — deps met, ready to move | 否 |
 
 ## 已完成
 
