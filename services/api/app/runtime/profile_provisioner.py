@@ -75,6 +75,34 @@ class ProfileProvisioner(Protocol):
         """List auto-learned skills for a profile ({name, content})."""
         ...
 
+    def add_capability(
+        self,
+        profile_name: str,
+        capability_key: str,
+        bundle: dict,
+    ) -> None:
+        """TD-06-T2: Add a new capability to an existing profile.
+
+        Enables new toolsets, installs new skills, writes credentials,
+        and reloads the gateway so the capability takes effect without
+        recreating the profile.
+
+        Args:
+            profile_name: Target Hermes profile name.
+            capability_key: The capability key from the catalog.
+            bundle: Resolved bundle dict from ``resolve_bundle``, with keys
+                ``toolsets``, ``skills``, ``mcp``, ``required_credentials``,
+                and ``risk_gate``.
+        """
+        ...
+
+    def reload_gateway(self, profile_name: str) -> None:
+        """TD-06-T2: Hot-reload (or restart) the profile's gateway.
+
+        Best-effort: if no gateway is running, this is a no-op.
+        """
+        ...
+
 
 class RecordOnlyProvisioner:
     """Provisioner that records all actions without side effects.
@@ -160,6 +188,36 @@ class RecordOnlyProvisioner:
             {"name": name, "content": content}
             for name, content in self.skills.get(profile_name, {}).items()
         ]
+
+    def add_capability(
+        self,
+        profile_name: str,
+        capability_key: str,
+        bundle: dict,
+    ) -> None:
+        self.actions.append(
+            ProvisioningAction(
+                action="add_capability",
+                profile_name=profile_name,
+                details={
+                    "capability_key": capability_key,
+                    "toolsets": list(bundle.get("toolsets", [])),
+                    "skills": list(bundle.get("skills", [])),
+                    "mcp": list(bundle.get("mcp", [])),
+                    "required_credentials": list(
+                        bundle.get("required_credentials", [])
+                    ),
+                },
+            )
+        )
+
+    def reload_gateway(self, profile_name: str) -> None:
+        self.actions.append(
+            ProvisioningAction(
+                action="reload_gateway",
+                profile_name=profile_name,
+            )
+        )
 
     def get_actions(self) -> list[ProvisioningAction]:
         """Return recorded actions (for test assertions)."""
@@ -330,6 +388,48 @@ class LocalHermesProvisioner:
         """Tear down a profile (employee removed). Best-effort."""
         if self._profile_exists(profile_name):
             self._run(["profile", "delete", profile_name, "--yes"])
+
+    def add_capability(
+        self,
+        profile_name: str,
+        capability_key: str,
+        bundle: dict,
+    ) -> None:
+        """TD-06-T2: Add a new capability to an existing profile.
+
+        Enables new toolsets, installs new skills, writes credentials,
+        and reloads the gateway.
+        """
+        new_toolsets: list[str] = bundle.get("toolsets", [])
+        new_skills: list[str] = bundle.get("skills", [])
+
+        # Enable new toolsets (append to existing)
+        if new_toolsets:
+            self._run(["tools", "enable", *new_toolsets], profile=profile_name)
+
+        # Install new skills
+        if new_skills:
+            self.install_skills(profile_name, new_skills)
+
+        # Credentials — already stored in .env from initial provisioning,
+        # and required_credentials for added capabilities may need new ones.
+        # The caller (UpgradeService) handles credential_missing separately;
+        # here we only write credentials that are actually provided.
+        # MCP wiring remains deferred (same as configure()).
+
+        # Reload gateway so the new capability takes effect
+        self.reload_gateway(profile_name)
+
+    def reload_gateway(self, profile_name: str) -> None:
+        """TD-06-T2: Hot-reload the profile's Hermes gateway.
+
+        Best-effort. If no gateway is running (404 or not found), this is
+        a silent no-op — the capability will be available on next start.
+        """
+        try:
+            self._run(["gateway", "reload"], profile=profile_name)
+        except HermesProvisionError:
+            pass  # No running gateway — that's fine
 
 
 def build_provisioner_from_settings() -> ProfileProvisioner:

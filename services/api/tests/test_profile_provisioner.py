@@ -121,6 +121,75 @@ class TestRecordOnlyProvisioner:
         # No files should have been created in tmp_path
         assert os.listdir(tmp_path) == []
 
+    def test_add_capability_recorded(self):
+        """add_capability is recorded with correct details."""
+        prov = RecordOnlyProvisioner()
+        bundle = {
+            "toolsets": ["web", "image_gen"],
+            "skills": ["marketing"],
+            "mcp": [],
+            "required_credentials": ["SOCIAL_API_KEY"],
+            "risk_gate": "approval",
+        }
+        prov.add_capability("wk_test-agent", "social_content", bundle)
+        actions = prov.get_actions()
+        assert len(actions) == 1
+        assert actions[0].action == "add_capability"
+        assert actions[0].details["capability_key"] == "social_content"
+        assert actions[0].details["toolsets"] == ["web", "image_gen"]
+        assert actions[0].details["skills"] == ["marketing"]
+        assert actions[0].details["required_credentials"] == ["SOCIAL_API_KEY"]
+
+    def test_reload_gateway_recorded(self):
+        """reload_gateway is recorded."""
+        prov = RecordOnlyProvisioner()
+        prov.reload_gateway("wk_test-agent")
+        actions = prov.get_actions()
+        assert len(actions) == 1
+        assert actions[0].action == "reload_gateway"
+        assert actions[0].profile_name == "wk_test-agent"
+
+    def test_full_provisioning_sequence_including_capability_upgrade(self):
+        """Complete provisioning + capability upgrade sequence."""
+        prov = RecordOnlyProvisioner()
+        profile = "wk_test-agent"
+
+        # Initial provisioning
+        prov.create_profile(profile)
+        prov.write_soul(profile, "# SOUL\nYou are a frontend engineer.")
+        prov.configure(
+            profile,
+            model="deepseek/deepseek-chat",
+            toolsets=["terminal", "file"],
+            mcp=[],
+        )
+        prov.install_skills(profile, ["react-components"])
+        prov.write_credentials(profile, {"GITHUB_TOKEN": "secret"})
+
+        # Capability upgrade
+        bundle = {
+            "toolsets": ["web", "image_gen"],
+            "skills": ["marketing"],
+            "mcp": [],
+            "required_credentials": ["SOCIAL_API_KEY"],
+            "risk_gate": "approval",
+        }
+        prov.add_capability(profile, "social_content", bundle)
+        prov.reload_gateway(profile)
+
+        actions = prov.get_actions()
+        assert len(actions) == 7
+        assert [a.action for a in actions] == [
+            "create_profile",
+            "write_soul",
+            "configure",
+            "install_skills",
+            "write_credentials",
+            "add_capability",
+            "reload_gateway",
+        ]
+        assert all(a.profile_name == profile for a in actions)
+
 
 class TestProtocol:
     def test_record_only_satisfies_protocol(self):
