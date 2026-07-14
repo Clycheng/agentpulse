@@ -11,7 +11,7 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 🔴1 | **审批门在执行层真强制**（修 T4 的根本缺口） | 实测:ACP 执行下 Hermes 不触发 `request_permission`,agent 裸跑 `rm -rf`,审批/求援/升级真 agent 都产生不了(2026-07-14 审计)。候选:(a)最小权限不开危险工具+危险能力老板显式授予;(b)调研 ACP permission 能力握手;(c)自研门。**需所有者拍板选型后实现,先出 ADR** | **agentpulse**(起真 Hermes 验证) | ⚪ |
+| 🔴1 | **审批门在执行层真强制**（修 T4 根本缺口，见 [ADR 0008](../decisions/0008-human-in-the-loop-approval-model.md)） | **根因已实测定位+修法已验证**:员工 profile 没配 `approvals.mode` → 被 Hermes `smart/auto` 辅助模型自动放行。**实测配 `approvals.mode: manual` → `rm -rf` 真触发 ACP `request_permission`（选项 allow_once/session/always/deny/deny_always）**。待实现(ADR 0008 分片):①provisioner 设 manual ②hermes_client 核对 approve 的 outcome 类型/option_id 真放行 ③桥/前端加"永远允许" ④业务受控工具门 ⑤删 clarification/capability agent 触发伪装 | **agentpulse**(真 Hermes 复测) | ⚪ |
 | 2 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
 | 3 | TD-09-T3 剩余(渠道出站回复 + 微信/widget 适配器) | 渠道入站已通，出站未接 | 否（微信/widget 需真账号） | ⚪ |
 
