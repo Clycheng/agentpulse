@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 2026-07-14（TD-06-T3：成长轨迹前端 —— 让自进化「可见」）
+- **feat(desktop)**: 员工详情抽屉 `AgentDetail` 新增「成长轨迹」区，把 TD-06-T1/T2 的后端成果接成用户能看的界面。
+  - **已获得能力**：拉 `GET /api/agents/{id}/spec` 的 `capabilities`，渲染能力徽章 + 状态（`已启用`/`待补凭证`/`待生效`/`已停用`，`credential_missing` 用 warning 色、`disabled` 用 subtle 色）。
+  - **已习得技能（自动沉淀）**：拉 `GET /api/agents/{id}/skills`，卡片显示 SKILL.md 首行标题 + 正文摘要；空态"干活满一定轮次后会自动沉淀可复用技能"。
+  - **触发反思**按钮：调 `POST /api/agents/{id}/reflect`，内联显示"新沉淀 N 条技能 / 这轮暂无 / 错误信息"，成功后刷新技能列表。
+  - `AgentDetail` 加 `token` prop；`styles.css` 加 `.growth-head`/`.growth-sub`/`.cap-badge`/`.skill-card`/`.button.small`（全用现有 teal / warning token，浅深主题通用）。
+  - **浏览器实测**：起独立 API(8001)+renderer(5175，`.env.local` 指过去，避开另一会话占用的 8000/5174)→登录 demo 工作区→员工→阿伦→成长轨迹正确渲染（`social_content 已启用` + `email_sending 待补凭证` + 技能空态）；`tsc --noEmit` 无错、无 console 报错、截图留证。
+  - 剩余：聊天内「审批/求援/能力升级」卡片（SSE `approval` 事件已带 category+approval_id，前端按类型渲染并调 `/resolve`\|`/answer`）另立一项。
+
 ### 2026-07-14（TD-06-T2：主动能力升级申请 —— 北极星④自进化第二半）
 - **feat(runtime+api)**: 员工碰到"有任务但缺工具"时主动申请升级，老板一键批准即自动把能力装到它的 Hermes profile。
   - `runtime/upgrade.py::execute_upgrade`：读老板确认的 `approved_capability_key` → `resolve_bundle` 校验并合并出 toolsets/skills/mcp/creds/risk_gate → `ProfileProvisioner.add_capability`（真装：`tools enable` + `skills install` + `gateway reload`）→ upsert `agent_capabilities` 行（有 `required_credentials` → `credential_missing` 交给现有凭证流程要，否则 `enabled`）。未知 key / 无 profile → `UpgradeError`。

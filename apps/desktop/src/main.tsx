@@ -1822,6 +1822,7 @@ function App() {
         <AgentDetail
           agent={detailAgent}
           tasks={tasks.filter((task) => task.owner === detailAgent.id)}
+          token={token}
           onClose={() => setDetailId(null)}
           onDm={() => {
             const chat = chats.find(
@@ -4129,14 +4130,78 @@ function LibraryView({
 function AgentDetail({
   agent,
   tasks,
+  token,
   onClose,
   onDm,
 }: {
   agent: Agent;
   tasks: Task[];
+  token: string;
   onClose: () => void;
   onDm: () => void;
 }) {
+  const [learned, setLearned] = useState<
+    { name: string; content: string }[] | null
+  >(null);
+  const [caps, setCaps] = useState<
+    { capability_key: string; status: string }[] | null
+  >(null);
+  const [reflecting, setReflecting] = useState(false);
+  const [reflectMsg, setReflectMsg] = useState('');
+
+  const loadGrowth = () => {
+    apiRequest<{ skills: { name: string; content: string }[] }>(
+      `/agents/${agent.id}/skills`,
+      { token },
+    )
+      .then((r) => setLearned(r.skills))
+      .catch(() => setLearned([]));
+    apiRequest<{ capabilities: { capability_key: string; status: string }[] }>(
+      `/agents/${agent.id}/spec`,
+      { token },
+    )
+      .then((r) => setCaps(r.capabilities ?? []))
+      .catch(() => setCaps([]));
+  };
+
+  useEffect(() => {
+    loadGrowth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.id, token]);
+
+  const triggerReflect = async () => {
+    setReflecting(true);
+    setReflectMsg('');
+    try {
+      const r = await apiRequest<{ skills_learned: string[] }>(
+        `/agents/${agent.id}/reflect`,
+        { method: 'POST', token },
+      );
+      setReflectMsg(
+        r.skills_learned.length
+          ? `新沉淀 ${r.skills_learned.length} 条技能`
+          : '这轮暂无值得沉淀的',
+      );
+      loadGrowth();
+    } catch (err) {
+      setReflectMsg(err instanceof Error ? err.message : '反思失败');
+    } finally {
+      setReflecting(false);
+    }
+  };
+
+  const skillTitle = (content: string, fallback: string) => {
+    const first = content.split('\n').find((l) => l.trim());
+    return first ? first.replace(/^#+\s*/, '').trim() || fallback : fallback;
+  };
+
+  const capLabel: Record<string, string> = {
+    enabled: '已启用',
+    credential_missing: '待补凭证',
+    pending: '待生效',
+    disabled: '已停用',
+  };
+
   return (
     <>
       <div className="overlay" onClick={onClose} />
@@ -4189,6 +4254,52 @@ function AgentDetail({
           <section className="drawer-section">
             <h3>MCP</h3>
             <ChipList items={agent.mcps} emptyText="暂无 MCP" muted />
+          </section>
+
+          <section className="drawer-section">
+            <div className="growth-head">
+              <h3>成长轨迹</h3>
+              <button
+                type="button"
+                className="button small"
+                onClick={triggerReflect}
+                disabled={reflecting}
+              >
+                {materialIcon('auto_awesome')}
+                {reflecting ? '反思中…' : '触发反思'}
+              </button>
+            </div>
+            {reflectMsg && <p className="growth-msg">{reflectMsg}</p>}
+
+            <h4 className="growth-sub">已获得能力</h4>
+            {caps && caps.length === 0 && (
+              <EmptyState>暂无升级获得的能力</EmptyState>
+            )}
+            <div className="growth-caps">
+              {(caps ?? []).map((cap) => (
+                <span
+                  className={`cap-badge cap-${cap.status}`}
+                  key={cap.capability_key}
+                >
+                  {cap.capability_key}
+                  <em>{capLabel[cap.status] ?? cap.status}</em>
+                </span>
+              ))}
+            </div>
+
+            <h4 className="growth-sub">已习得技能（自动沉淀）</h4>
+            {learned && learned.length === 0 && (
+              <EmptyState>干活满一定轮次后会自动沉淀可复用技能</EmptyState>
+            )}
+            {(learned ?? []).map((skill) => (
+              <article className="skill-card" key={skill.name}>
+                <div>
+                  {materialIcon('school')}
+                  <strong>{skillTitle(skill.content, skill.name)}</strong>
+                </div>
+                <p>{skill.content.replace(/^#+\s*.*\n+/, '').slice(0, 200)}</p>
+              </article>
+            ))}
           </section>
 
           <section className="drawer-section">
