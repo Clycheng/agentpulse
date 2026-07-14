@@ -1370,6 +1370,130 @@ textarea:focus-visible,
   border-top: 1px solid var(--border);
 }
 
+/* TD-06-T3: in-chat approval / clarification / capability-upgrade cards */
+.approval-card {
+  flex-shrink: 0;
+  overflow: hidden;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.approval-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+}
+
+.approval-card header .material-symbol {
+  font-size: 18px;
+  font-variation-settings: 'FILL' 1;
+}
+
+.approval-card header strong {
+  color: var(--text-strong);
+  font-size: 13.5px;
+}
+
+.approval-risk {
+  border-left-color: var(--warning);
+}
+.approval-risk header {
+  background: var(--warning-soft, rgba(217, 119, 6, 0.1));
+}
+.approval-risk header .material-symbol {
+  color: var(--warning);
+}
+
+.approval-clarify {
+  border-left-color: var(--primary);
+}
+.approval-clarify header {
+  background: var(--primary-soft, rgba(13, 148, 136, 0.09));
+}
+.approval-clarify header .material-symbol {
+  color: var(--primary);
+}
+
+.approval-upgrade {
+  border-left-color: #7c3aed;
+}
+.approval-upgrade header {
+  background: rgba(124, 58, 237, 0.09);
+}
+.approval-upgrade header .material-symbol {
+  color: #7c3aed;
+}
+
+.approval-desc {
+  margin: 0;
+  padding: 0 14px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+
+.approval-capkey {
+  flex: 1;
+  min-width: 120px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--text-strong);
+}
+
+.approval-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+
+.approval-answer textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  font: inherit;
+  font-size: 12.5px;
+  resize: vertical;
+  background: var(--surface);
+  color: var(--text-strong);
+}
+
+.approval-answer .button {
+  align-self: flex-end;
+}
+
+.approval-resolved {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--success, #059669);
+  font-size: 12.5px;
+}
+
+.approval-resolved .material-symbol {
+  font-size: 16px;
+  font-variation-settings: 'FILL' 1;
+}
+
 .message-row {
   display: flex;
   padding: 9px 0;

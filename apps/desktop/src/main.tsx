@@ -1263,6 +1263,45 @@ function App() {
                 }));
                 streamingMessageId = '';
                 streamingContent = '';
+              } else if (currentEvent === 'approval') {
+                // TD-06-T3: a run suspended for owner approval / clarification /
+                // capability upgrade — drop an interactive card into the thread.
+                const category = data.category || 'high_risk';
+                const tool = data.tool_call || {};
+                const title =
+                  category === 'clarification'
+                    ? '员工请求澄清'
+                    : category === 'capability_upgrade'
+                      ? '员工申请能力升级'
+                      : `高风险动作需确认：${tool.title || tool.name || '高风险动作'}`;
+                const description =
+                  category === 'clarification'
+                    ? tool.question || tool.text || ''
+                    : category === 'capability_upgrade'
+                      ? tool.capability_description || tool.text || ''
+                      : tool.text || tool.title || '';
+                const cardText =
+                  'APPROVAL_CARD:' +
+                  JSON.stringify({
+                    approval_id: data.approval_id,
+                    category,
+                    title,
+                    description,
+                    suggested_capability_key: tool.suggested_capability_key,
+                  });
+                setMessagesByChat((current) => ({
+                  ...current,
+                  [targetChat.id]: [
+                    ...(current[targetChat.id] ?? []),
+                    {
+                      id: tempMessageId(),
+                      from: 'system' as const,
+                      type: 'system' as const,
+                      time: '',
+                      text: cardText,
+                    },
+                  ],
+                }));
               } else if (currentEvent === 'error') {
                 setMessagesByChat((current) => ({
                   ...current,
@@ -1561,6 +1600,50 @@ function App() {
     }
   };
 
+  // TD-06-T3 (chat cards): resolve a run-linked approval / capability upgrade
+  // straight from the chat thread, then wake the suspended run.
+  const resolveChatApproval = async (
+    approvalId: string,
+    status: 'approved' | 'rejected',
+    approvedCapabilityKey?: string,
+  ): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      await apiRequest(`/approvals/${approvalId}/resolve`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          status,
+          approved_capability_key: approvedCapabilityKey ?? null,
+        }),
+      });
+      showToast(status === 'approved' ? '已批准，员工继续执行' : '已驳回');
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '处理失败');
+      return false;
+    }
+  };
+
+  const answerChatClarification = async (
+    approvalId: string,
+    answer: string,
+  ): Promise<boolean> => {
+    if (!token || !answer.trim()) return false;
+    try {
+      await apiRequest(`/approvals/${approvalId}/answer`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ answer: answer.trim() }),
+      });
+      showToast('已回复，员工继续');
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '回复失败');
+      return false;
+    }
+  };
+
   const finishOnboarding = async () => {
     if (token) {
       await apiRequest('/me/onboarding/complete', {
@@ -1734,6 +1817,8 @@ function App() {
             onConfirmBrief={confirmBrief}
             onRejectBrief={rejectBrief}
             onCreateTaskFromBrief={createTaskFromBrief}
+            onResolveCardApproval={resolveChatApproval}
+            onAnswerCardClarification={answerChatClarification}
           />
         )}
 
@@ -2875,6 +2960,8 @@ function ChatView({
   onConfirmBrief,
   onRejectBrief,
   onCreateTaskFromBrief,
+  onResolveCardApproval,
+  onAnswerCardClarification,
 }: {
   title: string;
   meta: string;
@@ -2904,6 +2991,15 @@ function ChatView({
     briefId: string,
     title: string,
     ownerId?: string,
+  ) => Promise<boolean>;
+  onResolveCardApproval?: (
+    approvalId: string,
+    status: 'approved' | 'rejected',
+    approvedCapabilityKey?: string,
+  ) => Promise<boolean>;
+  onAnswerCardClarification?: (
+    approvalId: string,
+    answer: string,
   ) => Promise<boolean>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -3056,6 +3152,8 @@ function ChatView({
             onConfirmBrief={onConfirmBrief}
             onRejectBrief={onRejectBrief}
             onCreateTaskFromBrief={onCreateTaskFromBrief}
+            onResolveCardApproval={onResolveCardApproval}
+            onAnswerCardClarification={onAnswerCardClarification}
           />
         ))}
         {approvals.map(({ approval, task }) => {
@@ -3206,6 +3304,135 @@ function ChatView({
   );
 }
 
+function ApprovalCard({
+  raw,
+  onResolve,
+  onAnswer,
+}: {
+  raw: string;
+  onResolve?: (
+    approvalId: string,
+    status: 'approved' | 'rejected',
+    approvedCapabilityKey?: string,
+  ) => Promise<boolean>;
+  onAnswer?: (approvalId: string, answer: string) => Promise<boolean>;
+}) {
+  let data: {
+    approval_id: string;
+    category: string;
+    title?: string;
+    description?: string;
+    suggested_capability_key?: string;
+  } | null = null;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    data = null;
+  }
+  const [answer, setAnswer] = useState('');
+  const [capKey, setCapKey] = useState(data?.suggested_capability_key ?? '');
+  const [resolved, setResolved] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (!data) return <div className="system-message">{raw}</div>;
+  const { approval_id: id, category } = data;
+
+  const meta =
+    category === 'clarification'
+      ? { icon: 'help', kind: 'clarify', label: '员工请求澄清' }
+      : category === 'capability_upgrade'
+        ? { icon: 'bolt', kind: 'upgrade', label: '员工申请能力升级' }
+        : { icon: 'gpp_maybe', kind: 'risk', label: '高风险动作待确认' };
+
+  const doResolve = async (status: 'approved' | 'rejected') => {
+    if (!onResolve) return;
+    setBusy(true);
+    const ok = await onResolve(
+      id,
+      status,
+      category === 'capability_upgrade' ? capKey : undefined,
+    );
+    setBusy(false);
+    if (ok)
+      setResolved(
+        status === 'rejected'
+          ? '已驳回'
+          : category === 'capability_upgrade'
+            ? `已批准升级：${capKey}`
+            : '已批准',
+      );
+  };
+
+  const doAnswer = async () => {
+    if (!onAnswer || !answer.trim()) return;
+    setBusy(true);
+    const ok = await onAnswer(id, answer);
+    setBusy(false);
+    if (ok) setResolved(`已回复：${answer.trim()}`);
+  };
+
+  return (
+    <article className={`approval-card approval-${meta.kind}`}>
+      <header>
+        {materialIcon(meta.icon)}
+        <strong>{data.title || meta.label}</strong>
+      </header>
+      {data.description && <p className="approval-desc">{data.description}</p>}
+
+      {resolved ? (
+        <p className="approval-resolved">
+          {materialIcon('check_circle')}
+          {resolved}
+        </p>
+      ) : category === 'clarification' ? (
+        <div className="approval-answer">
+          <textarea
+            rows={2}
+            placeholder="回复员工的问题…"
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+          />
+          <button
+            type="button"
+            className="button primary"
+            disabled={busy || !answer.trim()}
+            onClick={doAnswer}
+          >
+            提交回复
+          </button>
+        </div>
+      ) : (
+        <footer className="approval-actions">
+          {category === 'capability_upgrade' && (
+            <input
+              className="approval-capkey"
+              value={capKey}
+              placeholder="能力 key（可修改）"
+              onChange={(e) => setCapKey(e.target.value)}
+            />
+          )}
+          <button
+            type="button"
+            className="button primary"
+            disabled={busy || (category === 'capability_upgrade' && !capKey.trim())}
+            onClick={() => doResolve('approved')}
+          >
+            {category === 'capability_upgrade' ? '批准并升级' : '批准'}
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={busy}
+            onClick={() => doResolve('rejected')}
+          >
+            驳回
+          </button>
+        </footer>
+      )}
+    </article>
+  );
+}
+
 function MessageItem({
   message,
   agent,
@@ -3214,6 +3441,8 @@ function MessageItem({
   onConfirmBrief,
   onRejectBrief,
   onCreateTaskFromBrief,
+  onResolveCardApproval,
+  onAnswerCardClarification,
 }: {
   message: Message;
   agent?: Agent;
@@ -3226,7 +3455,27 @@ function MessageItem({
     title: string,
     ownerId?: string,
   ) => Promise<boolean>;
+  onResolveCardApproval?: (
+    approvalId: string,
+    status: 'approved' | 'rejected',
+    approvedCapabilityKey?: string,
+  ) => Promise<boolean>;
+  onAnswerCardClarification?: (
+    approvalId: string,
+    answer: string,
+  ) => Promise<boolean>;
 }) {
+  // TD-06-T3: approval / clarification / capability-upgrade cards in chat
+  if (message.type === 'system' && message.text.startsWith('APPROVAL_CARD:')) {
+    return (
+      <ApprovalCard
+        raw={message.text.slice('APPROVAL_CARD:'.length)}
+        onResolve={onResolveCardApproval}
+        onAnswer={onAnswerCardClarification}
+      />
+    );
+  }
+
   // Check for BRIEF_CARD message type
   if (message.type === 'system' && message.text.startsWith('BRIEF_CARD:')) {
     const briefJson = message.text.slice('BRIEF_CARD:'.length);

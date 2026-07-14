@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 2026-07-14（聊天内审批/求援/能力升级卡片 —— 让「拍板」在 UI 上可操作）
+- **feat(desktop)**: 员工执行挂起时，聊天里直接弹出可操作卡片，老板当场批准/驳回/回答/确认升级，续跑同一个 run。补上了 TD-03-T4 / TD-06-T2 缺的前端一环。
+  - SSE `approval` 事件（`_persist_run_approval` 发的，带 `approval_id`+`category`+`tool_call`）此前前端**根本没处理**（switch 里没有分支）→ 现在插一条 `APPROVAL_CARD:{json}` 系统消息进当前会话。
+  - 新增 `ApprovalCard` 组件，按 category 渲染：**高风险**（标题+说明+批准/驳回）、**澄清**（问题+文本框+提交回复 → `POST /approvals/{id}/answer`）、**能力升级**（可编辑的能力 key + 批准并升级 → `POST /approvals/{id}/resolve` 带 `approved_capability_key`）；点击后卡片原地翻转成「已批准 / 已回复 / 已批准升级：<key>」。
+  - `resolveChatApproval` / `answerChatClarification` 两个 handler 在 App 定义，经 `ChatPanel`→`MessageItem`（新增 `onResolveCardApproval` / `onAnswerCardClarification` props，与任务侧 `onResolveApproval` 区分）传入。
+  - `styles.css` 加 `.approval-card` 及三类配色（risk=warning、clarify=primary、upgrade=紫），浅深主题通用。
+  - **浏览器实测**（独立 API 8001 + renderer 5175）：登录 demo → 群聊出现 3 类卡片、渲染/配色正确；点「批准」→run 关联 `/resolve` 成功、卡片翻转；点「批准并升级」→`execute_upgrade` 真把 `web_scraping` 装进 `agent_capabilities`（status=enabled）、卡片翻转；`tsc` 无错、无 console 报错。
+  - 至此「群讨论 → 共识拍板 → 执行 → 高危/求援挂起 → 老板在聊天里拍板 → 续跑」整条闭环在 UI 上**可操作、可演示**。
+
 ### 2026-07-14（TD-06-T3：成长轨迹前端 —— 让自进化「可见」）
 - **feat(desktop)**: 员工详情抽屉 `AgentDetail` 新增「成长轨迹」区，把 TD-06-T1/T2 的后端成果接成用户能看的界面。
   - **已获得能力**：拉 `GET /api/agents/{id}/spec` 的 `capabilities`，渲染能力徽章 + 状态（`已启用`/`待补凭证`/`待生效`/`已停用`，`credential_missing` 用 warning 色、`disabled` 用 subtle 色）。
