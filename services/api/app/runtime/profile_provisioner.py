@@ -417,19 +417,21 @@ class LocalHermesProvisioner:
         # here we only write credentials that are actually provided.
         # MCP wiring remains deferred (same as configure()).
 
-        # Reload gateway so the new capability takes effect
+        # No reload needed: our execution model spawns a fresh `hermes acp`
+        # subprocess per run, which re-reads config.yaml — so a newly enabled
+        # toolset is available on the NEXT run automatically.
         self.reload_gateway(profile_name)
 
     def reload_gateway(self, profile_name: str) -> None:
-        """TD-06-T2: Hot-reload the profile's Hermes gateway.
+        """No-op in the ACP execution model.
 
-        Best-effort. If no gateway is running (404 or not found), this is
-        a silent no-op — the capability will be available on next start.
+        We do NOT run a persistent per-employee gateway; each run is a fresh
+        ``hermes acp`` subprocess that reads config.yaml at startup. (`hermes
+        gateway reload` is not a real subcommand — verified against v0.18.2 —
+        and there is no long-lived process to reload here.) Kept for interface
+        compatibility; a config change takes effect on the next run.
         """
-        try:
-            self._run(["gateway", "reload"], profile=profile_name)
-        except HermesProvisionError:
-            pass  # No running gateway — that's fine
+        return None
 
 
 def build_provisioner_from_settings() -> ProfileProvisioner:

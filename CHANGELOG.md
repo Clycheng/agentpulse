@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 2026-07-14（审计修正：审批门在真运行时不生效 —— 纠正 T4/卡片的过度声称）
+- **audit + fix**: 对真 Hermes 做了实测审计,发现之前 TD-03-T4「审批 suspend/resume」及聊天卡片的「闭环可演示」声称**对真运行时不成立**,之前的"验证"全靠 fake backend + seed 的 approval 行。如实纠正:
+  - **实测(真 Hermes ACP,agentpulse profile)**:① 让 agent 执行 `rm -rf ...` —— agent **直接执行成功,`request_permission` 触发 0 次**。ACP 执行路径下 Hermes 不为内置危险工具(terminal 等)调客户端审批,`--yolo` 未传也一样。② 让 agent 求援 —— agent 思考里明说"**我没有 clarify 工具**"(clarify toolset 虽 CLI 标 enabled,但 ACP 会话未暴露给模型),于是**用普通消息把问题问出来就结束**了。
+  - **结论**:high_risk / clarification / capability_upgrade 三类审批**真 agent 都产生不了**;审批桥、卡片、`/resolve`、`/answer`、`execute_upgrade` 都是能跑的真代码,但**只有 seed/手动建的 approval 行能触发**。→ 北极星「老板拍板制」**当前未在执行层真强制**(危险命令裸跑)。求援其实已天然可用——agent 发消息问、老板回、下轮带答案继续,**不需要专门的求援卡**。
+  - **本次已修**:① `LocalHermesProvisioner.reload_gateway` 之前调 `hermes gateway reload`——**该子命令不存在(实测 v0.18.2 只有 run/start/stop/restart/…)**,且我们每次 run 起新 `hermes acp` 会重读 config、加的工具下一次 run 自动生效,无需 reload → 改为诚实 no-op。② AGENTS.md §4 Hermes 行由"🟢 已接入含 T4"改为"🟡 执行真、审批门未真强制";看板 T4/卡片条目加 ⚠️。
+  - **真修法(待定/看板)**:审批门要在**执行层真强制**,候选:(a) 最小权限——不给员工 profile 开 terminal/code_execution/computer_use,危险能力必须老板显式授予;(b) 调研 ACP `initialize` 的 client permission 能力握手,看能否让 Hermes 真触发 `request_permission`;(c) 自研门(在我们这层拦截/不给危险工具)。这是架构决策,需项目所有者拍板后再实现,不再靠 seed 假装。
+
 ### 2026-07-14（聊天内审批/求援/能力升级卡片 —— 让「拍板」在 UI 上可操作）
 - **feat(desktop)**: 员工执行挂起时，聊天里直接弹出可操作卡片，老板当场批准/驳回/回答/确认升级，续跑同一个 run。补上了 TD-03-T4 / TD-06-T2 缺的前端一环。
   - SSE `approval` 事件（`_persist_run_approval` 发的，带 `approval_id`+`category`+`tool_call`）此前前端**根本没处理**（switch 里没有分支）→ 现在插一条 `APPROVAL_CARD:{json}` 系统消息进当前会话。

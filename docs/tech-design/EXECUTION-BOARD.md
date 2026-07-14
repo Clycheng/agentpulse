@@ -11,8 +11,9 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
-| 2 | TD-09-T3 剩余(渠道出站回复 + 微信/widget 适配器) | 渠道入站已通，出站未接 | 否（微信/widget 需真账号） | ⚪ |
+| 🔴1 | **审批门在执行层真强制**（修 T4 的根本缺口） | 实测:ACP 执行下 Hermes 不触发 `request_permission`,agent 裸跑 `rm -rf`,审批/求援/升级真 agent 都产生不了(2026-07-14 审计)。候选:(a)最小权限不开危险工具+危险能力老板显式授予;(b)调研 ACP permission 能力握手;(c)自研门。**需所有者拍板选型后实现,先出 ADR** | **agentpulse**(起真 Hermes 验证) | ⚪ |
+| 2 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
+| 3 | TD-09-T3 剩余(渠道出站回复 + 微信/widget 适配器) | 渠道入站已通，出站未接 | 否（微信/widget 需真账号） | ⚪ |
 
 ## 有依赖，等前置完成后做
 
@@ -25,10 +26,10 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
-| **聊天内审批/求援/能力升级卡片**：SSE `approval` 事件（带 category+approval_id+tool_call）→ 前端插一条 `APPROVAL_CARD:` 系统消息；新增 `ApprovalCard` 组件按类型渲染——高风险(批准/驳回)、澄清(文本框+提交回复→`/answer`)、能力升级(可改能力 key+批准并升级→`/resolve` 带 approved_capability_key)；`resolveChatApproval`/`answerChatClarification` 经 App→ChatPanel→MessageItem 传入；点后卡片原地翻转「已批准/已回复」。styles.css 加 `.approval-card`/三类配色。**浏览器实测**：3 类卡片渲染正确、点「批准」→run 关联 /resolve 翻转、点「批准并升级」→execute_upgrade 真装 `web_scraping`→`agent_capabilities` 落 `enabled`、无 console 报错 | 2026-07-14(见 CHANGELOG) | 至此「讨论→拍板→执行→挂起→续跑」在 UI 上真正可操作可演示 |
+| ⚠️ **聊天内审批/求援/能力升级卡片**（代码真、**真运行时触发不了**，见 2026-07-14 审计）：SSE `approval` 事件（带 category+approval_id+tool_call）→ 前端插一条 `APPROVAL_CARD:` 系统消息；新增 `ApprovalCard` 组件按类型渲染——高风险(批准/驳回)、澄清(文本框+提交回复→`/answer`)、能力升级(可改能力 key+批准并升级→`/resolve` 带 approved_capability_key)；`resolveChatApproval`/`answerChatClarification` 经 App→ChatPanel→MessageItem 传入；点后卡片原地翻转「已批准/已回复」。styles.css 加 `.approval-card`/三类配色。**浏览器实测**：3 类卡片渲染正确、点「批准」→run 关联 /resolve 翻转、点「批准并升级」→execute_upgrade 真装 `web_scraping`→`agent_capabilities` 落 `enabled`、无 console 报错 | 2026-07-14(见 CHANGELOG) | 至此「讨论→拍板→执行→挂起→续跑」在 UI 上真正可操作可演示 |
 | **TD-06-T3 成长轨迹前端（员工档案）**：`AgentDetail` 抽屉新增「成长轨迹」区——已获得能力（拉 `GET /agents/{id}/spec` 的 capabilities，`已启用`/`待补凭证`/`已停用` 徽章配色）+ 已习得技能（拉 `GET /agents/{id}/skills`，卡片显示 SKILL.md 标题+摘要）+「触发反思」按钮（调 `POST /reflect`，内联状态/错误）。styles.css 加 `.growth-*`/`.cap-badge`/`.skill-card`（复用 teal token）。**浏览器实测**：起 API(8001)+renderer(5175，`.env.local` 指向)→登录→员工→阿伦→成长轨迹正确渲染（social_content 已启用 + email_sending 待补凭证 + 技能空状态），tsc 无错、无 console 报错、截图留证 | 2026-07-14(见 CHANGELOG) | 纯前端；让 TD-06-T1/T2 的自进化成果「可见」；聊天内审批/求援卡片另立一项 |
 | **TD-06-T2 主动能力升级申请**：`runtime/upgrade.py::execute_upgrade`——老板批准能力升级审批→`resolve_bundle` 校验 key→`ProfileProvisioner.add_capability`(装 toolsets/skills+reload) 装到员工 profile→upsert `agent_capabilities`(有 required_credentials→`credential_missing`，否则 `enabled`)；`_persist_run_approval` 加 `capability_upgrade` 分支(写 payload_json 带 suggested key)；`/approvals/{id}/resolve` 识别 capability_upgrade→批准先装能力再唤醒 run；`ResolveApprovalRequest` 加 `approved_capability_key`(老板可改)；SOUL 加"缺工具主动申请升级"指令。**顺带修 bug**：另一会话重写 resolve 时把 `approved/rejected` 直接传桥，但 hermes_client 只认 `allow_once/deny`→**批准被误判成拒绝**，已改为正确映射。**零回归**：新增 `test_upgrade.py` 6 例(装能力+enabled/credential_missing、未知 key/无 profile 报错、幂等 upsert、resolve 端点全链)；全套 **250 通过 + 7 skipped**。三条 grep 干净 | 2026-07-14(见 CHANGELOG) | 北极星④自进化第二半闭环；能力真装到 profile；成长轨迹前端=TD-06-T3 |
-| **TD-03-T4 审批 suspend/resume + clarification**（见 CHANGELOG 详条）：`approval_bridge` 进程内 Future + `make_bridge_resolver` 原地挂起 ACP→`/resolve`/`/answer` 唤醒续跑；两会话平行实现已调和为单一入口、死码清除 | 2026-07-13(`d9e9fdd`+清理) | 北极星「老板拍板制」双向闭环 |
+| ⚠️ **TD-03-T4 审批 suspend/resume + clarification**（机制真、**真运行时不触发**，2026-07-14 审计降级）：`approval_bridge` 进程内 Future + `make_bridge_resolver` 原地挂起 ACP→`/resolve`/`/answer` 唤醒续跑；但实测 Hermes ACP 不触发 `request_permission`→真 agent 产生不了审批,只有 seed 行能走。**审批门未在执行层真强制,已回到"现在就做🔴1"** | 2026-07-13(`d9e9fdd`) | 需真修:见🔴1 |
 | **TD-01-T2 端到端手测**：4/5 步 API 级验证通过（brief 创建→拒绝→确认→建任务、门控拒绝），1 步 xfail（DeepSeek SOCKS 代理环境问题，不影响业务流程） | 2026-07-13 | 新增 `test_e2e_brief_lifecycle.py`（4 passed + 1 xfailed）；TD-01-T1/T1b 之前已实现；**brief 全链路已验证** |
 | **TD-03-T5 员工↔profile 生命周期（自动供给）**：`build_provisioner_from_settings` 按 `hermes_provisioning` 选 LocalHermes/RecordOnly；`supply.provision` 走真 provisioner——建 profile+写 SOUL(角色/职责/铁律)+配 model(`deepseek/deepseek-v4-flash`)+toolsets+装 skills+写 DeepSeek key→回填 `hermes_profile`/status=ready；profile 名合法化(lowercase alnum)。**真机 e2e 过**：provision→真 Hermes profile(model+SOUL+key)可跑，spec ready。招人→真员工全自动 | 2026-07-10(见 CHANGELOG) | 配 `AGENTPULSE_HERMES_PROVISIONING=true` 开启 |
 | **TD-03-T3 后半：热路径切换**：`send_message_stream` 的 DM + 群讨论两条路径都改成经 `runner.stream_agent_run` 调 Hermes（员工有 ready profile 时），否则回退临时 DeepSeek——**零回归**（现有 205 测试全过，无 profile 的 agent 走原路径）；`runner` 加 `resolve_hermes_profile` + 流式 `stream_agent_run`；approval_required 走 deny-by-default + SSE `approval` 事件。**真机 e2e 过**：DM 经 `/messages/stream` → runs(provider=hermes,completed)+run_steps(message,final)+agent 消息 "OK" 落库 | 2026-07-10(见 CHANGELOG) | 审批 suspend/resume 与自动供给留 T4/T5 |
