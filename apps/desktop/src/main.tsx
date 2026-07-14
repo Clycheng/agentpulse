@@ -2192,7 +2192,19 @@ function AuthScreen({
     <main className="workbench-shell auth-shell" data-theme={theme}>
       <section className="auth-hero" aria-label="AgentPulse 介绍">
         <div className="auth-brand">
-          <div className="auth-mark">✦</div>
+          <div className="auth-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+              <path d="M16 4 L27 26 H21.5 L16 14 L10.5 26 H5 Z" fill="url(#authMarkGradient)" />
+              <rect x="10.5" y="18" width="11" height="4.5" rx="2.25" fill="#062b26" fillOpacity=".55" />
+              <circle cx="16" cy="20.25" r="2.25" fill="#0d9488" />
+              <defs>
+                <linearGradient id="authMarkGradient" x1="5" y1="4" x2="27" y2="26">
+                  <stop stopColor="#2dd4bf" />
+                  <stop offset="1" stopColor="#0d9488" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
           <span>AgentPulse</span>
         </div>
         <h1>把一人公司，搭成一支 AI 团队。</h1>
@@ -2353,7 +2365,13 @@ function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="brand-mark">✦</div>
+      <div className="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+          <path d="M16 4 L27 26 H21.5 L16 14 L10.5 26 H5 Z" fill="#06090c" fillOpacity=".92" />
+          <rect x="10.5" y="18" width="11" height="4.5" rx="2.25" fill="#0d9488" />
+          <circle cx="16" cy="20.25" r="2.25" fill="#eef4f2" />
+        </svg>
+      </div>
       {items.map((item) => (
         <button
           className={view === item.key ? 'nav-item active' : 'nav-item'}
@@ -5583,7 +5601,13 @@ function OnboardingModal({
       <section className="onboarding-modal" aria-label="新手引导">
         {step === 0 && (
           <div className="onboarding-content centered">
-            <div className="onboarding-logo big">✦</div>
+            <div className="onboarding-logo big" aria-hidden="true">
+              <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16 4 L27 26 H21.5 L16 14 L10.5 26 H5 Z" fill="#06090c" fillOpacity=".92" />
+                <rect x="10.5" y="18" width="11" height="4.5" rx="2.25" fill="#0d9488" />
+                <circle cx="16" cy="20.25" r="2.25" fill="#eef4f2" />
+              </svg>
+            </div>
             <h2>欢迎来到 AgentPulse</h2>
             <p>
               这里不是聊天 Demo，而是你的 AI
@@ -5611,7 +5635,13 @@ function OnboardingModal({
 
         {step === 1 && (
           <div className="onboarding-content">
-            <div className="onboarding-logo">✦</div>
+            <div className="onboarding-logo" aria-hidden="true">
+              <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16 4 L27 26 H21.5 L16 14 L10.5 26 H5 Z" fill="#06090c" fillOpacity=".92" />
+                <rect x="10.5" y="18" width="11" height="4.5" rx="2.25" fill="#0d9488" />
+                <circle cx="16" cy="20.25" r="2.25" fill="#eef4f2" />
+              </svg>
+            </div>
             <h2>先认识你的第一批员工</h2>
             <p>
               小秘已经就位。你可以继续从人才市场招募这些角色，让一人公司开始分工。
@@ -5639,7 +5669,13 @@ function OnboardingModal({
 
         {step === 2 && (
           <div className="onboarding-content centered">
-            <div className="onboarding-logo big">✦</div>
+            <div className="onboarding-logo big" aria-hidden="true">
+              <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16 4 L27 26 H21.5 L16 14 L10.5 26 H5 Z" fill="#06090c" fillOpacity=".92" />
+                <rect x="10.5" y="18" width="11" height="4.5" rx="2.25" fill="#0d9488" />
+                <circle cx="16" cy="20.25" r="2.25" fill="#eef4f2" />
+              </svg>
+            </div>
             <h2>从给小秘发消息开始</h2>
             <p>
               你可以说“帮我把 AgentPulse

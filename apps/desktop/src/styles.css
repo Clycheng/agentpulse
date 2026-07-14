@@ -245,10 +245,14 @@ textarea:focus-visible,
   border-radius: 12px;
   background: linear-gradient(150deg, var(--primary) 0%, var(--primary-strong) 100%);
   color: var(--on-primary);
-  font-size: 19px;
   box-shadow:
     var(--shadow-sm),
     inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.brand-mark svg {
+  width: 22px;
+  height: 22px;
 }
 
 .nav-item {
@@ -435,6 +439,11 @@ textarea:focus-visible,
   background: var(--primary-soft);
   color: var(--primary);
   font-size: 19px;
+}
+
+.auth-mark svg {
+  width: 24px;
+  height: 24px;
 }
 
 .auth-hero h1 {
@@ -3889,9 +3898,14 @@ textarea::placeholder {
   height: 56px;
   margin: 0 auto;
   border-radius: 16px;
-  background: #3b5bdb;
-  color: #ffffff;
+  background: linear-gradient(150deg, var(--primary) 0%, var(--primary-strong) 100%);
+  color: var(--on-primary);
   font-size: 26px;
+}
+
+.onboarding-logo svg {
+  width: 30px;
+  height: 30px;
 }
 
 .onboarding-logo.big {
@@ -3899,6 +3913,11 @@ textarea::placeholder {
   height: 64px;
   border-radius: 18px;
   font-size: 28px;
+}
+
+.onboarding-logo.big svg {
+  width: 34px;
+  height: 34px;
 }
 
 .onboarding-content h2 {
@@ -3931,7 +3950,7 @@ textarea::placeholder {
 }
 
 .onboarding-feature-grid .material-symbol {
-  color: #3b5bdb;
+  color: var(--primary);
   font-size: 22px;
 }
 
@@ -3969,7 +3988,7 @@ textarea::placeholder {
 }
 
 .role-option.active {
-  border-color: #3b5bdb;
+  border-color: var(--primary);
   background: #f5f7fd;
 }
 
@@ -4005,7 +4024,7 @@ textarea::placeholder {
 }
 
 .role-option.active > .material-symbol {
-  color: #3b5bdb;
+  color: var(--primary);
 }
 
 .try-chip {
@@ -4021,7 +4040,7 @@ textarea::placeholder {
 }
 
 .try-chip .material-symbol {
-  color: #3b5bdb;
+  color: var(--primary);
 }
 
 .onboarding-footer {
@@ -4049,7 +4068,7 @@ textarea::placeholder {
 }
 
 .step-dots i.active {
-  background: #3b5bdb;
+  background: var(--primary);
 }
 
 .skip-button {

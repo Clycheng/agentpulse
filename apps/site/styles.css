@@ -165,15 +165,16 @@ section { position: relative; z-index: var(--z-base); }
   box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 0 18px var(--glow);
 }
 .brand-mark.small { width: 22px; height: 22px; }
-.brand-mark-core {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 8px #fff;
-  animation: beat 2.4s var(--ease) infinite;
+.brand-mark svg { width: 16px; height: 16px; }
+.brand-mark.small svg { width: 13px; height: 13px; }
+.brand-mark-dot {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: checkpoint-blink 2.6s var(--ease) infinite;
 }
-@keyframes beat {
-  0%, 100% { transform: scale(1); opacity: 0.9; }
-  50% { transform: scale(1.5); opacity: 1; }
+@keyframes checkpoint-blink {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; filter: drop-shadow(0 0 3px rgba(238,244,242,.8)); }
 }
 .nav-links { display: flex; gap: 26px; margin-left: auto; }
 .nav-links a { color: var(--muted); font-size: 0.95rem; transition: color 0.2s; }

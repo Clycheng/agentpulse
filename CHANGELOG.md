@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 2026-07-15（新 logo：Checkpoint 标记，全项目/官网统一替换）
+- **feat(brand)**: 设计并落地新 logo——「Checkpoint」：几何化字母 A，横杠切成一个卡口 + 一个常亮检查点，呼应产品"每个高风险动作都要过老板这道闸"的核心承诺；同时仍可读作字母 A（AgentPulse），能和文字标一起用。手绘矢量 SVG（无图像生成模型可用，矢量本就是 logo 该有的交付形态），在 16px favicon 尺寸下实测依然清晰。
+  - `apps/site/favicon.svg`：换成新标（深底 + teal 渐变 A + 卡口 + 检查点）。
+  - `apps/site/index.html` + `styles.css`：nav/footer 的 `.brand-mark` 从"跳动圆点"换成新标（深色 A + teal 卡口 + 亮点，贴合已有 teal 渐变容器）；保留一个克制的检查点呼吸动效（`prefers-reduced-motion` 已有全局兜底覆盖）。
+  - `apps/desktop/src/main.tsx` + `styles.css`：侧栏 `.brand-mark`、登录页 `.auth-mark`、onboarding 弹窗 3 处 `.onboarding-logo`（均为原先的"✦"字符）统一换成新标；`.onboarding-logo` 顺手把容器底色从遗留的硬编码蓝 `#3b5bdb`（6 处，teal 改版时漏改的）换成 teal 渐变 token，否则新标会和旧蓝底冲突。
+  - **浏览器实测**（官网 + 桌面端真登录，走完认证页→onboarding 三步→侧栏）：5 处 mark 位置渲染一致、无 console 报错；`tsc --noEmit` 桌面端无误。
+  - 过程：用 brandkit 方法论构思了 3 个方向（Roster/Handoff/Checkpoint），做成对比页发布为 Artifact 供选型，选定 Checkpoint 后实现。
+  - 暂未覆盖：Electron 应用本身的 dock/窗口图标（.icns/.ico，当前项目本就没有自定义过，用的是 Electron 默认图标）——如需要是独立的多分辨率图标生成工作，未来可补。
+
 ### 2026-07-14（官网 agentpulse.cc + 双语 README）
 - **feat(site)**: 新增官方营销官网 `apps/site`——纯静态(HTML/CSS/JS,零构建依赖),英文版。深色「操作驾驶舱」+ teal「脉搏」品牌信号;AI 特效:hero 脉搏网络 canvas(节点+沿边流动的脉冲)、辉光 aurora、滚动 reveal(带**兜底**:过渡在无头/后台会冻结导致空白 → 超时强制显形,遵循设计 skill 的"reveal 只增强、绝不门控可见性")、实时群聊打字演示(讨论→共识纪要卡→审批卡循环)。字体避开训练集默认:Bricolage Grotesque + Hanken Grotesk + JetBrains Mono。`prefers-reduced-motion` 全兜底、响应式、无 gradient-text/side-stripe 等 slop。`vercel.json`(cleanUrls+安全头);Vercel 原生 Git 集成 → 设 Root Directory=`apps/site` 即每次 push 自动部署(见 `apps/site/README.md`);自定义域 agentpulse.cc 在 Vercel 面板绑定。浏览器实测:9 区块/内容齐全、hero 渲染正确、无 console 报错。
 - **docs(readme)**: README 改为**多语言、默认英文**——`README.md`(英文,默认)+ `README.zh-CN.md`(中文),顶部互相语言切换 + 官网徽章;两版共用 `docs/images/` 截图。
