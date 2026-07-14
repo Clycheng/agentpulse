@@ -11,14 +11,13 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | [TD-06-T2](TD-06-agent-self-evolution.md)(主动能力升级申请) | approvals.payload_json schema done; +add_capability/reload_gateway to ProfileProvisioner | **agentpulse** | 🔵 进行中(step 2/6) |
+| 1 | TD-06-T3(成长轨迹 + 审批/求援卡 UI) | 前端把 `GET /skills`、能力升级/审批/求援卡片接进桌面端 | 否（前端）/ agentpulse（验 SOUL） | ⚪ |
 | 2 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
 
 ## 有依赖，等前置完成后做
 
 | 任务 | 等什么 | 会话要求 |
 |---|---|---|
-| TD-06-T3(成长轨迹 UI) | TD-06-T1✅ + TD-06-T2；`GET /api/agents/{id}/skills` 已就绪✅ | 否（前端）/ agentpulse（验 SOUL） |
 | TD-09-T3 **剩余**(ChannelReply 把回复发回原渠道 + 微信/widget 适配器) | **agentpulse**（需 Hermes 集成验证）|
 | TD-09-T3(ChannelReply + 网页 Widget) | TD-09-T2✅ — deps met, ready to move | 否 |
 
@@ -26,7 +25,8 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
-| **TD-03-T4 审批 suspend/resume 闭环**：`runner._make_approval_resolver`→ACP `request_permission` 拦截→建 approval+waiting_user→Future 挂起→`/approvals/{id}/resolve` 调 `resolve_pending` 唤醒→续跑或驳回；SOUL 铁律增强 clarify 指令；3 新单测 + 210 全过零回归 | 2026-07-13 | 代码无需 Hermes 即可测；批准后 run 续跑、驳回后 run 结束、超时→failed |
+| **TD-06-T2 主动能力升级申请**：`runtime/upgrade.py::execute_upgrade`——老板批准能力升级审批→`resolve_bundle` 校验 key→`ProfileProvisioner.add_capability`(装 toolsets/skills+reload) 装到员工 profile→upsert `agent_capabilities`(有 required_credentials→`credential_missing`，否则 `enabled`)；`_persist_run_approval` 加 `capability_upgrade` 分支(写 payload_json 带 suggested key)；`/approvals/{id}/resolve` 识别 capability_upgrade→批准先装能力再唤醒 run；`ResolveApprovalRequest` 加 `approved_capability_key`(老板可改)；SOUL 加"缺工具主动申请升级"指令。**顺带修 bug**：另一会话重写 resolve 时把 `approved/rejected` 直接传桥，但 hermes_client 只认 `allow_once/deny`→**批准被误判成拒绝**，已改为正确映射。**零回归**：新增 `test_upgrade.py` 6 例(装能力+enabled/credential_missing、未知 key/无 profile 报错、幂等 upsert、resolve 端点全链)；全套 **250 通过 + 7 skipped**。三条 grep 干净 | 2026-07-14(见 CHANGELOG) | 北极星④自进化第二半闭环；能力真装到 profile；成长轨迹前端=TD-06-T3 |
+| **TD-03-T4 审批 suspend/resume + clarification**（见 CHANGELOG 详条）：`approval_bridge` 进程内 Future + `make_bridge_resolver` 原地挂起 ACP→`/resolve`/`/answer` 唤醒续跑；两会话平行实现已调和为单一入口、死码清除 | 2026-07-13(`d9e9fdd`+清理) | 北极星「老板拍板制」双向闭环 |
 | **TD-01-T2 端到端手测**：4/5 步 API 级验证通过（brief 创建→拒绝→确认→建任务、门控拒绝），1 步 xfail（DeepSeek SOCKS 代理环境问题，不影响业务流程） | 2026-07-13 | 新增 `test_e2e_brief_lifecycle.py`（4 passed + 1 xfailed）；TD-01-T1/T1b 之前已实现；**brief 全链路已验证** |
 | **TD-03-T5 员工↔profile 生命周期（自动供给）**：`build_provisioner_from_settings` 按 `hermes_provisioning` 选 LocalHermes/RecordOnly；`supply.provision` 走真 provisioner——建 profile+写 SOUL(角色/职责/铁律)+配 model(`deepseek/deepseek-v4-flash`)+toolsets+装 skills+写 DeepSeek key→回填 `hermes_profile`/status=ready；profile 名合法化(lowercase alnum)。**真机 e2e 过**：provision→真 Hermes profile(model+SOUL+key)可跑，spec ready。招人→真员工全自动 | 2026-07-10(见 CHANGELOG) | 配 `AGENTPULSE_HERMES_PROVISIONING=true` 开启 |
 | **TD-03-T3 后半：热路径切换**：`send_message_stream` 的 DM + 群讨论两条路径都改成经 `runner.stream_agent_run` 调 Hermes（员工有 ready profile 时），否则回退临时 DeepSeek——**零回归**（现有 205 测试全过，无 profile 的 agent 走原路径）；`runner` 加 `resolve_hermes_profile` + 流式 `stream_agent_run`；approval_required 走 deny-by-default + SSE `approval` 事件。**真机 e2e 过**：DM 经 `/messages/stream` → runs(provider=hermes,completed)+run_steps(message,final)+agent 消息 "OK" 落库 | 2026-07-10(见 CHANGELOG) | 审批 suspend/resume 与自动供给留 T4/T5 |

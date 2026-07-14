@@ -66,20 +66,34 @@ def _persist_run_approval(
     category: str, payload: dict,
 ) -> None:
     """Insert a pending approval row keyed to this exact permission request."""
+    import json as _json
+
     tool = payload.get("tool_call") or {}
     tool_name = str(tool.get("title") or tool.get("name") or "高风险动作")
+    approval_payload: dict = {}
     if category == "clarification":
         title = "员工请求澄清"
         description = str(tool.get("question") or tool.get("text") or tool_name)
+        approval_type, risk = "clarification", "low"
+    elif category == "capability_upgrade":
+        # TD-06-T2: agent hit a capability gap and asked to be upgraded.
+        title = "员工申请能力升级"
+        description = str(tool.get("capability_description") or tool.get("text") or tool_name)
+        approval_type, risk = "capability_upgrade", "medium"
+        approval_payload = {
+            "capability_description": description,
+            "suggested_capability_key": tool.get("suggested_capability_key"),
+        }
     else:
         title = f"高风险动作需确认：{tool_name}"
         description = str(tool.get("text") or tool_name)
+        approval_type, risk = "high_risk", "high"
     conn.execute(
         """
         INSERT INTO approvals (
           id, workspace_id, task_id, conversation_id, agent_id,
-          title, description, status, risk_level, type, run_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+          title, description, status, risk_level, type, run_id, payload_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
         """,
         (
             approval_id,
@@ -89,9 +103,10 @@ def _persist_run_approval(
             ctx.agent_id or None,
             title,
             description,
-            "high" if category != "clarification" else "low",
-            "clarification" if category == "clarification" else "high_risk",
+            risk,
+            approval_type,
             run_id,
+            _json.dumps(approval_payload, ensure_ascii=False),
             _now_iso(),
         ),
     )

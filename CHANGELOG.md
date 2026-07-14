@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 2026-07-14（TD-06-T2：主动能力升级申请 —— 北极星④自进化第二半）
+- **feat(runtime+api)**: 员工碰到"有任务但缺工具"时主动申请升级，老板一键批准即自动把能力装到它的 Hermes profile。
+  - `runtime/upgrade.py::execute_upgrade`：读老板确认的 `approved_capability_key` → `resolve_bundle` 校验并合并出 toolsets/skills/mcp/creds/risk_gate → `ProfileProvisioner.add_capability`（真装：`tools enable` + `skills install` + `gateway reload`）→ upsert `agent_capabilities` 行（有 `required_credentials` → `credential_missing` 交给现有凭证流程要，否则 `enabled`）。未知 key / 无 profile → `UpgradeError`。
+  - `runner._persist_run_approval`：加 `capability_upgrade` 分支——标题"员工申请能力升级"、`payload_json` 存 `capability_description` + `suggested_capability_key`。
+  - `routes/workspace.py` `/approvals/{id}/resolve`：识别 `type=capability_upgrade`——批准时先 `execute_upgrade`（用老板确认或 agent 建议的 key）装好能力，再唤醒挂起的 run。`ResolveApprovalRequest` 加可选 `approved_capability_key`（老板可改 agent 猜的 key）。
+  - **顺带修 bug**：另一会话重写 resolve 端点时把 `approved`/`rejected` 原样传给 `approval_bridge.resolve_pending`，但 `hermes_client` 的 permission 映射只认 `allow_once`/`deny` → **批准会被误映射成拒绝**。已改为 `bridge_decision = "allow_once" if approved else "deny"`，高危审批的批准路径现在真的放行。
+  - SOUL(`_build_soul`)：铁律加"因缺工具/MCP/权限无法完成时，用 `clarify` 提交 `capability_upgrade` 申请，等老板批准自动获得能力"。
+  - **零回归**：新增 `test_upgrade.py` 6 例（无凭证→enabled、有凭证→credential_missing、未知 key/无 profile→报错、幂等 upsert 不重复、resolve 端点全链：批准→装 write_code→`agent_capabilities` 落行 + run 续跑）；全套 **250 通过 + 7 skipped**。三条架构 grep 干净。
+  - 说明：TD-06-T2 的 provisioner 方法（`add_capability`/`reload_gateway`）由另一会话先行提交（step 2/6，commit `e3a8101`），本次补齐 UpgradeService + 审批创建/解析接线 + SOUL + 测试，完成整条闭环。
+  - Verified: execute_upgrade 经生产路径 `POST /api/approvals/{id}/resolve`（type=capability_upgrade 批准分支）调用。
+
 ### 2026-07-13（清理：合并两套 TD-03-T4 的残留债务）
 - **chore(cleanup)**: 两个会话平行实现了 TD-03-T4，快进合并后留下债务，本次清理（方向未跑偏——三条架构 grep 干净、生产路径已收敛到 `make_bridge_resolver`）：
   - 删除死码 `runner._make_approval_resolver`（已被 `make_bridge_resolver`+`_persist_run_approval` 取代、不在生产路径）及其 `tests/test_approval_suspend.py`（258 行只测死码，正是 AGENTS.md §5 警告的反模式）；去掉 `runner.py` 重复定义的 `_now_iso` 与随之无用的 `asyncio`/`json`/`new_id` import。

@@ -1004,15 +1004,40 @@ def resolve_approval(
         (decision, current_user["id"], resolved_at, approval_id, workspace["id"]),
     )
 
-    # TD-03-T4: wake a suspended run (high_risk approvals created by the Hermes
-    # approval_resolver). The in-process permission_resolver callback is blocked
-    # on an approval_bridge Future; waking it lets the ACP stream continue.
-    run_id = approval.get("run_id")
-    if run_id and approval.get("type") == "high_risk":
+    # TD-03-T4 / TD-06-T2: wake a suspended run for run-linked approvals
+    # (high_risk gate or capability_upgrade). The in-process permission_resolver
+    # is blocked on an approval_bridge Future; waking it lets the ACP stream
+    # continue. clarification approvals are resolved via /answer, not here.
+    run_id = approval["run_id"]
+    if run_id and approval["type"] in ("high_risk", "capability_upgrade"):
         from app.runtime.approval_bridge import resolve_pending
-        from app.runtime.runs import RunStatus, transition_run
 
-        # Transition the run (in case no resolver is waiting — detached wake).
+        # TD-06-T2: approving a capability upgrade installs the capability onto
+        # the employee's profile (+ agent_capabilities row) before resuming.
+        if approval["type"] == "capability_upgrade" and decision == "approved":
+            from app.runtime.upgrade import UpgradeError, execute_upgrade
+
+            try:
+                appr_payload = json.loads(approval["payload_json"] or "{}")
+            except (ValueError, TypeError):
+                appr_payload = {}
+            cap_key = (
+                payload.approved_capability_key
+                or appr_payload.get("suggested_capability_key")
+            )
+            try:
+                execute_upgrade(
+                    conn,
+                    approval=dict(approval),
+                    approved_capability_key=cap_key or "",
+                    provisioner=build_provisioner_from_settings(),
+                )
+            except UpgradeError as exc:
+                raise HTTPException(status_code=400, detail=f"能力升级失败：{exc}")
+
+        # Map the owner's decision to the ACP permission decision hermes_client
+        # expects ("allow_once" | "deny") — NOT the raw approved/rejected string.
+        bridge_decision = "allow_once" if decision == "approved" else "deny"
         try:
             transition_run(
                 conn, run_id,
@@ -1021,9 +1046,8 @@ def resolve_approval(
         except Exception:
             pass  # run may have already moved on; bridge wake is still needed.
 
-        resolve_pending(approval_id, decision)
-        # Log a task event if the approval has a task_id.
-        task_id = approval.get("task_id")
+        resolve_pending(approval_id, bridge_decision)
+        task_id = approval["task_id"]
         if task_id:
             add_task_event(
                 conn,

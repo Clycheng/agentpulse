@@ -235,3 +235,6 @@ class ClaimTaskRequest(BaseModel):
 
 class ResolveApprovalRequest(BaseModel):
     status: Literal["approved", "rejected"]
+    # TD-06-T2: for capability_upgrade approvals, the owner confirms/adjusts which
+    # catalog capability to grant (defaults to the agent's suggested key).
+    approved_capability_key: str | None = None
