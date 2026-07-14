@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### 2026-07-14（官网 agentpulse.cc + 双语 README）
+- **feat(site)**: 新增官方营销官网 `apps/site`——纯静态(HTML/CSS/JS,零构建依赖),英文版。深色「操作驾驶舱」+ teal「脉搏」品牌信号;AI 特效:hero 脉搏网络 canvas(节点+沿边流动的脉冲)、辉光 aurora、滚动 reveal(带**兜底**:过渡在无头/后台会冻结导致空白 → 超时强制显形,遵循设计 skill 的"reveal 只增强、绝不门控可见性")、实时群聊打字演示(讨论→共识纪要卡→审批卡循环)。字体避开训练集默认:Bricolage Grotesque + Hanken Grotesk + JetBrains Mono。`prefers-reduced-motion` 全兜底、响应式、无 gradient-text/side-stripe 等 slop。`vercel.json`(cleanUrls+安全头);Vercel 原生 Git 集成 → 设 Root Directory=`apps/site` 即每次 push 自动部署(见 `apps/site/README.md`);自定义域 agentpulse.cc 在 Vercel 面板绑定。浏览器实测:9 区块/内容齐全、hero 渲染正确、无 console 报错。
+- **docs(readme)**: README 改为**多语言、默认英文**——`README.md`(英文,默认)+ `README.zh-CN.md`(中文),顶部互相语言切换 + 官网徽章;两版共用 `docs/images/` 截图。
+
 ### 2026-07-14（ADR 0008 分片1-3：技术危险动作的真审批门 —— 已真机验证）
 - **feat(runtime+api+desktop)**: 让高危动作在真执行路径上**真的挂起等老板拍板**,批准才跑、拒绝真拦。修掉 2026-07-14 审计发现的"审批门不生效"根因。
   - **分片1**（`profile_provisioner.configure`）：供给员工 profile 时设 `approvals.mode: manual`。此前没配 → Hermes 落 `smart` 档用辅助模型自动放行危险命令;`manual` 让它走 ACP `request_permission` → 我们的 client。

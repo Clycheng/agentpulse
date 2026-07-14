@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgentPulse — Hire a team of AI employees. Run them like a real company.</title>
+    <meta
+      name="description"
+      content="AgentPulse is an open-source AI company workspace. Hire AI employees, assign goals in a group chat, let them discuss before they act, and approve every high-risk move. No prompts, no workflow graphs — if you can run a group chat, you can run an AI company."
+    />
+    <meta name="theme-color" content="#06090c" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://agentpulse.cc" />
+    <meta property="og:title" content="AgentPulse — Run AI like a company, not a chatbot" />
+    <meta
+      property="og:description"
+      content="Hire AI employees, brief them in a group chat, let them discuss before acting, approve the risky moves. Open source."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- living pulse-network canvas behind the hero -->
+    <canvas id="pulse-canvas" aria-hidden="true"></canvas>
+    <div class="aurora" aria-hidden="true"></div>
+
+    <header class="nav" id="nav">
+      <a class="brand" href="#top" aria-label="AgentPulse home">
+        <span class="brand-mark" aria-hidden="true"><span class="brand-mark-core"></span></span>
+        <span class="brand-word">AgentPulse</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#how">How it works</a>
+        <a href="#features">Features</a>
+        <a href="#compare">Why it's different</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <div class="nav-cta">
+        <a class="ghost" href="https://github.com/Clycheng/agentpulse" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          GitHub
+        </a>
+        <a class="solid" href="#cta">Start building</a>
+      </div>
+    </header>
+
+    <main id="top">
+      <!-- ───────────────────────── HERO ───────────────────────── -->
+      <section class="hero">
+        <div class="hero-inner">
+          <p class="status" data-reveal>
+            <span class="dot" aria-hidden="true"></span>
+            Alpha · open source · self-hostable
+          </p>
+          <h1 data-reveal>
+            Hire a team of<br /><span class="grad">AI employees.</span><br />
+            Run them like a real company.
+          </h1>
+          <p class="lede" data-reveal>
+            AgentPulse isn't another chatbot or a workflow builder. You hire AI
+            employees, assign goals in a group chat, and let them
+            <em>discuss before they act</em> — with you approving every
+            high-risk move. If you can run a group chat, you can run a company.
+          </p>
+          <div class="hero-actions" data-reveal>
+            <a class="solid lg" href="https://github.com/Clycheng/agentpulse" target="_blank" rel="noopener">
+              View on GitHub
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M7 17 17 7M17 7H8M17 7v9"/></svg>
+            </a>
+            <a class="ghost lg" href="#how">See the loop</a>
+          </div>
+          <ul class="hero-chips" data-reveal>
+            <li>No prompts to write</li>
+            <li>No workflow graphs</li>
+            <li>Any OpenAI-compatible model</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── MANIFESTO ───────────────────────── -->
+      <section class="manifesto">
+        <p data-reveal>
+          Most "AI tools" hand you a blank box and a blinking cursor.
+          <span class="hl">AgentPulse hands you a company.</span> Departments,
+          employees with names and memory, a task board, an inbox of decisions
+          waiting for your call. The work doesn't vanish when you close the tab —
+          it keeps running on a server while you sleep.
+        </p>
+      </section>
+
+      <!-- ───────────────────────── HOW IT WORKS (live demo) ───────────────────────── -->
+      <section class="how" id="how">
+        <div class="section-head">
+          <h2 data-reveal>Watch a company think, not a bot reply.</h2>
+          <p data-reveal>
+            You drop a goal in the group. The right employees get pulled in,
+            argue out the unknowns, and turn the conversation into a
+            <strong>consensus brief</strong>. Only after you confirm does work
+            begin — and anything risky stops for your sign-off.
+          </p>
+        </div>
+
+        <div class="how-grid">
+          <!-- live chat -->
+          <div class="chat" data-reveal aria-label="Example group discussion">
+            <div class="chat-head">
+              <span class="chat-title"># next week — content plan</span>
+              <span class="chat-live"><span class="dot"></span>4 members</span>
+            </div>
+            <div class="chat-body" id="chat-body"><!-- populated by main.js --></div>
+          </div>
+
+          <!-- the loop steps -->
+          <ol class="loop" data-reveal>
+            <li>
+              <h3>Say the goal</h3>
+              <p>“Plan next week's content.” Plain language, in the group.</p>
+            </li>
+            <li>
+              <h3>They discuss</h3>
+              <p>Employees ask what's unclear instead of guessing — like real teammates.</p>
+            </li>
+            <li>
+              <h3>You confirm the brief</h3>
+              <p>The chat collapses into a consensus card. One click turns it into tasks.</p>
+            </li>
+            <li>
+              <h3>They execute — you hold the keys</h3>
+              <p>Publishing, spending, deploying: every high-risk action waits for your approval.</p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── FEATURES ───────────────────────── -->
+      <section class="features" id="features">
+        <div class="section-head">
+          <h2 data-reveal>Built around how a company actually runs.</h2>
+        </div>
+        <div class="feature-list">
+          <article class="feat feat-lead" data-reveal>
+            <div class="feat-icon">✎</div>
+            <h3>Hire in one sentence</h3>
+            <p>
+              Say “I need a content lead for Xiaohongshu” and get an employee with
+              a persona, skills, and boundaries. No prompt engineering, nothing to
+              configure.
+            </p>
+          </article>
+          <article class="feat" data-reveal>
+            <div class="feat-icon">⇄</div>
+            <h3>Discuss, then execute</h3>
+            <p>Agents question fuzzy briefs in the group and reach a written consensus before touching anything.</p>
+          </article>
+          <article class="feat" data-reveal>
+            <div class="feat-icon">⛊</div>
+            <h3>The boss holds the keys</h3>
+            <p>Publish, deploy, spend, send — every high-risk move stops and waits for allow-once / allow-always / deny.</p>
+          </article>
+          <article class="feat" data-reveal>
+            <div class="feat-icon">◈</div>
+            <h3>Gets better the more you use it</h3>
+            <p>Each employee keeps long-term memory and distills skills from its work — your corrections stick.</p>
+          </article>
+          <article class="feat" data-reveal>
+            <div class="feat-icon">◐</div>
+            <h3>No idle employees</h3>
+            <p>When there's no task, they reflect, spot opportunities, and drop ideas into an Idea Center — 24/7.</p>
+          </article>
+          <article class="feat" data-reveal>
+            <div class="feat-icon">▤</div>
+            <h3>Everything leaves a trace</h3>
+            <p>Who did what, how far along, what they produced — conversations scatter, tasks and outputs don't.</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── COMPARE ───────────────────────── -->
+      <section class="compare" id="compare">
+        <div class="section-head">
+          <h2 data-reveal>Not a chatbot. Not a workflow builder.</h2>
+        </div>
+        <div class="table-wrap" data-reveal>
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>Chatbot<span>(ChatGPT-style)</span></th>
+                <th>Automation<span>(Dify / n8n-style)</span></th>
+                <th class="us">AgentPulse</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th>Mental model</th>
+                <td>One window, one assistant</td>
+                <td>Nodes, triggers, JSON</td>
+                <td class="us">Run a company</td>
+              </tr>
+              <tr>
+                <th>Multi-role collaboration</th>
+                <td><span class="no">✕</span> single assistant</td>
+                <td><span class="mid">~</span> you orchestrate</td>
+                <td class="us"><span class="yes">✓</span> employees discuss &amp; hand off</td>
+              </tr>
+              <tr>
+                <th>Process &amp; output kept</th>
+                <td><span class="no">✕</span> gone when you close it</td>
+                <td><span class="mid">~</span> engineer-facing</td>
+                <td class="us"><span class="yes">✓</span> tasks, progress, outputs traced</td>
+              </tr>
+              <tr>
+                <th>Dangerous actions gated</th>
+                <td><span class="no">✕</span></td>
+                <td><span class="mid">~</span> you wire it</td>
+                <td class="us"><span class="yes">✓</span> enforced approvals</td>
+              </tr>
+              <tr>
+                <th>Learning curve</th>
+                <td>Low</td>
+                <td>High</td>
+                <td class="us">Low — hire &amp; delegate in words</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── AUDIENCE ───────────────────────── -->
+      <section class="who">
+        <div class="section-head">
+          <h2 data-reveal>For people who wear every hat.</h2>
+        </div>
+        <div class="who-grid">
+          <div data-reveal><h3>Solo founders</h3><p>One person covering marketing, ops, support and finance — hand it to an AI staff.</p></div>
+          <div data-reveal><h3>Creators</h3><p>Topic research, multi-platform copy, performance reviews — run by an always-on operator.</p></div>
+          <div data-reveal><h3>Indie hackers</h3><p>Outsource the repetitive business work to “digital employees”; stay on the core product.</p></div>
+          <div data-reveal><h3>Small teams</h3><p>Add capacity without headcount, in the language of a company — not an API.</p></div>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── OPEN SOURCE ───────────────────────── -->
+      <section class="oss">
+        <div class="oss-inner" data-reveal>
+          <h2>Open source, and yours to run.</h2>
+          <p>
+            The code is open for study and research. Each employee runs on the
+            <a href="https://github.com/NousResearch/hermes-agent" target="_blank" rel="noopener">Hermes Agent</a>
+            runtime; any OpenAI-compatible model works (DeepSeek by default), and
+            text-only models still handle images, audio and video.
+          </p>
+          <div class="stack">
+            <span>Electron + React</span>
+            <span>FastAPI + PostgreSQL</span>
+            <span>Hermes runtime</span>
+            <span>DeepSeek / OpenAI-compatible</span>
+          </div>
+          <a class="ghost lg" href="https://github.com/Clycheng/agentpulse" target="_blank" rel="noopener">Read the source</a>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── FAQ ───────────────────────── -->
+      <section class="faq" id="faq">
+        <div class="section-head"><h2 data-reveal>Questions</h2></div>
+        <div class="faq-list" data-reveal>
+          <details>
+            <summary>How is this different from ChatGPT?</summary>
+            <p>ChatGPT is one assistant in one window; close it and the context is gone. AgentPulse is a persistent team — each employee has its own persona, skills and memory, work is traced as tasks, and it runs 24/7 on a server without you keeping a window open.</p>
+          </details>
+          <details>
+            <summary>Can the AI go rogue — publish or spend without me?</summary>
+            <p>No. Every high-risk action (publishing, deploying, anything that spends money) is structurally stopped for your approval — allow once, allow always, or deny. Irreversible spending stays with you by design, not by asking the model nicely.</p>
+          </details>
+          <details>
+            <summary>Do I need to be technical?</summary>
+            <p>No. The product speaks in companies, employees, group chats, tasks and approvals — not prompts, workflows or DAGs. If you can run a group chat, you can run AgentPulse.</p>
+          </details>
+          <details>
+            <summary>Which models does it support?</summary>
+            <p>Any OpenAI-compatible API, DeepSeek by default. A text-only model still handles images, audio and video — the runtime converts every modality to text for the main model.</p>
+          </details>
+          <details>
+            <summary>Is it ready to use?</summary>
+            <p>It's Alpha. The desktop workspace, group chat, tasks, consensus briefs and the approval gate are working; real multi-agent execution is being wired in on the open-source runtime. Try it and tell us what breaks.</p>
+          </details>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── CTA ───────────────────────── -->
+      <section class="cta" id="cta">
+        <div class="cta-inner" data-reveal>
+          <h2>Start your one-person company —<br />with a full staff.</h2>
+          <p>Clone it, run it locally, hire your first employee tonight.</p>
+          <div class="hero-actions">
+            <a class="solid lg" href="https://github.com/Clycheng/agentpulse" target="_blank" rel="noopener">Get AgentPulse on GitHub</a>
+          </div>
+          <code class="clone">git clone git@github.com:Clycheng/agentpulse.git</code>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot-brand">
+        <span class="brand-mark small" aria-hidden="true"><span class="brand-mark-core"></span></span>
+        AgentPulse
+      </div>
+      <p>Hire a team of AI employees. Run them like a real company.</p>
+      <div class="foot-links">
+        <a href="https://github.com/Clycheng/agentpulse" target="_blank" rel="noopener">GitHub</a>
+        <a href="#how">How it works</a>
+        <a href="#faq">FAQ</a>
+      </div>
+      <small>© 2026 AgentPulse · Source-available for study &amp; research · Commercial use requires a license.</small>
+    </footer>
+
+    <script src="main.js" defer></script>
+  </body>
+</html>

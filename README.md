@@ -2,85 +2,83 @@
 
 # AgentPulse
 
-**雇一支 AI 员工团队，像经营公司一样使用 AI**
+**Hire a team of AI employees. Run them like a real company.**
 
-*Hire a team of AI employees. Run them like a real company.*
+*雇一支 AI 员工团队，像经营公司一样使用 AI*
 
-![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-yellow.svg) ![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg) ![Platform: Desktop](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue.svg)
+**English** · [简体中文](README.zh-CN.md)
 
-[什么是 AgentPulse](#-什么是-agentpulse) · [核心特性](#-核心特性) · [适合谁用](#-适合谁用) · [快速开始](#-快速开始) · [常见问题](#-常见问题) · [开发者](#-开发者)
+[![Website](https://img.shields.io/badge/website-agentpulse.cc-0d9488.svg)](https://agentpulse.cc) ![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-yellow.svg) ![Status: Alpha](https://img.shields.io/badge/Status-Alpha-orange.svg) ![Platform: Desktop](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-blue.svg)
 
-<img src="docs/images/hero-discussion.png" alt="AgentPulse 桌面工作台：AI 员工在群里讨论，生成共识纪要，等老板拍板后再开工" width="900" />
+[What is it](#-what-is-agentpulse) · [Features](#-features) · [Who it's for](#-who-its-for) · [Quick start](#-quick-start) · [FAQ](#-faq) · [Developers](#-developers)
+
+<img src="docs/images/hero-discussion.png" alt="AgentPulse desktop workspace: AI employees discuss in a group, produce a consensus brief, and wait for the boss to approve before starting work" width="900" />
 
 </div>
 
 ---
 
-## 🧭 什么是 AgentPulse
+## 🧭 What is AgentPulse
 
-**AgentPulse 是一个开源的「AI 公司工作台」**——你像老板一样**雇一支 AI 员工团队**（内容主笔、运营、销售、客服、财务……），在群里交代目标，员工**先讨论清楚再动手**，任务与产出全程留痕，所有高风险动作都等你拍板。它不是又一个聊天机器人，而是把"用 AI"重构成"经营一家公司"——面向一人公司、自媒体和独立开发者。
+**AgentPulse is an open-source “AI company workspace.”** You act like the boss and **hire a team of AI employees** (a content lead, an operator, sales, support, finance…), assign goals in a group chat, and let them **discuss until it's clear before acting**. Every task and output is traced, and every high-risk action stops for your sign-off. It isn't another chatbot — it reframes “using AI” as “running a company,” built for solo founders, creators, and indie hackers.
 
-**AgentPulse is an open-source AI company workspace for solo founders and creators.** You hire AI employees, assign goals in a group chat, let them discuss before they act, track every task and output, and approve every high-risk action. No prompts, no workflow DAGs, no config files — if you can run a group chat, you can run an AI company.
+## ✨ Features
 
-## ✨ 核心特性
+- **🧑‍💼 Hire in one sentence** — Say “I need a content lead for Xiaohongshu” and get an AI employee with a persona, skills, and boundaries. No prompt engineering, nothing to configure.
+- **💬 Discuss, then execute** — Employees behave like real teammates: they question a fuzzy brief in the group, reach a written **consensus brief**, and only start once you confirm — never charging ahead blind.
+- **📋 Everything is traced** — Who's doing what, how far along, and what they produced — the task center shows it all. Conversations scatter; tasks and outputs don't.
+- **🛡 The boss holds the keys** — Publishing, deploying, spending, sending — every high-risk action is structurally stopped for your approval. The AI can never step past that gate.
+- **🌱 Gets better the more you use it** — Each employee has long-term memory and distills skills from its work: corrected wording, mistakes it hit — it won't repeat them.
+- **🌙 24/7, never off the clock** — Employees live on a server: they review data on a schedule and surface topics and ideas on their own, so the company keeps running while you sleep.
+- **🔓 Open source, model-agnostic** — Source open for study and research; works with any OpenAI-compatible model (DeepSeek by default), and text-only models still handle images / audio / video (auto-converted).
 
-- **🧑‍💼 一句话雇一个员工** — 说"我要一个小红书运营"，就得到一个有人格、有技能、有边界的 AI 员工，不用写 prompt、不用配置任何东西。
-- **💬 先讨论，再执行** — 员工像真人同事：背景不清会在群里追问你，讨论出「共识纪要」你点了确认，才开始干活——绝不稀里糊涂开工。
-- **📋 任务全程可追踪** — 谁在做、做到哪、产出了什么，任务中心一目了然；对话会散，任务和产出永远留痕。
-- **🛡 老板拍板制** — 发布、部署、花钱、对外发送……所有高风险动作强制停下等你确认，AI 永远越不过这道门。
-- **🌱 员工越用越懂你** — 每个员工有长期记忆，会在工作中沉淀技能：改过的口径、踩过的坑，下次不会再犯。
-- **🌙 7×24 不下班** — 员工住在服务器上：定时复盘数据、主动产出选题和想法，你睡觉时公司还在转。
-- **🔓 源码开放、模型不锁定** — 代码开放供学习研究；接任何 OpenAI 兼容模型（默认 DeepSeek），纯文本模型也能处理图片/音频/视频（系统自动转换）。
+## 👥 Who it's for
 
-## 👥 适合谁用
+- **Solo founders** — One person carrying marketing, ops, support and finance — share the load with an AI staff and free yourself up.
+- **Creators** — Topic research, multi-platform copy, performance reviews — handed to an always-on AI operator.
+- **Indie hackers / small teams** — Outsource repetitive business work to “digital employees” and stay on your core product.
+- **Anyone who wants to use AI well without learning prompts / workflows** — The product speaks in companies, employees, group chats, tasks and approvals — not APIs and node graphs.
 
-- **一人公司 / 独立创业者** — 一个人要扛市场、运营、客服、财务全套活，用 AI 班底分担，把自己解放出来。
-- **自媒体 / 内容创作者** — 内容选题、多平台文案、数据复盘，交给持续在线的 AI 运营。
-- **独立开发者 / 小团队** — 把重复性业务外包给"数字员工"，自己专注核心产品。
-- **想用好 AI、又不想学 prompt / workflow 的人** — 产品语言是公司、员工、群聊、任务、审批，不是 API 和节点图。
-
-> *For solo founders, indie hackers, creators, and small teams who want an AI workforce — not another chatbot or a workflow builder.*
-
-## 💡 它是怎么工作的
+## 💡 How it works
 
 ```text
-1. 创建你的公司      →  获得默认班底（秘书、主笔、运营、客服、财务）
-2. 群里说出目标      →  "下周帮我做小红书内容规划"
-3. 员工讨论澄清      →  "主打什么主题？发几篇？有直播要配合吗？"
-4. 你确认共识纪要    →  一键生成任务，员工开始执行
-5. 关键节点你拍板    →  发布前、花钱前，必须经过你
+1. Create your company   →  get a default staff (secretary, writer, ops, support, finance)
+2. State a goal in chat  →  "Plan next week's content for us"
+3. They clarify          →  "Which theme? How many posts? Any livestream to match?"
+4. You confirm the brief →  one click turns it into tasks; they start executing
+5. You sign off at gates →  before publishing, before spending — it goes through you
 ```
 
-## 🖼 界面预览
+## 🖼 Screenshots
 
-> 桌面工作台（Electron + React），支持浅色 / 深色主题。以下为一家「小红书内容工作室」的真实使用场景。
+> Desktop workspace (Electron + React), light / dark themes. Below: a real scenario for a Xiaohongshu content studio.
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/tasks.png" alt="任务中心：谁在做、做到哪、什么状态一目了然" /><br />
-      <sub><b>任务中心</b> · 共识确认后自动生成任务，进度/负责人/状态全程留痕</sub>
+      <img src="docs/images/tasks.png" alt="Task center: who's doing what, how far along, and its status at a glance" /><br />
+      <sub><b>Task center</b> · tasks auto-created after a confirmed consensus; progress / owner / status all traced</sub>
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/talent-market.png" alt="人才市场：按岗位招募 AI 员工，确认技能与 MCP 后入职" /><br />
-      <sub><b>人才市场</b> · 按岗位招募 AI 员工，确认 Prompt / 技能 / MCP 后入职</sub>
+      <img src="docs/images/talent-market.png" alt="Talent market: hire AI employees by role, confirm skills and MCP before onboarding" /><br />
+      <sub><b>Talent market</b> · hire AI employees by role; confirm prompt / skills / MCP before onboarding</sub>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="docs/images/ideas.png" alt="想法中心：空闲员工主动沉淀改进、机会、风险、学习" /><br />
-      <sub><b>想法中心</b> · 没有 idle 员工——空闲时也在攒改进 / 机会 / 风险 / 学习</sub>
+      <img src="docs/images/ideas.png" alt="Idea center: idle employees proactively bank improvements, opportunities, risks and learnings" /><br />
+      <sub><b>Idea center</b> · no idle employees — they bank improvements / opportunities / risks / learnings when free</sub>
     </td>
     <td width="50%" valign="top">
-      <img src="docs/images/hero-discussion-dark.png" alt="深色主题下的群讨论与共识纪要" /><br />
-      <sub><b>深色主题</b> · 同一套群讨论 + 共识纪要，深色「驾驶舱」质感</sub>
+      <img src="docs/images/hero-discussion-dark.png" alt="Group discussion and consensus brief in dark theme" /><br />
+      <sub><b>Dark theme</b> · the same group discussion + consensus brief, in a dark “cockpit” look</sub>
     </td>
   </tr>
 </table>
 
-## 🚀 快速开始
+## 🚀 Quick start
 
-> 要求：Node.js 20+ · Python 3.12+ · Docker（跑 PostgreSQL）
+> Requirements: Node.js 20+ · Python 3.12+ · Docker (for PostgreSQL)
 
 ```bash
 git clone git@github.com:Clycheng/agentpulse.git && cd agentpulse
@@ -88,64 +86,64 @@ npm install
 cd services/api && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && cd ../..
 docker compose up -d postgres
 
-export AGENTPULSE_DEEPSEEK_API_KEY="你的 DeepSeek API Key"
-npm run dev:api        # 后端
-npm run dev:desktop    # 桌面工作台
+export AGENTPULSE_DEEPSEEK_API_KEY="your DeepSeek API key"
+npm run dev:api        # backend
+npm run dev:desktop    # desktop workspace
 ```
 
-打开桌面应用，注册进入你的公司即可。更多配置见 [docs/](docs/)。
+Open the desktop app, register, and you're in your company. More config in [docs/](docs/).
 
-## 🆚 和现有产品的区别
+## 🆚 How it's different
 
-| | 聊天机器人 (ChatGPT 类) | 自动化平台 (Dify/n8n 类) | **AgentPulse** |
+| | Chatbot (ChatGPT-style) | Automation (Dify / n8n-style) | **AgentPulse** |
 |---|---|---|---|
-| 心智模型 | 和一个窗口反复对话 | 配置节点、触发器、JSON | **经营一家公司** |
-| 多角色协作 | ❌ 单一助手 | 🟡 靠人编排 | ✅ 员工群里讨论、接力 |
-| 过程与产出沉淀 | ❌ 聊完即散 | 🟡 面向工程师 | ✅ 任务/进度/产出全留痕 |
-| 危险动作管控 | ❌ | 🟡 靠自己配置 | ✅ 强制审批，绕不过 |
-| 上手门槛 | 低 | 高 | **低**（自然语言雇人派活） |
+| Mental model | One window, one assistant | Nodes, triggers, JSON | **Run a company** |
+| Multi-role collaboration | ❌ single assistant | 🟡 you orchestrate | ✅ employees discuss &amp; hand off |
+| Process &amp; output kept | ❌ gone when you close it | 🟡 engineer-facing | ✅ tasks / progress / outputs traced |
+| Dangerous actions gated | ❌ | 🟡 you wire it | ✅ enforced approvals |
+| Learning curve | Low | High | **Low** (hire &amp; delegate in words) |
 
-## ❓ 常见问题
+## ❓ FAQ
 
-**和 ChatGPT 有什么区别？**
-ChatGPT 是一个窗口一个助手，聊完即散。AgentPulse 是一支持续存在的团队：每个员工有自己的人格、技能和记忆，任务留痕，7×24 在服务器上工作，不依赖你开着窗口。
+**How is this different from ChatGPT?**
+ChatGPT is one assistant in one window; close it and the context is gone. AgentPulse is a persistent team — each employee has its own persona, skills and memory, work is traced as tasks, and it runs 24/7 on a server without you keeping a window open.
 
-**AI 员工会失控吗？会乱花钱、乱发布吗？**
-不会。所有高风险动作（对外发布、部署上线、任何花钱操作）都被系统强制拦下等你确认；"花钱且不可逆"的事（比如买域名）永远由你亲自完成。这是产品的硬性设计，不是对 AI 的口头要求。
+**Can the AI go rogue — spend money or publish on its own?**
+No. Every high-risk action (publishing, deploying, anything that spends money) is structurally stopped for your approval. Irreversible spending (e.g. buying a domain) always stays with you. It's a hard product constraint, not a request to the model.
 
-**需要懂技术吗？**
-不需要。产品语言是「公司、员工、群聊、任务、审批」，不是 prompt、workflow、DAG。会用微信群，就会用 AgentPulse。
+**Do I need to be technical?**
+No. The product speaks in companies, employees, group chats, tasks and approvals — not prompts, workflows or DAGs. If you can run a group chat, you can run AgentPulse.
 
-**和 Dify / n8n / Coze 这类平台有什么不同？**
-那些是给会配置的人用的自动化 / 编排平台，你要自己搭节点、连触发器、调 prompt。AgentPulse 把这一切藏在"公司"心智后面：你只管用自然语言雇人、在群里派活、点确认，多员工的讨论与分工由系统编排。详见上方[对比表](#-和现有产品的区别)。
+**How is it different from Dify / n8n / Coze?**
+Those are automation / orchestration platforms for people who like to configure — you build nodes, wire triggers, tune prompts. AgentPulse hides all of that behind the “company” metaphor: you hire in natural language, delegate in the group, and click confirm; the multi-agent discussion and division of labor are orchestrated for you.
 
-**支持哪些模型？**
-任何 OpenAI 兼容 API，默认 DeepSeek。用纯文本模型也能处理图片、音频、视频（系统自动转换）。
+**Which models are supported?**
+Any OpenAI-compatible API, DeepSeek by default. A text-only model still handles images, audio and video (auto-converted by the runtime).
 
-**现在能用吗？**
-Alpha 阶段：桌面工作台、群聊、任务、共识纪要与审批已可用；多员工自动讨论和真实执行能力正在接入。欢迎试用与反馈。
+**Is it usable now?**
+Alpha: the desktop workspace, group chat, tasks, consensus briefs and the approval gate work; real multi-agent discussion and execution are being wired in. Try it and send feedback.
 
-## 🗺 路线图
+## 🗺 Roadmap
 
-- ✅ 桌面工作台：群聊、员工、任务、审批、共识纪要
-- 🚧 多员工群内自动讨论与分工
-- 🚧 员工真实执行能力（写码、发布、部署等，带审批门）
-- 📋 一句话定制任意工种员工 · 技能市场 · idea 中心
-- 📋 更多场景模板：销售、客服、财务、跨境电商
+- ✅ Desktop workspace: group chat, employees, tasks, approvals, consensus briefs
+- 🚧 Automatic in-group multi-agent discussion and division of labor
+- 🚧 Real execution (coding, publishing, deploying…) behind the approval gate
+- 📋 Any role from one sentence · skill market · idea center
+- 📋 More scenario templates: sales, support, finance, cross-border e-commerce
 
-详见 [ROADMAP.md](ROADMAP.md)。
+See [ROADMAP.md](ROADMAP.md).
 
-## 🧑‍💻 开发者
+## 🧑‍💻 Developers
 
-技术栈：Electron + React（桌面）· FastAPI + PostgreSQL（后端）· [Hermes Agent](https://github.com/NousResearch/hermes-agent)（员工运行时）。
+Stack: Electron + React (desktop) · FastAPI + PostgreSQL (backend) · [Hermes Agent](https://github.com/NousResearch/hermes-agent) (employee runtime) · marketing site in `apps/site` (static, deploys to Vercel).
 
-- **参与开发 / AI 接手**：从 [AGENTS.md](AGENTS.md) 开始（项目北极星 + 开发规范）
-- **架构与技术设计**：[docs/tech-design/](docs/tech-design/) · 决策记录：[docs/decisions/](docs/decisions/)
+- **Contributing / picking up as an AI**: start with [AGENTS.md](AGENTS.md) (the project's north star + conventions)
+- **Architecture &amp; tech design**: [docs/tech-design/](docs/tech-design/) · decision records: [docs/decisions/](docs/decisions/)
 
 ## 📄 License
 
-本项目采用 **[PolyForm Noncommercial License 1.0.0](LICENSE)**：个人学习、研究、教育、业余项目及非营利组织使用完全免费。详见 [LICENSE](LICENSE)。
+Released under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**: free for personal study, research, education, hobby projects, and noncommercial organizations. See [LICENSE](LICENSE); commercial use requires a license — see [COMMERCIAL.md](COMMERCIAL.md).
 
 ---
 
-<sub>关键词 / Keywords：AI 员工 · AI 数字员工 · AI 公司工作台 · 一人公司 AI 工具 · 自媒体 AI 运营 · 多智能体协作 · AI 员工平台 · AI digital employees · AI company workspace · AI workforce · hire AI employees · multi-agent orchestration · autonomous agents · ai-agents · multi-agent · ai-employees · ai-workforce · agent-orchestration · solo-founder · indie-hackers · deepseek · open-source-ai</sub>
+<sub>Keywords: AI employees · AI digital employees · AI company workspace · AI workforce · one-person company · hire AI employees · multi-agent orchestration · autonomous agents · ai-agents · multi-agent · ai-employees · ai-workforce · agent-orchestration · solo-founder · indie-hackers · deepseek · open-source-ai · AI 员工 · AI 公司工作台 · 多智能体协作</sub>
