@@ -1036,8 +1036,15 @@ def resolve_approval(
                 raise HTTPException(status_code=400, detail=f"能力升级失败：{exc}")
 
         # Map the owner's decision to the ACP permission decision hermes_client
-        # expects ("allow_once" | "deny") — NOT the raw approved/rejected string.
-        bridge_decision = "allow_once" if decision == "approved" else "deny"
+        # expects ("allow_once" | "allow_always" | "deny") — NOT the raw
+        # approved/rejected string. "always" makes Hermes persist an allowlist
+        # rule so the same action won't ask again (ADR 0008).
+        if decision != "approved":
+            bridge_decision = "deny"
+        elif payload.scope == "always":
+            bridge_decision = "allow_always"
+        else:
+            bridge_decision = "allow_once"
         try:
             transition_run(
                 conn, run_id,

@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 2026-07-14（ADR 0008 分片1-3：技术危险动作的真审批门 —— 已真机验证）
+- **feat(runtime+api+desktop)**: 让高危动作在真执行路径上**真的挂起等老板拍板**,批准才跑、拒绝真拦。修掉 2026-07-14 审计发现的"审批门不生效"根因。
+  - **分片1**（`profile_provisioner.configure`）：供给员工 profile 时设 `approvals.mode: manual`。此前没配 → Hermes 落 `smart` 档用辅助模型自动放行危险命令;`manual` 让它走 ACP `request_permission` → 我们的 client。
+  - **分片2**（`hermes_client.request_permission`）—— **关键 bug 修复**：之前批准返回 `SelectedPermissionOutcome`,但 Hermes(`acp_adapter/permissions.py`)只认 `AllowedOutcome`,其余一律当 deny → **"批准"被静默读成"拒绝",批了也放不了行**。改为:允许→`AllowedOutcome(outcome="selected", option_id=…)`,拒绝→`DeniedOutcome(outcome="cancelled")`;按 **option_id**(allow_once/allow_session/allow_always/deny)选项(kind 有歧义:Hermes 给 allow_session 的 kind 也是 allow_always)。
+  - **分片3**（审批桥/端点/前端）：`ResolveApprovalRequest` 加 `scope: once|always`;`/resolve` 把决定映射成 `allow_once|allow_always|deny` 喂桥;桥/resolver 贯通三态;前端审批卡按钮改为 **允许一次 / 永远允许 / 拒绝**（能力升级卡为"批准并升级"）。"永远允许"→ `allow_always` → Hermes 自己把规则写进 allowlist,下次同类不再问。
+  - **真机验证**（一次性 profile,经 `LocalHermesProvisioner` 供给 + `HermesBackend` 执行,非 seed）：让真 agent `rm -rf <dir>` —— **拒绝→目录保留(命令被拦)、批准→目录真被删(命令执行)**,`request_permission` 各触发 1 次,均 PASS。config.yaml 确认 `approvals.mode: manual` 落地。
+  - **零回归**：全套 **250 通过 + 7 skipped**;前端 `tsc` 无错。
+  - 剩余（ADR 0008 后续分片）：挂起超时与 Hermes 60s fail-closed 对齐;业务受控工具门（发布/花钱/对外发送,独立 TD）;删 clarification/capability 的 agent 触发伪装(求援已天然走普通对话、能力升级改老板发起)。
+
 ### 2026-07-14（审计修正：审批门在真运行时不生效 —— 纠正 T4/卡片的过度声称）
 - **audit + fix**: 对真 Hermes 做了实测审计,发现之前 TD-03-T4「审批 suspend/resume」及聊天卡片的「闭环可演示」声称**对真运行时不成立**,之前的"验证"全靠 fake backend + seed 的 approval 行。如实纠正:
   - **实测(真 Hermes ACP,agentpulse profile)**:① 让 agent 执行 `rm -rf ...` —— agent **直接执行成功,`request_permission` 触发 0 次**。ACP 执行路径下 Hermes 不为内置危险工具(terminal 等)调客户端审批,`--yolo` 未传也一样。② 让 agent 求援 —— agent 思考里明说"**我没有 clarify 工具**"(clarify toolset 虽 CLI 标 enabled,但 ACP 会话未暴露给模型),于是**用普通消息把问题问出来就结束**了。

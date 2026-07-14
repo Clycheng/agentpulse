@@ -332,6 +332,14 @@ class LocalHermesProvisioner:
             ["config", "set", "terminal.working_dir", workdir],
             profile=profile_name,
         )
+        # ADR 0008: force human-in-the-loop approvals. Without this Hermes falls
+        # to `smart` mode and an auxiliary model auto-approves dangerous actions
+        # (verified: agent ran `rm -rf` with 0 approvals). `manual` routes them
+        # through ACP request_permission → our approval bridge → the owner.
+        self._run(
+            ["config", "set", "approvals.mode", "manual"],
+            profile=profile_name,
+        )
         if toolsets:
             self._run(["tools", "enable", *toolsets], profile=profile_name)
         # NOTE: real MCP servers need endpoints/auth (`hermes mcp add ...`); the

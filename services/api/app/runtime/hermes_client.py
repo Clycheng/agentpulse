@@ -117,32 +117,46 @@ def _make_client(
                 decision = await permission_resolver(
                     {"approval_id": approval_id, "category": category, **info}
                 )
-            # Options offer kinds allow_once/allow_always/reject_once/reject_always.
-            # A decision always resolves to one of the OFFERED options (safe default
-            # = a reject option). The client always selects; it never leaves the
-            # agent hanging.
-            prefer = {
-                "allow_once": ("allow_once", "allow_always"),
-                "allow_always": ("allow_always", "allow_once"),
-                "deny": ("reject_once", "reject_always"),
-            }.get(decision, ("reject_once", "reject_always"))
+            # Map the owner's decision to a concrete offered option, then return
+            # the outcome Hermes actually understands. CRITICAL (verified against
+            # Hermes v0.18.2 acp_adapter/permissions.py): the agent only treats a
+            # response as "allowed" when it is an ``AllowedOutcome``; a
+            # ``DeniedOutcome`` (or anything else) is read as deny. Hermes maps
+            # the allow back by OPTION ID (allow_once/allow_session/allow_always),
+            # so we must match by option_id first (kinds are ambiguous — Hermes
+            # gives "allow_session" the kind "allow_always").
+            allow = decision in ("allow", "allow_once", "allow_always")
+            if decision == "allow_always":
+                prefer_ids = ("allow_always", "allow_session", "allow_once")
+                prefer_kinds = ("allow_always", "allow_once")
+            elif allow:  # allow_once / generic allow
+                prefer_ids = ("allow_once", "allow_session", "allow_always")
+                prefer_kinds = ("allow_once", "allow_always")
+            else:  # deny
+                prefer_ids = ("deny", "deny_always")
+                prefer_kinds = ("reject_once", "reject_always")
 
             def _pick():
-                for kind in prefer:
+                for oid in prefer_ids:
+                    for opt in options:
+                        if str(getattr(opt, "option_id", "")) == oid:
+                            return opt
+                for kind in prefer_kinds:
                     for opt in options:
                         if str(getattr(opt, "kind", "")) == kind:
                             return opt
-                # fall back to any reject option, else the first offered option
-                for opt in options:
-                    if "reject" in str(getattr(opt, "kind", "")):
-                        return opt
-                return options[0] if options else None
+                return None
 
             chosen = _pick()
-            if chosen is None:  # no options offered — nothing to select
-                raise HermesBackendError("permission request had no options")
+            if allow and chosen is not None:
+                return acp.RequestPermissionResponse(
+                    outcome=acp.schema.AllowedOutcome(
+                        outcome="selected", option_id=chosen.option_id
+                    )
+                )
+            # Deny (or allow requested but no allow option offered → fail closed).
             return acp.RequestPermissionResponse(
-                outcome=acp.schema.SelectedPermissionOutcome(option_id=chosen.option_id)
+                outcome=acp.schema.DeniedOutcome(outcome="cancelled")
             )
 
         async def read_text_file(

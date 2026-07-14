@@ -238,3 +238,6 @@ class ResolveApprovalRequest(BaseModel):
     # TD-06-T2: for capability_upgrade approvals, the owner confirms/adjusts which
     # catalog capability to grant (defaults to the agent's suggested key).
     approved_capability_key: str | None = None
+    # ADR 0008: "once" = allow this time; "always" = remember (Hermes persists it
+    # to its allowlist so the same action won't ask again).
+    scope: Literal["once", "always"] = "once"

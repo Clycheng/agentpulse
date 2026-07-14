@@ -1606,6 +1606,7 @@ function App() {
     approvalId: string,
     status: 'approved' | 'rejected',
     approvedCapabilityKey?: string,
+    scope: 'once' | 'always' = 'once',
   ): Promise<boolean> => {
     if (!token) return false;
     try {
@@ -1615,9 +1616,16 @@ function App() {
         body: JSON.stringify({
           status,
           approved_capability_key: approvedCapabilityKey ?? null,
+          scope,
         }),
       });
-      showToast(status === 'approved' ? '已批准，员工继续执行' : '已驳回');
+      showToast(
+        status === 'rejected'
+          ? '已驳回'
+          : scope === 'always'
+            ? '已永久允许（下次同类不再询问）'
+            : '已批准，员工继续执行',
+      );
       return true;
     } catch (error) {
       showToast(error instanceof Error ? error.message : '处理失败');
@@ -3314,6 +3322,7 @@ function ApprovalCard({
     approvalId: string,
     status: 'approved' | 'rejected',
     approvedCapabilityKey?: string,
+    scope?: 'once' | 'always',
   ) => Promise<boolean>;
   onAnswer?: (approvalId: string, answer: string) => Promise<boolean>;
 }) {
@@ -3344,13 +3353,17 @@ function ApprovalCard({
         ? { icon: 'bolt', kind: 'upgrade', label: '员工申请能力升级' }
         : { icon: 'gpp_maybe', kind: 'risk', label: '高风险动作待确认' };
 
-  const doResolve = async (status: 'approved' | 'rejected') => {
+  const doResolve = async (
+    status: 'approved' | 'rejected',
+    scope: 'once' | 'always' = 'once',
+  ) => {
     if (!onResolve) return;
     setBusy(true);
     const ok = await onResolve(
       id,
       status,
       category === 'capability_upgrade' ? capKey : undefined,
+      scope,
     );
     setBusy(false);
     if (ok)
@@ -3359,7 +3372,9 @@ function ApprovalCard({
           ? '已驳回'
           : category === 'capability_upgrade'
             ? `已批准升级：${capKey}`
-            : '已批准',
+            : scope === 'always'
+              ? '已永久允许（下次不再询问）'
+              : '已批准',
       );
   };
 
@@ -3415,17 +3430,28 @@ function ApprovalCard({
             type="button"
             className="button primary"
             disabled={busy || (category === 'capability_upgrade' && !capKey.trim())}
-            onClick={() => doResolve('approved')}
+            onClick={() => doResolve('approved', 'once')}
           >
-            {category === 'capability_upgrade' ? '批准并升级' : '批准'}
+            {category === 'capability_upgrade' ? '批准并升级' : '允许一次'}
           </button>
+          {category !== 'capability_upgrade' && (
+            <button
+              type="button"
+              className="button secondary"
+              disabled={busy}
+              onClick={() => doResolve('approved', 'always')}
+              title="以后同类动作不再询问"
+            >
+              永远允许
+            </button>
+          )}
           <button
             type="button"
             className="button secondary"
             disabled={busy}
             onClick={() => doResolve('rejected')}
           >
-            驳回
+            拒绝
           </button>
         </footer>
       )}
