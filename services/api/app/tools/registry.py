@@ -143,6 +143,8 @@ TOOLS: list[dict[str, Any]] = [
             "description": (
                 "创建一个群聊。把多个员工拉到一个群里讨论协作。"
                 "建群后可以用 add_group_member 加更多成员。"
+                "⚠️ 建群前必须先调 list_groups 检查是否已经有相同目的的群——"
+                "已经有就用 send_group_message 或 add_group_member，不要重复建群。"
             ),
             "parameters": {
                 "type": "object",
@@ -180,6 +182,20 @@ TOOLS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["conversation_id", "agent_ids"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_groups",
+            "description": (
+                "列出公司当前所有群聊，包括群聊ID、名称和成员。"
+                "建群前必须先查这里，避免为同一个目的重复创建群聊。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
             },
         },
     },
@@ -404,6 +420,15 @@ async def _handle_create_task(
         return json.dumps({"error": str(exc)})
 
 
+def _normalize_group_name(name: str) -> str:
+    """Strip a leading emoji/symbol run and surrounding whitespace so
+    "运营团队" and "📈 运营团队" are recognized as the same group name."""
+    stripped = name.strip()
+    while stripped and not (stripped[0].isalnum() or "一" <= stripped[0] <= "鿿"):
+        stripped = stripped[1:].lstrip()
+    return stripped.lower()
+
+
 async def _handle_create_group(
     conn: Database,
     workspace_id: str,
@@ -417,6 +442,46 @@ async def _handle_create_group(
         return json.dumps({"error": "群聊名称不能为空"})
     if not member_ids:
         return json.dumps({"error": "至少需要1个成员"})
+
+    # Defense in depth against duplicate groups: even if the model skipped
+    # list_groups, don't create a second group for a name that (ignoring a
+    # leading emoji/symbol) already exists — add any missing members to the
+    # existing one instead.
+    normalized = _normalize_group_name(name)
+    existing_groups = conn.execute(
+        "SELECT id, name FROM conversations WHERE workspace_id = ? AND kind = 'group'",
+        (workspace_id,),
+    ).fetchall()
+    existing = next(
+        (g for g in existing_groups if _normalize_group_name(g["name"]) == normalized),
+        None,
+    )
+    if existing is not None:
+        conversation_id = existing["id"]
+        current_members = {
+            row["agent_id"]
+            for row in conn.execute(
+                "SELECT agent_id FROM conversation_members WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchall()
+        }
+        added = 0
+        for mid in member_ids:
+            if mid not in current_members:
+                conn.execute(
+                    "INSERT INTO conversation_members (conversation_id, agent_id) VALUES (?, ?)",
+                    (conversation_id, mid),
+                )
+                added += 1
+        conn.commit()
+        return json.dumps(
+            {
+                "success": True,
+                "group": {"id": conversation_id, "name": existing["name"], "reused": True},
+                "added_members": added,
+            },
+            ensure_ascii=False,
+        )
 
     conversation_id = new_id("conv")
     created_at = now_iso()
@@ -501,6 +566,41 @@ async def _handle_add_group_member(
     conn.commit()
 
     return json.dumps({"success": True, "added": added}, ensure_ascii=False)
+
+
+async def _handle_list_groups(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    rows = conn.execute(
+        """
+        SELECT id, name FROM conversations
+        WHERE workspace_id = ? AND kind = 'group'
+        ORDER BY created_at
+        """,
+        (workspace_id,),
+    ).fetchall()
+
+    groups_list = []
+    for r in rows:
+        members = conn.execute(
+            """
+            SELECT a.name FROM conversation_members cm
+            JOIN agents a ON a.id = cm.agent_id
+            WHERE cm.conversation_id = ?
+            """,
+            (r["id"],),
+        ).fetchall()
+        groups_list.append(
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "members": [m["name"] for m in members],
+            }
+        )
+    return json.dumps({"groups": groups_list, "total": len(groups_list)}, ensure_ascii=False)
 
 
 async def _handle_list_agents(
@@ -666,6 +766,7 @@ HANDLER_MAP: dict[str, Callable] = {
     "create_task": _handle_create_task,
     "create_group": _handle_create_group,
     "add_group_member": _handle_add_group_member,
+    "list_groups": _handle_list_groups,
     "list_agents": _handle_list_agents,
     "list_tasks": _handle_list_tasks,
     "claim_task": _handle_claim_task,
@@ -741,5 +842,7 @@ def system_prompt_for_operator(
         "6. 调工具前如果需要查员工ID，先调 list_agents。\n"
         "7. 所有回复用中文，专业直接。\n"
         "8. 如果有公司资料库上下文，优先结合资料里的品牌、业务、客户、流程等事实，不要编造资料中没有的公司事实。\n"
-        "9. 如果有个人经验记忆，优先复用成功经验，避开复盘教训里已经暴露的问题。"
+        "9. 如果有个人经验记忆，优先复用成功经验，避开复盘教训里已经暴露的问题。\n"
+        "10. 创建群聊前必须先调 list_groups 检查是否已有相同目的的群——"
+        "已存在就用 add_group_member/send_group_message，绝对不要为同一件事重复建群。"
     )

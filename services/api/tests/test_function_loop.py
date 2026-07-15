@@ -184,6 +184,50 @@ def test_execute_create_group():
     assert data["group"]["member_count"] == 2
 
 
+def test_execute_create_group_reuses_existing_by_normalized_name():
+    """create_group must not spawn a duplicate for the same purpose — an
+    emoji-prefixed name that otherwise matches an existing group should
+    reuse it (add missing members) instead of creating a second group."""
+    db = _make_db()
+    agent = dict(db.execute("SELECT * FROM agents WHERE id = 'agent_1'").fetchone())
+    db.executescript(
+        "INSERT INTO agents (id, workspace_id, department_id, name, role, prompt, created_at) "
+        "VALUES ('agent_2', 'ws_test', 'dept_1', '小明', '设计师', '你是设计师', '2026-01-01T00:00:00');"
+        "INSERT INTO agents (id, workspace_id, department_id, name, role, prompt, created_at) "
+        "VALUES ('agent_3', 'ws_test', 'dept_1', '小李', '运营', '你是运营', '2026-01-01T00:00:00');"
+    )
+
+    first = asyncio.run(execute_tool(
+        db, "ws_test", agent,
+        ToolCall(id="call_1", name="create_group",
+                 arguments={"name": "运营团队", "member_agent_ids": ["agent_1", "agent_2"]}),
+    ))
+    first_data = json.loads(first.content)
+
+    second = asyncio.run(execute_tool(
+        db, "ws_test", agent,
+        ToolCall(id="call_2", name="create_group",
+                 arguments={"name": "📈 运营团队", "member_agent_ids": ["agent_1", "agent_3"]}),
+    ))
+    second_data = json.loads(second.content)
+
+    assert second_data["success"] is True
+    assert second_data["group"]["id"] == first_data["group"]["id"]
+    assert second_data["group"]["reused"] is True
+    assert second_data["added_members"] == 1  # agent_1 already there, agent_3 is new
+
+    groups = db.execute(
+        "SELECT COUNT(*) AS n FROM conversations WHERE workspace_id = 'ws_test' AND kind = 'group'"
+    ).fetchone()
+    assert groups["n"] == 1
+
+    members = db.execute(
+        "SELECT agent_id FROM conversation_members WHERE conversation_id = ?",
+        (first_data["group"]["id"],),
+    ).fetchall()
+    assert {m["agent_id"] for m in members} == {"agent_1", "agent_2", "agent_3"}
+
+
 def test_execute_list_agents():
     """Test that list_agents returns the workspace's agents."""
     db = _make_db()
