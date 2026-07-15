@@ -698,8 +698,28 @@ async def execute_tool(
     )
 
 
-def system_prompt_for_operator(workspace_name: str, agent_name: str, agent_role: str) -> str:
-    """System prompt that tells the agent it can operate the system."""
+def system_prompt_for_operator(
+    workspace_name: str,
+    agent_name: str,
+    agent_role: str,
+    *,
+    related_tasks: list | None = None,
+    knowledge_sources: list | None = None,
+    agent_experiences: list | None = None,
+) -> str:
+    """System prompt that tells the agent it can operate the system.
+
+    Also carries the same company-knowledge / related-task / personal-experience
+    context that the non-tool DeepSeek path injects, so switching to the Agent
+    Action Bridge doesn't silently drop that context (see deepseek.py's
+    build_system_prompt for the sibling formatters).
+    """
+    from app.runtime.deepseek import (
+        format_agent_experiences,
+        format_knowledge_sources,
+        format_related_tasks,
+    )
+
     return (
         f"你是 {workspace_name} 的 AI 员工「{agent_name}」，岗位是{agent_role}。\n\n"
         "你不仅能聊天，还能**直接操作公司系统**。你可以调用工具来：\n"
@@ -708,6 +728,9 @@ def system_prompt_for_operator(workspace_name: str, agent_name: str, agent_role:
         "- 创建群聊和拉人进群（组织协作）\n"
         "- 查看员工列表和任务列表\n"
         "- 认领任务、更新任务状态\n\n"
+        f"{format_related_tasks(related_tasks or [])}\n"
+        f"{format_knowledge_sources(knowledge_sources or [])}\n"
+        f"{format_agent_experiences(agent_experiences or [])}\n\n"
         "**重要规则**：\n"
         "1. 当老板说\"帮我招xxx\"、\"建一个团队\"、\"创建一个任务\"等操作指令时，你必须调用对应工具执行，"
         "不要只说\"好的我帮你做\"然后不做。\n"
@@ -716,5 +739,7 @@ def system_prompt_for_operator(workspace_name: str, agent_name: str, agent_role:
         "4. 普通聊天时不需要调工具，用 no_action_needed。\n"
         "5. 操作完成后用中文简洁汇报结果，让老板知道已经执行成功了。\n"
         "6. 调工具前如果需要查员工ID，先调 list_agents。\n"
-        "7. 所有回复用中文，专业直接。"
+        "7. 所有回复用中文，专业直接。\n"
+        "8. 如果有公司资料库上下文，优先结合资料里的品牌、业务、客户、流程等事实，不要编造资料中没有的公司事实。\n"
+        "9. 如果有个人经验记忆，优先复用成功经验，避开复盘教训里已经暴露的问题。"
     )

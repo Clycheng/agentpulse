@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     ]
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_model: str = "deepseek-v4-pro"
     deepseek_timeout_seconds: float = 60.0
     deepseek_temperature: float = 0.7
     deepseek_thinking_enabled: bool = False

@@ -162,9 +162,9 @@ def build_system_prompt(request: LlmChatRequest) -> str:
     agent = request.agent
     skills = "、".join(agent.skills) if agent.skills else "暂无绑定技能"
     conversation = request.conversation_title or "当前会话"
-    related_tasks = format_related_tasks(request)
-    knowledge_sources = format_knowledge_sources(request)
-    agent_experiences = format_agent_experiences(request)
+    related_tasks = format_related_tasks(request.related_tasks)
+    knowledge_sources = format_knowledge_sources(request.knowledge_sources)
+    agent_experiences = format_agent_experiences(request.agent_experiences)
 
     return f"""你是 AgentPulse 里的 AI 员工，需要像真实团队成员一样帮助老板推进一人公司的工作。
 
@@ -196,12 +196,12 @@ def build_system_prompt(request: LlmChatRequest) -> str:
 8. 输出尽量结构化，优先给老板可直接推进的下一步。"""
 
 
-def format_related_tasks(request: LlmChatRequest) -> str:
-    if not request.related_tasks:
+def format_related_tasks(tasks: list) -> str:
+    if not tasks:
         return "\n当前关联任务：无"
 
     lines = ["\n当前关联任务："]
-    for index, task in enumerate(request.related_tasks, start=1):
+    for index, task in enumerate(tasks, start=1):
         owner = f"，负责人：{task.owner_name}" if task.owner_name else ""
         description = f"\n   说明：{task.description}" if task.description else ""
         lines.append(
@@ -211,24 +211,24 @@ def format_related_tasks(request: LlmChatRequest) -> str:
     return "\n".join(lines)
 
 
-def format_agent_experiences(request: LlmChatRequest) -> str:
-    if not request.agent_experiences:
+def format_agent_experiences(experiences: list) -> str:
+    if not experiences:
         return "\n个人经验记忆：暂无"
 
     lines = ["\n个人经验记忆："]
-    for index, experience in enumerate(request.agent_experiences, start=1):
+    for index, experience in enumerate(experiences, start=1):
         label = "成功经验" if experience.outcome == "success" else "复盘教训"
         lessons = f"\n   经验/教训：{experience.lessons}" if experience.lessons else ""
         lines.append(f"{index}. {label}：{experience.summary}{lessons}")
     return "\n".join(lines)
 
 
-def format_knowledge_sources(request: LlmChatRequest) -> str:
-    if not request.knowledge_sources:
+def format_knowledge_sources(sources: list) -> str:
+    if not sources:
         return "\n公司资料库上下文：暂无"
 
     lines = ["\n公司资料库上下文："]
-    for index, source in enumerate(request.knowledge_sources, start=1):
+    for index, source in enumerate(sources, start=1):
         content = source.content[:900]
         lines.append(
             f"{index}. [{source.category or '通用资料'}] {source.title}\n   {content}"

@@ -26,6 +26,7 @@ from app.schemas.run import (
     LlmChatMessage,
     LlmChatRequest,
     LlmKnowledgeSource,
+    LlmTaskContext,
 )
 from app.schemas.workspace import (
     AddConversationMembersRequest,
@@ -1265,6 +1266,13 @@ async def _stream_reply_events(
     # ── Agent Action Bridge (streaming): try function loop first ──
     deepseek = DeepSeekChatClient()
     history = load_llm_history(conn, conversation["id"])
+    related_tasks, knowledge_sources, agent_experiences = load_agent_llm_context(
+        conn,
+        workspace_id=workspace["id"],
+        conversation_id=conversation["id"],
+        agent_id=agent["id"],
+        query=user_message["content"],
+    )
     try:
         tool_chunks: list[str] = []
         async for ev in run_function_loop(
@@ -1275,6 +1283,9 @@ async def _stream_reply_events(
             history=history,
             user_message_content=user_message["content"],
             deepseek_client=deepseek,
+            related_tasks=related_tasks,
+            knowledge_sources=knowledge_sources,
+            agent_experiences=agent_experiences,
         ):
             yield ev
             if ev["type"] == "chunk":
@@ -1338,7 +1349,7 @@ async def _stream_reply_events(
         sender_id=agent["id"],
         content=full_reply,
         provider="deepseek",
-        model="deepseek-v4-flash",
+        model=settings.deepseek_model,
     )
     conn.commit()
     yield {"type": "message", "message": msg}
@@ -1361,25 +1372,17 @@ async def _stream_agent_reply(
     from collections.abc import AsyncGenerator as _AG
 
     history = load_llm_history(conn, conversation_id)
-    related_tasks = load_related_task_context(conn, conversation_id)
     latest_user_content = next(
         (message.content for message in reversed(history) if message.role == "user"),
         "",
     )
-    knowledge_sources = [
-        LlmKnowledgeSource(
-            id=source["id"],
-            title=source["title"],
-            category=source["category"],
-            content=source["content"][:2000],
-        )
-        for source in load_knowledge_context(
-            conn,
-            workspace_id=workspace["id"],
-            query=latest_user_content,
-        )
-    ]
-    agent_experiences = load_agent_experience_context(conn, agent["id"])
+    related_tasks, knowledge_sources, agent_experiences = load_agent_llm_context(
+        conn,
+        workspace_id=workspace["id"],
+        conversation_id=conversation_id,
+        agent_id=agent["id"],
+        query=latest_user_content,
+    )
 
     request = LlmChatRequest(
         company_name=workspace["name"],
@@ -1446,6 +1449,13 @@ async def complete_agent_reply(
 
     if use_tools:
         deepseek = DeepSeekChatClient()
+        related_tasks, knowledge_sources, agent_experiences = load_agent_llm_context(
+            conn,
+            workspace_id=workspace["id"],
+            conversation_id=conversation_id,
+            agent_id=agent["id"],
+            query=user_message["content"],
+        )
         try:
             tool_chunks: list[str] = []
             async for ev in run_function_loop(
@@ -1456,6 +1466,9 @@ async def complete_agent_reply(
                 history=history,
                 user_message_content=user_message["content"],
                 deepseek_client=deepseek,
+                related_tasks=related_tasks,
+                knowledge_sources=knowledge_sources,
+                agent_experiences=agent_experiences,
             ):
                 if ev["type"] == "chunk":
                     tool_chunks.append(ev["content"])
@@ -1471,25 +1484,17 @@ async def complete_agent_reply(
                 return agent_message
         except Exception:
             pass  # Fall through to normal completion
-    related_tasks = load_related_task_context(conn, conversation_id)
     latest_user_content = next(
         (message.content for message in reversed(history) if message.role == "user"),
         "",
     )
-    knowledge_sources = [
-        LlmKnowledgeSource(
-            id=source["id"],
-            title=source["title"],
-            category=source["category"],
-            content=source["content"][:2000],
-        )
-        for source in load_knowledge_context(
-            conn,
-            workspace_id=workspace["id"],
-            query=latest_user_content,
-        )
-    ]
-    agent_experiences = load_agent_experience_context(conn, agent["id"])
+    related_tasks, knowledge_sources, agent_experiences = load_agent_llm_context(
+        conn,
+        workspace_id=workspace["id"],
+        conversation_id=conversation_id,
+        agent_id=agent["id"],
+        query=latest_user_content,
+    )
     completion = await DeepSeekChatClient().complete(
         LlmChatRequest(
             company_name=workspace["name"],
@@ -1713,6 +1718,33 @@ def load_agent_experience_context(
         )
         for row in rows
     ]
+
+
+def load_agent_llm_context(
+    conn: Database,
+    *,
+    workspace_id: str,
+    conversation_id: str,
+    agent_id: str,
+    query: str,
+) -> tuple[list[LlmTaskContext], list[LlmKnowledgeSource], list[LlmAgentExperience]]:
+    """Load the same company-knowledge / related-task / experience context
+    regardless of which reply path (Agent Action Bridge or plain DeepSeek
+    completion) ends up using it — keeps both in sync."""
+    related_tasks = [
+        LlmTaskContext(**row) for row in load_related_task_context(conn, conversation_id)
+    ]
+    knowledge_sources = [
+        LlmKnowledgeSource(
+            id=source["id"],
+            title=source["title"],
+            category=source["category"],
+            content=source["content"][:2000],
+        )
+        for source in load_knowledge_context(conn, workspace_id=workspace_id, query=query)
+    ]
+    agent_experiences = load_agent_experience_context(conn, agent_id)
+    return related_tasks, knowledge_sources, agent_experiences
 
 
 def conversation_title(conversation: Row, agent: Row) -> str:

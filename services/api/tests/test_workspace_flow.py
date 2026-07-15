@@ -172,7 +172,7 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
     # Just verify we got a non-empty response with correct metadata.
     assert len(payload["agent_message"]["content"]) > 10
     assert payload["agent_message"]["provider"] == "deepseek"
-    assert payload["agent_message"]["model"] == "deepseek-v4-flash"
+    assert payload["agent_message"]["model"] == settings.deepseek_model
     # NOTE: Auto-task creation removed (ADR 0006) - created_task is now None
     assert payload["created_task"] is None
 
@@ -184,7 +184,7 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
         "agent",
     ]
     assert messages[-1]["provider"] == "deepseek"
-    assert messages[-1]["model"] == "deepseek-v4-flash"
+    assert messages[-1]["model"] == settings.deepseek_model
 
 
 def test_knowledge_source_is_injected_into_agent_context(tmp_path, monkeypatch):
