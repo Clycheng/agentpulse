@@ -242,9 +242,10 @@ def init_postgres(conn: Database) -> None:
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
           name TEXT NOT NULL,
+          parent_id TEXT REFERENCES departments(id) ON DELETE CASCADE,
           sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL,
-          UNIQUE(workspace_id, name)
+          UNIQUE(workspace_id, parent_id, name)
         );
 
         CREATE TABLE IF NOT EXISTS agents (
@@ -546,6 +547,12 @@ def init_postgres(conn: Database) -> None:
     ensure_column(conn, "conversations", "source_channel", "TEXT")
     ensure_column(conn, "conversations", "external_conversation_id", "TEXT")
     ensure_column(conn, "messages", "external_message_id", "TEXT")
+    # Multi-level org chart: departments can nest under a parent department
+    # (technical dept → backend center → data group, à la DingTalk/Feishu),
+    # instead of the flat list that forced "A/B/C" path strings into `name`.
+    ensure_column(
+        conn, "departments", "parent_id", "TEXT REFERENCES departments(id) ON DELETE CASCADE"
+    )
 
 
 def init_sqlite(conn: Database) -> None:
@@ -597,9 +604,10 @@ def init_sqlite(conn: Database) -> None:
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
           name TEXT NOT NULL,
+          parent_id TEXT REFERENCES departments(id) ON DELETE CASCADE,
           sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL,
-          UNIQUE(workspace_id, name)
+          UNIQUE(workspace_id, parent_id, name)
         );
 
         CREATE TABLE IF NOT EXISTS agents (
@@ -901,6 +909,12 @@ def init_sqlite(conn: Database) -> None:
     ensure_column(conn, "conversations", "source_channel", "TEXT")
     ensure_column(conn, "conversations", "external_conversation_id", "TEXT")
     ensure_column(conn, "messages", "external_message_id", "TEXT")
+    # Multi-level org chart: departments can nest under a parent department
+    # (technical dept → backend center → data group, à la DingTalk/Feishu),
+    # instead of the flat list that forced "A/B/C" path strings into `name`.
+    ensure_column(
+        conn, "departments", "parent_id", "TEXT REFERENCES departments(id) ON DELETE CASCADE"
+    )
 
 
 def ensure_column(

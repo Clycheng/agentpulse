@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
@@ -26,6 +26,7 @@ type Workspace = {
 type Department = {
   id: string;
   name: string;
+  parent_id: string | null;
   sort_order: number;
 };
 
@@ -1687,12 +1688,6 @@ function App() {
     { key: 'skills', label: 'Skills 技能' },
     { key: 'mcp', label: 'MCP 服务' },
   ];
-  const depts = departments
-    .map((dept) => ({
-      name: dept.name,
-      members: agents.filter((agent) => agent.departmentId === dept.id),
-    }))
-    .filter((dept) => dept.members.length > 0);
 
   const currentChatAgent =
     activeChat?.kind === 'dm' ? agentById(activeChat.agentId) : null;
@@ -1840,7 +1835,7 @@ function App() {
         {view === 'staff' && (
           <StaffView
             companyName={workspace.name}
-            depts={depts}
+            departments={departments}
             agents={agents}
             tasks={tasks}
             busyCount={busyCount}
@@ -1941,7 +1936,7 @@ function App() {
       {hireOpen && (
         <HireModal
           template={hireTemplates.find((template) => template.id === hireTpl)}
-          departments={depts
+          departments={departments
             .filter((dept) => dept.name !== '老板办公室')
             .map((dept) => dept.name)}
           hireDept={hireDept}
@@ -1954,7 +1949,7 @@ function App() {
       {createOpen && (
         <CreateAgentModal
           token={token ?? ''}
-          departments={depts
+          departments={departments
             .filter((dept) => dept.name !== '老板办公室')
             .map((dept) => dept.name)}
           createName={createName}
@@ -3656,7 +3651,7 @@ function MessageItem({
 
 function StaffView({
   companyName,
-  depts,
+  departments,
   agents,
   tasks,
   busyCount,
@@ -3664,17 +3659,73 @@ function StaffView({
   onOpenAgent,
 }: {
   companyName: string;
-  depts: Array<{ name: string; members: Agent[] }>;
+  departments: Department[];
   agents: Agent[];
   tasks: Task[];
   busyCount: number;
   onOpenCreate: () => void;
   onOpenAgent: (id: string) => void;
 }) {
-  const [selectedDept, setSelectedDept] = useState<string | null>(null);
-  const activeDept = selectedDept
-    ? depts.find((dept) => dept.name === selectedDept)
-    : null;
+  // Breadcrumb path of department ids, root → current. Multi-level org chart
+  // (technical dept → backend center → data group), not a flat list — a
+  // department can nest under another via parent_id.
+  const [path, setPath] = useState<string[]>([]);
+
+  const deptById = new Map(departments.map((dept) => [dept.id, dept]));
+  const childrenOf = (parentId: string | null) =>
+    departments
+      .filter((dept) => (dept.parent_id ?? null) === parentId)
+      .sort((a, b) => a.sort_order - b.sort_order);
+
+  const descendantMembers = (deptId: string): Agent[] => {
+    const direct = agents.filter((agent) => agent.departmentId === deptId);
+    const subMembers = childrenOf(deptId).flatMap((child) =>
+      descendantMembers(child.id),
+    );
+    return [...direct, ...subMembers];
+  };
+
+  const currentParentId = path.length ? path[path.length - 1] : null;
+  const currentDept = currentParentId ? deptById.get(currentParentId) : null;
+  const childDepts = childrenOf(currentParentId);
+  const directMembers = currentParentId
+    ? agents.filter((agent) => agent.departmentId === currentParentId)
+    : [];
+
+  const renderMemberRow = (agent: Agent) => {
+    const currentTask = tasks.find(
+      (task) => task.owner === agent.id && task.status !== '已完成',
+    );
+    return (
+      <button
+        className="org-member-row"
+        key={agent.id}
+        type="button"
+        onClick={() => onOpenAgent(agent.id)}
+      >
+        <div
+          className="org-member-avatar"
+          style={{ background: avatarColor(agent) }}
+        >
+          {avatarText(agent.name)}
+        </div>
+        <div className="org-member-copy">
+          <strong>
+            {agent.name}
+            {agent.role === '老板秘书' && <em>内置秘书</em>}
+          </strong>
+          <p>
+            {agent.role}
+            {currentTask ? ` | ${currentTask.title}` : ''}
+          </p>
+        </div>
+        <span style={{ color: dotColor(agent.statusKind) }}>
+          <i style={{ background: dotColor(agent.statusKind) }} />
+          {agent.statusLabel}
+        </span>
+      </button>
+    );
+  };
 
   return (
     <div className="screen-scroll">
@@ -3684,8 +3735,8 @@ function StaffView({
             <div>
               <h1>组织内联系人</h1>
               <p>
-                {companyName} · {agents.length} 名 AI 员工 · {depts.length}{' '}
-                个部门 · {busyCount} 人执行中
+                {companyName} · {agents.length} 名 AI 员工 ·{' '}
+                {departments.length} 个部门 · {busyCount} 人执行中
               </p>
             </div>
             <button
@@ -3699,93 +3750,64 @@ function StaffView({
 
           <div className="org-body">
             <nav className="org-breadcrumb" aria-label="组织路径">
-              <button type="button" onClick={() => setSelectedDept(null)}>
+              <button type="button" onClick={() => setPath([])}>
                 {companyName}
               </button>
-              {activeDept && (
-                <>
+              {path.map((deptId, index) => (
+                <Fragment key={deptId}>
                   {materialIcon('chevron_right')}
-                  <span>{activeDept.name}</span>
-                </>
-              )}
+                  <button
+                    type="button"
+                    onClick={() => setPath(path.slice(0, index + 1))}
+                  >
+                    {deptById.get(deptId)?.name ?? deptId}
+                  </button>
+                </Fragment>
+              ))}
             </nav>
 
-            {!activeDept && (
-              <div className="org-list" aria-label="部门列表">
-                {depts.map((dept) => {
-                  const busyMembers = dept.members.filter(
-                    (agent) => agent.statusKind === 'busy',
-                  ).length;
-                  const waitingMembers = dept.members.filter(
-                    (agent) => agent.statusKind === 'wait',
-                  ).length;
+            <div className="org-list" aria-label="部门与成员">
+              {childDepts.map((dept) => {
+                const members = descendantMembers(dept.id);
+                const busyMembers = members.filter(
+                  (agent) => agent.statusKind === 'busy',
+                ).length;
+                const waitingMembers = members.filter(
+                  (agent) => agent.statusKind === 'wait',
+                ).length;
 
-                  return (
-                    <div className="org-row" key={dept.name}>
-                      <div className="org-node-icon">
-                        {materialIcon('account_tree')}
-                      </div>
-                      <div className="org-row-main">
-                        <strong>
-                          {dept.name}
-                          <span>({dept.members.length})</span>
-                        </strong>
-                        <p>
-                          {busyMembers} 人执行中 · {waitingMembers} 个待确认
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedDept(dept.name)}
-                      >
-                        下级
-                      </button>
+                return (
+                  <div className="org-row" key={dept.id}>
+                    <div className="org-node-icon">
+                      {materialIcon('account_tree')}
                     </div>
-                  );
-                })}
-                {!depts.length && <EmptyState>暂无部门</EmptyState>}
-              </div>
-            )}
-
-            {activeDept && (
-              <div className="org-list" aria-label={`${activeDept.name} 成员`}>
-                {activeDept.members.map((agent) => {
-                  const currentTask = tasks.find(
-                    (task) =>
-                      task.owner === agent.id && task.status !== '已完成',
-                  );
-                  return (
+                    <div className="org-row-main">
+                      <strong>
+                        {dept.name}
+                        <span>({members.length})</span>
+                      </strong>
+                      <p>
+                        {busyMembers} 人执行中 · {waitingMembers} 个待确认
+                      </p>
+                    </div>
                     <button
-                      className="org-member-row"
-                      key={agent.id}
                       type="button"
-                      onClick={() => onOpenAgent(agent.id)}
+                      onClick={() => setPath([...path, dept.id])}
                     >
-                      <div
-                        className="org-member-avatar"
-                        style={{ background: avatarColor(agent) }}
-                      >
-                        {avatarText(agent.name)}
-                      </div>
-                      <div className="org-member-copy">
-                        <strong>
-                          {agent.name}
-                          {agent.role === '老板秘书' && <em>内置秘书</em>}
-                        </strong>
-                        <p>
-                          {agent.role}
-                          {currentTask ? ` | ${currentTask.title}` : ''}
-                        </p>
-                      </div>
-                      <span style={{ color: dotColor(agent.statusKind) }}>
-                        <i style={{ background: dotColor(agent.statusKind) }} />
-                        {agent.statusLabel}
-                      </span>
+                      下级
                     </button>
-                  );
-                })}
-              </div>
-            )}
+                  </div>
+                );
+              })}
+
+              {currentParentId && directMembers.map(renderMemberRow)}
+
+              {!childDepts.length && !directMembers.length && (
+                <EmptyState>
+                  {currentDept ? `${currentDept.name} 暂无下级部门或成员` : '暂无部门'}
+                </EmptyState>
+              )}
+            </div>
           </div>
         </section>
       </div>

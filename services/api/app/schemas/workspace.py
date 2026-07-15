@@ -8,6 +8,7 @@ from app.schemas.agent_spec import AgentSpecOut, RoleSpecIn
 class DepartmentOut(BaseModel):
     id: str
     name: str
+    parent_id: str | None = None
     sort_order: int
 
 

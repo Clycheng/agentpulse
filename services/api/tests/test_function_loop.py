@@ -100,7 +100,7 @@ def _make_db() -> Database:
         );
         CREATE TABLE departments (
             id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
-            sort_order INTEGER DEFAULT 0, created_at TEXT NOT NULL
+            parent_id TEXT, sort_order INTEGER DEFAULT 0, created_at TEXT NOT NULL
         );
         CREATE TABLE agents (
             id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, department_id TEXT NOT NULL,

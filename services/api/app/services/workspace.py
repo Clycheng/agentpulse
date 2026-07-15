@@ -195,10 +195,39 @@ def get_workspace_by_id(conn: Database, workspace_id: str) -> Row:
 def ensure_department(
     conn: Database, workspace_id: str, department_name: str
 ) -> Row:
-    row = conn.execute(
-        "SELECT * FROM departments WHERE workspace_id = ? AND name = ?",
-        (workspace_id, department_name),
-    ).fetchone()
+    """Find-or-create a department, returning the leaf.
+
+    Accepts a "/"-separated path (e.g. "技术部/后端研发中心/数据组") and
+    walks/creates each level as a real parent-child chain — a multi-level
+    org chart, not a flat list with a slash-joined display string baked
+    into `name` (which is what silently happened before this existed:
+    every level collapsed into one department row at the top).
+    """
+    segments = [s.strip() for s in department_name.split("/") if s.strip()]
+    if not segments:
+        segments = [department_name]
+
+    parent_id: str | None = None
+    department: Row | None = None
+    for segment in segments:
+        department = _ensure_department_level(conn, workspace_id, parent_id, segment)
+        parent_id = department["id"]
+    return department
+
+
+def _ensure_department_level(
+    conn: Database, workspace_id: str, parent_id: str | None, name: str
+) -> Row:
+    if parent_id is None:
+        row = conn.execute(
+            "SELECT * FROM departments WHERE workspace_id = ? AND parent_id IS NULL AND name = ?",
+            (workspace_id, name),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM departments WHERE workspace_id = ? AND parent_id = ? AND name = ?",
+            (workspace_id, parent_id, name),
+        ).fetchone()
     if row is not None:
         return row
 
@@ -209,10 +238,10 @@ def ensure_department(
     department_id = new_id("dept")
     conn.execute(
         """
-        INSERT INTO departments (id, workspace_id, name, sort_order, created_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO departments (id, workspace_id, name, parent_id, sort_order, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (department_id, workspace_id, department_name, count, now_iso()),
+        (department_id, workspace_id, name, parent_id, count, now_iso()),
     )
     return conn.execute("SELECT * FROM departments WHERE id = ?", (department_id,)).fetchone()
 
@@ -272,7 +301,12 @@ def serialize_user(row: Row) -> dict:
 
 
 def serialize_department(row: Row) -> dict:
-    return {"id": row["id"], "name": row["name"], "sort_order": row["sort_order"]}
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "parent_id": row["parent_id"],
+        "sort_order": row["sort_order"],
+    }
 
 
 def serialize_agent(row: Row) -> dict:
