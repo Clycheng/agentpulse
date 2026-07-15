@@ -1,6 +1,8 @@
 {
   "name": "@agentpulse/desktop",
   "version": "0.1.0",
+  "description": "AgentPulse desktop client — an AI company workbench for one-person companies.",
+  "author": "AgentPulse",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.js",
@@ -10,7 +12,10 @@
     "build:electron": "tsc -p electron/tsconfig.json",
     "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
     "start": "electron .",
-    "lint": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit"
+    "lint": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:win": "npm run build && electron-builder --win",
+    "package:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
@@ -24,8 +29,36 @@
     "@types/react-dom": "^19.0.2",
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
-    "electron": "^33.2.1",
+    "electron": "33.4.11",
+    "electron-builder": "^25.1.8",
     "typescript": "^5.7.2",
     "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "cc.agentpulse.desktop",
+    "productName": "AgentPulse",
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "mac": {
+      "icon": "resources/icon.icns",
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"],
+      "identity": null
+    },
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": ["nsis"]
+    },
+    "linux": {
+      "icon": "resources/icon.png",
+      "target": ["AppImage"],
+      "category": "Office"
+    }
   }
 }
