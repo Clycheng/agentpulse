@@ -1,4 +1,11 @@
+from __future__ import annotations
+
+import os
+import sys
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_AUTH_SECRET = "agentpulse-local-dev-secret"
 
 
 class Settings(BaseSettings):
@@ -24,13 +31,11 @@ class Settings(BaseSettings):
     hermes_work_root: str = ""
     hermes_bin: str = "hermes"
     # When true, provisioning drives the real `hermes` CLI (creates profiles).
-    # Off by default so tests / non-Hermes envs use the record-only provisioner.
     hermes_provisioning: bool = False
-    # TD-08-T2: idle-reflection cron. Off by default so tests / non-Hermes envs
-    # don't spawn the background loop; enable in the desktop deployment.
+    # TD-08-T2: idle-reflection cron.
     idle_thinking_cron: bool = False
     idle_cron_interval_seconds: int = 3600
-    auth_secret_key: str = "agentpulse-local-dev-secret"
+    auth_secret_key: str = _DEFAULT_AUTH_SECRET
     access_token_ttl_hours: int = 24 * 14
     password_iterations: int = 260_000
 
@@ -38,3 +43,24 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def _validate_secret_key() -> None:
+    """Refuse to start with the default dev secret in non-dev environments."""
+    if settings.auth_secret_key == _DEFAULT_AUTH_SECRET:
+        # Allow the default only when explicitly opted-in via env var
+        if os.environ.get("AGENTPULSE_ALLOW_DEFAULT_SECRET", "").lower() not in (
+            "1",
+            "true",
+            "yes",
+        ):
+            print(
+                "ERROR: AGENTPULSE_AUTH_SECRET_KEY is still the default dev value.\n"
+                "       Set AGENTPULSE_AUTH_SECRET_KEY to a strong random secret,\n"
+                "       or set AGENTPULSE_ALLOW_DEFAULT_SECRET=1 for local dev only.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+
+_validate_secret_key()

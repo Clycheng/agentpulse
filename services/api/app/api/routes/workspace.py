@@ -7,6 +7,7 @@ from starlette.responses import StreamingResponse
 
 from app.api.deps import get_current_user
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.core.database import Database, Row, get_db
 from app.runtime.deepseek import DeepSeekAPIError, DeepSeekChatClient, DeepSeekNotConfigured
 from app.runtime.hermes_client import HermesBackend, RunContext
@@ -68,10 +69,13 @@ from app.services.workspace import (
     update_task,
 )
 from app.orchestration.supply import create_agent_spec, provision, ProvisioningError
+from app.tools.function_loop import run_function_loop
 from app.orchestration.discussion import (
     run_discussion_round,
     build_discussion_context,
 )
+
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["workspace"])
 
@@ -746,6 +750,7 @@ async def send_message(
         # Multi-agent discussion round (TD-02) — orchestrated by the
         # discussion layer. The route only injects how a turn executes and
         # how the moderator LLM is called, then collects the yielded messages.
+        logger.info("group_discussion_round", conversation_id=conversation_id, agents=len(reply_agents))
         async def turn_executor(conn, agent_id):
             next_agent = next(
                 (a for a in reply_agents if a["id"] == agent_id), None
@@ -1244,8 +1249,41 @@ async def _stream_reply_events(
     (TD-03-T3), else falls back to the temporary DeepSeek path. Both persist an
     agent message and end with a single {"type": "message", "message": row|None}.
     """
+    # ── Agent Action Bridge (streaming): try function loop first ──
+    deepseek = DeepSeekChatClient()
+    history = load_llm_history(conn, conversation["id"])
+    try:
+        tool_chunks: list[str] = []
+        async for ev in run_function_loop(
+            conn=conn,
+            workspace_id=workspace["id"],
+            workspace_name=workspace["name"],
+            agent=agent,
+            history=history,
+            user_message_content=user_message["content"],
+            deepseek_client=deepseek,
+        ):
+            yield ev
+            if ev["type"] == "chunk":
+                tool_chunks.append(ev["content"])
+        # Persist the final message
+        reply_text = "".join(tool_chunks).strip()
+        if reply_text and conversation["id"]:
+            msg = add_message(
+                conn, conversation_id=conversation["id"],
+                sender_type="agent", sender_id=agent["id"],
+                content=reply_text,
+                provider="deepseek", model=deepseek.model,
+            )
+            conn.commit()
+            yield {"type": "message", "message": msg}
+        return
+    except Exception:
+        pass
+
     profile = resolve_hermes_profile(conn, agent["id"])
     if profile:
+        logger.info("agent_reply_via_hermes", agent_id=agent["id"], profile=profile)
         work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
         ctx = RunContext(
             run_id="",
@@ -1267,6 +1305,7 @@ async def _stream_reply_events(
         return
 
     # Temporary DeepSeek execution layer (employees without a Hermes profile).
+    logger.info("agent_reply_via_deepseek", agent_id=agent["id"])
     full_reply = ""
     async for chunk_text in await _stream_agent_reply(
         conn,
@@ -1385,8 +1424,40 @@ async def complete_agent_reply(
     agent: Row,
     user_message: Row,
     discussion_context: str = "",
+    use_tools: bool = True,
 ) -> Row:
+    # ── Agent Action Bridge: function-calling loop ──
+    # When use_tools is True (default for DM), the agent can call tools to
+    # create employees, tasks, groups, etc. instead of just chatting.
     history = load_llm_history(conn, conversation_id)
+
+    if use_tools:
+        deepseek = DeepSeekChatClient()
+        try:
+            tool_chunks: list[str] = []
+            async for ev in run_function_loop(
+                conn=conn,
+                workspace_id=workspace["id"],
+                workspace_name=workspace["name"],
+                agent=agent,
+                history=history,
+                user_message_content=user_message["content"],
+                deepseek_client=deepseek,
+            ):
+                if ev["type"] == "chunk":
+                    tool_chunks.append(ev["content"])
+            reply_text = "".join(tool_chunks).strip()
+            if reply_text:
+                agent_message = add_message(
+                    conn, conversation_id=conversation_id,
+                    sender_type="agent", sender_id=agent["id"],
+                    content=reply_text,
+                    provider="deepseek", model=deepseek.model,
+                )
+                conn.commit()
+                return agent_message
+        except Exception:
+            pass  # Fall through to normal completion
     related_tasks = load_related_task_context(conn, conversation_id)
     latest_user_content = next(
         (message.content for message in reversed(history) if message.role == "user"),

@@ -644,6 +644,7 @@ def create_task(
     due_date: str | None = None,
     parent_task_id: str | None = None,
     consensus_brief_id: str | None = None,  # Gate condition
+    bypass_gate: bool = False,  # Agent action tools bypass the brief requirement
 ) -> Row:
     from app.orchestration.gate import (
         validate_task_creation_gate,
@@ -657,6 +658,7 @@ def create_task(
             workspace_id=workspace_id,
             consensus_brief_id=consensus_brief_id,
             parent_task_id=parent_task_id,
+            bypass_gate=bypass_gate,
         )
     except TaskCreationGateError as e:
         raise ValueError(str(e))

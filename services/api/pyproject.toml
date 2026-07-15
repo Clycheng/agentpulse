@@ -9,6 +9,9 @@ dependencies = [
   "pydantic-settings==2.7.0",
   "httpx==0.28.1",
   "psycopg[binary]==3.3.4",
+  "psycopg_pool==3.3.1",
+  "python-jose[cryptography]==3.5.0",
+  "alembic==1.18.5",
 ]
 
 [tool.pytest.ini_options]

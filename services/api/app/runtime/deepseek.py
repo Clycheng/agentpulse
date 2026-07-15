@@ -56,7 +56,7 @@ class DeepSeekChatClient:
             payload["temperature"] = settings.deepseek_temperature
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=False) as client:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers={
@@ -119,7 +119,7 @@ class DeepSeekChatClient:
             payload["temperature"] = settings.deepseek_temperature
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=False) as client:
                 async with client.stream(
                     "POST",
                     f"{self.base_url}/chat/completions",

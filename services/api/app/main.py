@@ -1,3 +1,7 @@
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,12 +15,41 @@ from app.api.routes.ideas import router as ideas_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.webhooks import router as webhooks_router
 from app.api.routes.workspace import router as workspace_router
-from app.core.database import connect, init_db
+from app.core.database import connect, init_db, shutdown_db
 from app.core.config import settings
+from app.core.logging import get_logger, setup_logging
+
+logger = get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    setup_logging(json_output=os.environ.get("AGENTPULSE_LOG_JSON", "").lower() in ("1", "true"))
+    logger.info("server_starting", version=settings.app_version)
+    init_db()
+    logger.info("database_initialized", kind=database_kind_label())
+
+    cron_task = None
+    if settings.idle_thinking_cron:
+        import asyncio
+
+        cron_task = asyncio.create_task(_idle_cron_loop())
+        logger.info("idle_cron_started", interval_s=settings.idle_cron_interval_seconds)
+
+    yield
+
+    if cron_task is not None:
+        cron_task.cancel()
+    shutdown_db()
+    logger.info("server_stopped")
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title=settings.app_name, version=settings.app_version)
+    app = FastAPI(
+        title=settings.app_name,
+        version=settings.app_version,
+        lifespan=lifespan,
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -35,28 +68,17 @@ def create_app() -> FastAPI:
     app.include_router(ideas_router, prefix="/api")
     app.include_router(channels_router, prefix="/api")
     app.include_router(catalog_router, prefix="/api")
-    # Public webhook endpoints are intentionally NOT under /api (no JWT).
     app.include_router(webhooks_router)
-
-    @app.on_event("startup")
-    async def startup() -> None:
-        init_db()
-        if settings.idle_thinking_cron:
-            import asyncio
-
-            asyncio.create_task(_idle_cron_loop())
 
     return app
 
 
-async def _idle_cron_loop() -> None:
-    """Background self-evolution loop (desktop deployment).
+def database_kind_label() -> str:
+    from app.core.database import safe_database_label
+    return safe_database_label()
 
-    Guarded by ``settings.idle_thinking_cron``. Each pass opens its own
-    connection and runs (1) idle idea reflection (TD-08-T2) and (2) skill
-    sedimentation for employees that hit their run interval (TD-06-T1), with a
-    real Hermes backend. Never lets an error kill the loop.
-    """
+
+async def _idle_cron_loop() -> None:
     import asyncio
 
     from app.runtime.hermes_client import HermesBackend
@@ -70,18 +92,23 @@ async def _idle_cron_loop() -> None:
             conn = connect()
             try:
                 backend = HermesBackend(hermes_bin=settings.hermes_bin)
-                await run_idle_tick(
+                idle_result = await run_idle_tick(
                     conn, backend=backend, hermes_work_root=settings.hermes_work_root
                 )
-                await run_reflection_tick(
+                reflection_result = await run_reflection_tick(
                     conn,
                     backend=backend,
                     provisioner=build_provisioner_from_settings(),
                     hermes_work_root=settings.hermes_work_root,
                 )
+                logger.info(
+                    "cron_tick",
+                    ideas=idle_result["ideas_created"],
+                    skills=reflection_result["skills_learned"],
+                )
             finally:
                 conn.close()
-        except Exception:  # never let the cron loop die
+        except Exception:
             continue
 
 

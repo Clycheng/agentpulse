@@ -1,0 +1,720 @@
+"""Tool registry — schemas + handlers the agent can call.
+
+Each tool is a dict with:
+- schema: OpenAI function-calling schema (name, description, parameters)
+- handler: async callable(conn, workspace, agent, args) -> str (result text)
+
+The handler calls internal service functions directly (no HTTP layer), so it
+shares the same DB connection as the calling request.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from app.core.database import Database, Row
+from app.services.workspace import (
+    add_message,
+    claim_task,
+    create_agent,
+    create_dm_conversation,
+    create_task,
+    ensure_department,
+    get_bootstrap,
+    new_id,
+    now_iso,
+    serialize_agent,
+    serialize_task,
+    update_task,
+)
+
+
+# ---------------------------------------------------------------------------
+# Tool result types
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ToolCall:
+    """A parsed tool call from the LLM response."""
+    id: str
+    name: str
+    arguments: dict = field(default_factory=dict)
+
+
+@dataclass
+class ToolResult:
+    """Result of executing a tool call, to be fed back to the LLM."""
+    tool_call_id: str
+    name: str
+    content: str  # JSON string or human-readable text
+
+
+# ---------------------------------------------------------------------------
+# Tool definitions (OpenAI function-calling schema)
+# ---------------------------------------------------------------------------
+
+TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_employee",
+            "description": (
+                "创建一个新的AI员工。用自然语言描述你想要什么样的员工，"
+                "系统会分配角色和技能。你可以一次创建多个员工来组建团队。"
+                "创建后员工需要经过配置才能开始工作，但可以立即和ta聊天。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "员工的名字，例如：小明、市场分析师小王",
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "岗位名称，例如：内容策划、全栈工程师、客服专员",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "员工的职责描述，帮老板做什么",
+                    },
+                    "department": {
+                        "type": "string",
+                        "description": "所属部门，例如：市场部、技术部、运营部。不提供则自动归入合适部门",
+                    },
+                    "skills": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "技能列表，例如：[\"公众号文案\", \"SEO优化\"]",
+                    },
+                },
+                "required": ["name", "role", "description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_task",
+            "description": (
+                "创建一个新任务。老板直接交代的任务不需要 brief 确认。"
+                "分配给指定员工。设置 bypass_gate=true 跳过共识门控。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "任务标题，简明扼要",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "任务详细描述，包括目标、范围、验收标准",
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": ["P0", "P1", "P2"],
+                        "description": "优先级：P0最紧急，P2最低",
+                    },
+                    "owner_agent_id": {
+                        "type": "string",
+                        "description": "分配给哪个员工的ID。先调 list_agents 查到员工ID再分配",
+                    },
+                    "conversation_id": {
+                        "type": "string",
+                        "description": "关联的会话ID（可选）",
+                    },
+                    "bypass_gate": {
+                        "type": "boolean",
+                        "description": "老板直接交代的任务设为true，跳过共识brief要求",
+                        "default": True,
+                    },
+                },
+                "required": ["title", "description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_group",
+            "description": (
+                "创建一个群聊。把多个员工拉到一个群里讨论协作。"
+                "建群后可以用 add_group_member 加更多成员。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "群聊名称，例如：新产品讨论组",
+                    },
+                    "member_agent_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "初始成员（员工ID列表）。至少1个",
+                    },
+                },
+                "required": ["name", "member_agent_ids"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_group_member",
+            "description": "把员工拉进已有群聊。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "conversation_id": {
+                        "type": "string",
+                        "description": "群聊ID",
+                    },
+                    "agent_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "要加入的员工ID列表",
+                    },
+                },
+                "required": ["conversation_id", "agent_ids"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_agents",
+            "description": (
+                "列出公司当前所有员工，获取他们的ID、名字、岗位、部门等信息。"
+                "在分配任务或拉群前先查这里获取员工ID。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_tasks",
+            "description": "列出公司当前所有任务，知道有哪些需要做。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "按状态筛选：待认领、进行中、待确认、阻塞、已完成。不填则列全部",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "claim_task",
+            "description": "认领一个待办任务，表示这个员工要开始执行它了。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "要认领的任务ID",
+                    },
+                    "agent_id": {
+                        "type": "string",
+                        "description": "认领的员工ID（通常就是操作者自己）",
+                    },
+                },
+                "required": ["task_id", "agent_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_task",
+            "description": "更新任务状态或信息。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "任务ID",
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["进行中", "待确认", "阻塞", "已完成"],
+                        "description": "新状态",
+                    },
+                    "progress": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "进度百分比",
+                    },
+                },
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_group_message",
+            "description": (
+                "在群聊里发消息。当你需要通知多个员工、发起讨论、"
+                "或者传达老板的决定时使用。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "conversation_id": {
+                        "type": "string",
+                        "description": "群聊ID",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "消息内容",
+                    },
+                },
+                "required": ["conversation_id", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "no_action_needed",
+            "description": (
+                "当前不需要执行任何操作，只是一个普通回复。"
+                "这是默认行为——只有当你确定需要创建、修改、查询东西时才调其他工具。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# Tool handlers
+# ---------------------------------------------------------------------------
+
+async def _handle_create_employee(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    """Create one employee."""
+    name = str(args.get("name", "")).strip()
+    role = str(args.get("role", "")).strip()
+    description = str(args.get("description", "")).strip()
+    department_name = str(args.get("department", "新员工部")).strip()
+    skills: list[str] = args.get("skills") or []
+
+    if not name or not role:
+        return json.dumps({"error": "员工名字和岗位不能为空"})
+
+    if len(name) > 24:
+        name = name[:24]
+    if len(role) > 24:
+        role = role[:24]
+
+    department = ensure_department(conn, workspace_id, department_name)
+    agent_id = create_agent(
+        conn,
+        workspace_id=workspace_id,
+        department_id=department["id"],
+        name=name,
+        role=role,
+        description=description or f"由 {agent['name']} 创建的{role}",
+        prompt=f"你是一名{role}。{description}",
+        skills=skills,
+        mcps=[],
+        source="custom",
+    )
+    create_dm_conversation(conn, workspace_id, agent_id)
+    new_agent = conn.execute(
+        "SELECT * FROM agents WHERE id = ?", (agent_id,)
+    ).fetchone()
+
+    return json.dumps(
+        {
+            "success": True,
+            "agent": {
+                "id": agent_id,
+                "name": name,
+                "role": role,
+                "department": department_name,
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+async def _handle_create_task(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    title = str(args.get("title", "")).strip()
+    description = str(args.get("description", "")).strip()
+    priority = str(args.get("priority", "P2")).strip()
+    owner_agent_id = str(args.get("owner_agent_id", "")).strip() or None
+    conversation_id = str(args.get("conversation_id", "")).strip() or None
+
+    if not title:
+        return json.dumps({"error": "任务标题不能为空"})
+
+    try:
+        bypass = args.get("bypass_gate", True)
+        task = create_task(
+            conn,
+            workspace_id=workspace_id,
+            title=title[:160],
+            description=description[:2000] if description else "",
+            priority=priority if priority in ("P0", "P1", "P2") else "P2",
+            owner_agent_id=owner_agent_id,
+            status="待认领",
+            conversation_id=conversation_id,
+            bypass_gate=bypass,
+        )
+        return json.dumps(
+            {
+                "success": True,
+                "task": {
+                    "id": task["id"],
+                    "title": task["title"],
+                    "priority": task["priority"],
+                    "status": task["status"],
+                },
+            },
+            ensure_ascii=False,
+        )
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+async def _handle_create_group(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    name = str(args.get("name", "")).strip()
+    member_ids: list[str] = args.get("member_agent_ids") or []
+
+    if not name:
+        return json.dumps({"error": "群聊名称不能为空"})
+    if not member_ids:
+        return json.dumps({"error": "至少需要1个成员"})
+
+    conversation_id = new_id("conv")
+    created_at = now_iso()
+    conn.execute(
+        """
+        INSERT INTO conversations (id, workspace_id, kind, name, unread, created_at, updated_at)
+        VALUES (?, ?, 'group', ?, 0, ?, ?)
+        """,
+        (conversation_id, workspace_id, name, created_at, created_at),
+    )
+    for mid in member_ids:
+        conn.execute(
+            "INSERT INTO conversation_members (conversation_id, agent_id) VALUES (?, ?)",
+            (conversation_id, mid),
+        )
+    conn.commit()
+
+    # Also send a welcome message
+    add_message(
+        conn,
+        conversation_id=conversation_id,
+        sender_type="system",
+        sender_id="",
+        content=f"群聊「{name}」已创建，{len(member_ids)} 位成员已加入。",
+    )
+    conn.commit()
+
+    return json.dumps(
+        {
+            "success": True,
+            "group": {
+                "id": conversation_id,
+                "name": name,
+                "member_count": len(member_ids),
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+async def _handle_add_group_member(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    conversation_id = str(args.get("conversation_id", "")).strip()
+    agent_ids: list[str] = args.get("agent_ids") or []
+
+    if not conversation_id or not agent_ids:
+        return json.dumps({"error": "缺少群聊ID或员工ID"})
+
+    conv = conn.execute(
+        "SELECT id FROM conversations WHERE id = ? AND workspace_id = ?",
+        (conversation_id, workspace_id),
+    ).fetchone()
+    if conv is None:
+        return json.dumps({"error": "群聊不存在"})
+
+    added = 0
+    for aid in agent_ids:
+        existing = conn.execute(
+            "SELECT 1 FROM conversation_members WHERE conversation_id = ? AND agent_id = ?",
+            (conversation_id, aid),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO conversation_members (conversation_id, agent_id) VALUES (?, ?)",
+                (conversation_id, aid),
+            )
+            added += 1
+
+    conn.commit()
+
+    add_message(
+        conn,
+        conversation_id=conversation_id,
+        sender_type="system",
+        sender_id="",
+        content=f"{agent['name']} 邀请了 {added} 位新成员加入群聊。",
+    )
+    conn.commit()
+
+    return json.dumps({"success": True, "added": added}, ensure_ascii=False)
+
+
+async def _handle_list_agents(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    rows = conn.execute(
+        """
+        SELECT a.id, a.name, a.role, a.description, d.name AS department, a.status_kind
+        FROM agents a
+        JOIN departments d ON d.id = a.department_id
+        WHERE a.workspace_id = ?
+        ORDER BY a.created_at
+        """,
+        (workspace_id,),
+    ).fetchall()
+
+    agents_list = [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "role": r["role"],
+            "department": r["department"],
+            "status": r["status_kind"],
+        }
+        for r in rows
+    ]
+    return json.dumps({"agents": agents_list, "total": len(agents_list)}, ensure_ascii=False)
+
+
+async def _handle_list_tasks(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    status_filter = str(args.get("status", "")).strip()
+    if status_filter:
+        rows = conn.execute(
+            """
+            SELECT id, title, priority, status, progress, owner_agent_id
+            FROM tasks WHERE workspace_id = ? AND status = ?
+            ORDER BY
+              CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 ELSE 2 END,
+              updated_at DESC
+            """,
+            (workspace_id, status_filter),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT id, title, priority, status, progress, owner_agent_id
+            FROM tasks WHERE workspace_id = ?
+            ORDER BY
+              CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 ELSE 2 END,
+              updated_at DESC
+            """,
+            (workspace_id,),
+        ).fetchall()
+
+    tasks_list = [
+        {
+            "id": r["id"],
+            "title": r["title"],
+            "priority": r["priority"],
+            "status": r["status"],
+            "progress": r["progress"],
+            "owner_id": r["owner_agent_id"],
+        }
+        for r in rows
+    ]
+    return json.dumps({"tasks": tasks_list, "total": len(tasks_list)}, ensure_ascii=False)
+
+
+async def _handle_claim_task(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    task_id = str(args.get("task_id", "")).strip()
+    claimant_agent_id = str(args.get("agent_id", "")).strip()
+
+    if not task_id or not claimant_agent_id:
+        return json.dumps({"error": "缺少任务ID或员工ID"})
+
+    try:
+        task = claim_task(
+            conn,
+            workspace_id=workspace_id,
+            task_id=task_id,
+            agent_id=claimant_agent_id,
+        )
+        return json.dumps(
+            {"success": True, "task": {"id": task["id"], "status": task["status"]}},
+            ensure_ascii=False,
+        )
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+async def _handle_update_task(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    task_id = str(args.get("task_id", "")).strip()
+    changes: dict[str, Any] = {}
+    if "status" in args:
+        changes["status"] = args["status"]
+    if "progress" in args:
+        changes["progress"] = int(args["progress"])
+
+    if not task_id or not changes:
+        return json.dumps({"error": "缺少任务ID或更新内容"})
+
+    try:
+        task = update_task(conn, workspace_id=workspace_id, task_id=task_id, changes=changes)
+        return json.dumps(
+            {"success": True, "task": {"id": task["id"], "status": task["status"], "progress": task["progress"]}},
+            ensure_ascii=False,
+        )
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+async def _handle_send_group_message(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    conversation_id = str(args.get("conversation_id", "")).strip()
+    content = str(args.get("content", "")).strip()
+
+    if not conversation_id or not content:
+        return json.dumps({"error": "缺少群聊ID或消息内容"})
+
+    add_message(
+        conn,
+        conversation_id=conversation_id,
+        sender_type="agent",
+        sender_id=agent["id"],
+        content=content,
+    )
+    conn.commit()
+    return json.dumps({"success": True})
+
+
+async def _handle_no_action(_conn, _ws, _agent, _args) -> str:
+    return json.dumps({"action": "none"})
+
+
+# ---------------------------------------------------------------------------
+# Handler dispatch map
+# ---------------------------------------------------------------------------
+
+HANDLER_MAP: dict[str, Callable] = {
+    "create_employee": _handle_create_employee,
+    "create_task": _handle_create_task,
+    "create_group": _handle_create_group,
+    "add_group_member": _handle_add_group_member,
+    "list_agents": _handle_list_agents,
+    "list_tasks": _handle_list_tasks,
+    "claim_task": _handle_claim_task,
+    "update_task": _handle_update_task,
+    "send_group_message": _handle_send_group_message,
+    "no_action_needed": _handle_no_action,
+}
+
+
+async def execute_tool(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    tool_call: ToolCall,
+) -> ToolResult:
+    """Execute a single tool call and return the result."""
+    handler = HANDLER_MAP.get(tool_call.name)
+    if handler is None:
+        content = json.dumps({"error": f"未知工具: {tool_call.name}"})
+    else:
+        try:
+            content = await handler(conn, workspace_id, agent, tool_call.arguments)
+        except Exception as exc:
+            content = json.dumps({"error": f"工具执行失败: {exc}"})
+
+    return ToolResult(
+        tool_call_id=tool_call.id,
+        name=tool_call.name,
+        content=content,
+    )
+
+
+def system_prompt_for_operator(workspace_name: str, agent_name: str, agent_role: str) -> str:
+    """System prompt that tells the agent it can operate the system."""
+    return (
+        f"你是 {workspace_name} 的 AI 员工「{agent_name}」，岗位是{agent_role}。\n\n"
+        "你不仅能聊天，还能**直接操作公司系统**。你可以调用工具来：\n"
+        "- 创建新员工（帮你招人、组建团队）\n"
+        "- 创建任务（把工作分配给员工）\n"
+        "- 创建群聊和拉人进群（组织协作）\n"
+        "- 查看员工列表和任务列表\n"
+        "- 认领任务、更新任务状态\n\n"
+        "**重要规则**：\n"
+        "1. 当老板说\"帮我招xxx\"、\"建一个团队\"、\"创建一个任务\"等操作指令时，你必须调用对应工具执行，"
+        "不要只说\"好的我帮你做\"然后不做。\n"
+        "2. 老板说\"帮我建一个完整的创业团队\"时，根据团队类型一口气创建多个员工。\n"
+        "3. 创建完员工后，主动告诉他们接下来可以做什么。\n"
+        "4. 普通聊天时不需要调工具，用 no_action_needed。\n"
+        "5. 操作完成后用中文简洁汇报结果，让老板知道已经执行成功了。\n"
+        "6. 调工具前如果需要查员工ID，先调 list_agents。\n"
+        "7. 所有回复用中文，专业直接。"
+    )

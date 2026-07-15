@@ -8,6 +8,7 @@ import re
 import sqlite3
 
 import psycopg
+import psycopg_pool
 from psycopg.rows import dict_row
 
 from app.core.config import settings
@@ -30,6 +31,34 @@ class Result:
 
     def fetchall(self) -> list[Row]:
         return self._rows
+
+# ---------------------------------------------------------------------------
+# Placeholder translation — replaces `?` with the dialect-native placeholder
+# but *not* inside single-quoted strings (avoids breaking string literals
+# that happen to contain a literal ? character).
+# ---------------------------------------------------------------------------
+
+def _translate_placeholders(sql: str, dialect: str) -> str:
+    """Replace ``?`` placeholders with dialect-native markers.
+
+    Skips ``?`` inside single-quoted SQL string literals (e.g. ``'what?'``).
+    """
+    if dialect == "sqlite":
+        return sql
+    # PostgreSQL uses %s
+    result: list[str] = []
+    in_string = False
+    for ch in sql:
+        if ch == "'":
+            in_string = not in_string
+            result.append(ch)
+        elif ch == "?" and not in_string:
+            result.append("%s")
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
 
 
 class Database:
@@ -59,7 +88,7 @@ class Database:
         self.conn.close()
 
     def _execute_postgres(self, sql: str, params: Params) -> Result:
-        translated_sql = sql.replace("?", "%s")
+        translated_sql = _translate_placeholders(sql, "postgres")
         with self.conn.cursor() as cursor:
             cursor.execute(translated_sql, tuple(params))
             if cursor.description is None:
@@ -72,12 +101,34 @@ class Database:
             return Result()
         return Result([Row(dict(row)) for row in cursor.fetchall()])
 
+# ---------------------------------------------------------------------------
+# Connection pooling
+# ---------------------------------------------------------------------------
+
+_pg_pool: "psycopg_pool.ConnectionPool | None" = None
+
+
+def _pg_pool_instance() -> "psycopg_pool.ConnectionPool":
+    global _pg_pool
+    if _pg_pool is None:
+        _pg_pool = psycopg_pool.ConnectionPool(
+            settings.database_url,
+            kwargs={"row_factory": dict_row},
+            min_size=1,
+            max_size=10,
+            open=True,
+        )
+    return _pg_pool
+
+
+
 
 def connect() -> Database:
     database_url = settings.database_url
     if is_sqlite_url(database_url):
         return connect_sqlite(database_url)
-    conn = psycopg.connect(database_url, row_factory=dict_row)
+    pool = _pg_pool_instance()
+    conn = pool.getconn()
     return Database(conn, "postgres")
 
 
@@ -112,6 +163,18 @@ def get_db() -> Generator[Database, None, None]:
         raise
     finally:
         conn.close()
+        # Return the connection to the pool (no-op for SQLite)
+        if _pg_pool is not None and hasattr(conn, "conn"):
+            _pg_pool.putconn(conn.conn)  # type: ignore[arg-type]
+
+def shutdown_db() -> None:
+    """Close the PostgreSQL pool gracefully (call on app shutdown)."""
+    global _pg_pool
+    if _pg_pool is not None:
+        _pg_pool.close()
+        _pg_pool = None
+
+
 
 
 def init_db() -> None:

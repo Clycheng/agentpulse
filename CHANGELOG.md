@@ -295,3 +295,64 @@
 - **feat(desktop)**: 聊天头部关联任务栏——会话正在驱动的任务以可点击 chip 展示（等级+状态），点击开任务详情。
 
 <!-- 追加新条目到此区块顶部；发版时归档为带版本号的小节 -->
+
+## 2026-07-15 — 企业级加固
+
+### 认证
+- **JWT 标准化**：自研 HMAC token → `python-jose` HS256 JWT（标准 `sub`/`iat`/`exp`/`jti`/`iss` claims）。旧格式兼容 30 天过渡期，现有 session 不中断。
+- **默认密钥强制检测**：`auth_secret_key` 为默认值 `agentpulse-local-dev-secret` 时启动直接拒绝，除非设 `AGENTPULSE_ALLOW_DEFAULT_SECRET=1`（仅限本地开发）。
+
+### 数据库
+- **连接池**：PostgreSQL 路径引入 `psycopg_pool`（min=1, max=10），替换每次请求新建连接。`shutdown_db()` 在 app lifespan 结束时优雅关闭。
+- **占位符加固**：`?` → `%s` 替换改为逐字符扫描，跳过单引号字符串内的 `?`，防止误替换。
+- **Alembic 迁移框架**：初始化 `alembic/`，`env.py` 从 `app.core.config.settings` 读取数据库 URL。基线 revision `99f23f8da74b` 已创建。
+
+### 可观测性
+- **结构化日志**：新增 `app/core/logging.py`，支持 JSON Lines 输出（`AGENTPULSE_LOG_JSON=1`）和彩色控制台模式。关键路径（Hermes/DeepSeek 路由、群讨论进入）已加日志点。
+- **FastAPI lifespan**：`@app.on_event("startup")` → `lifespan` async context manager，正确处理启动/关闭生命周期。
+
+### 依赖
+- 新增：`python-jose[cryptography]==3.5.0`、`psycopg_pool==3.3.1`、`alembic==1.18.5`
+
+### 文档
+- 新增 `apps/desktop/AGENTS.md`：前端当前状态 + 模块化路线图
+
+### 测试
+- 全量 247 passed / 7 skipped / 1 xpassed，零回归
+
+## 2026-07-15（续）— Agent Action Bridge 🔧
+
+**核心突破：Agent 能动手，不只是动嘴。**
+
+### 新增模块
+
+- **`app/tools/registry.py`** — 10 个工具定义（OpenAI function-calling 格式）+ 对应 handler
+  - `create_employee` / `create_task` / `create_group` / `add_group_member` / `list_agents` / `list_tasks` / `claim_task` / `update_task` / `send_group_message` / `no_action_needed`
+  - Handler 直接调内部 service 函数（不走 HTTP），共享请求 DB 连接
+- **`app/tools/function_loop.py`** — Function-calling 循环
+  - 用户发消息 → LLM 决策调工具 → 执行 → 结果回喂 → 重复（最多 5 轮）
+  - `run_function_loop()` 生成 {type: chunk|tool_call|tool_result} 事件流
+- **`app/tools/__init__.py`**
+
+### 接入热路径
+
+- **`send_message`**（非流式 DM）：优先走 function loop，失败 fallback 原路径
+- **`send_message_stream`**（SSE 流式）：同上，结果实时流式返回
+- **`complete_agent_reply`**：新增 `use_tools=True` 参数
+
+### 门控调整
+
+- **`app/orchestration/gate.py`**：`validate_task_creation_gate` 新增 `bypass_gate` 参数
+- **`app/services/workspace.py`**：`create_task` 新增 `bypass_gate` 参数
+- agent 通过 tool 创建任务时 `bypass_gate=True`，跳过共识 brief 要求
+
+### 测试
+
+- **`tests/test_function_loop.py`** — 12 个新测试覆盖全部工具执行路径：
+  - tool_call 解析、系统 prompt、创建员工/任务/群组、拉人、列表查询、错误处理
+- 原有测试适配（`test_login_secretary_chat` 不再断言硬编码文本）
+
+### 效果
+
+老板跟小秘说「帮我建一个市场团队，要内容策划、运营增长、设计师」→ agent 实际调 `create_employee` x3 → 返回结果。
+从此 agent 不再只是"打字"，而是真正能**操作公司系统**。
