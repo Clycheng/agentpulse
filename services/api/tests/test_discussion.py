@@ -242,6 +242,7 @@ class TestRunDiscussionRound:
                 conversation_id="conv_1",
                 member_agents=[{"id": "agent_abc"}],
                 turn_executor=noop,
+                debounce_seconds=0,
             )
         )
         end = events[-1]
@@ -270,6 +271,7 @@ class TestRunDiscussionRound:
                 member_agents=[{"id": "agent_abc"}],
                 turn_executor=reply,
                 max_turns=2,
+                debounce_seconds=0,
             )
         )
         messages = [e for e in events if e["type"] == "message"]
@@ -295,6 +297,7 @@ class TestRunDiscussionRound:
                 member_agents=[{"id": "agent_abc"}],
                 turn_executor=reply,
                 max_turns=1,
+                debounce_seconds=0,
             )
         )
         types = [e["type"] for e in events]
@@ -317,6 +320,7 @@ class TestRunDiscussionRound:
                 conversation_id="conv_1",
                 member_agents=[],  # empty → no speaker
                 turn_executor=reply,
+                debounce_seconds=0,
             )
         )
         end = events[-1]
@@ -340,6 +344,7 @@ class TestRunDiscussionRound:
                 member_agents=[{"id": "agent_abc"}],
                 turn_executor=failing,
                 max_turns=4,
+                debounce_seconds=0,
             )
         )
         errors = [e for e in events if e["type"] == "error"]

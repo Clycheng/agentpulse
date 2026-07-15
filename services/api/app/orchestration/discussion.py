@@ -12,6 +12,7 @@ See ADR 0002, ADR 0006, and TD-02 for design details.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -35,6 +36,9 @@ LlmComplete = Callable[[str], Awaitable[str]]
 MAX_AGENT_TURNS_PER_ROUND = 4
 TRANSCRIPT_WINDOW = 30
 MODERATOR_IS_DEFAULT_SECRETARY = True
+# How long to wait, after a boss message arrives, before letting the group
+# jump in — gives a quick burst of follow-up messages a chance to land first.
+DISCUSSION_DEBOUNCE_SECONDS = 2.5
 
 
 class DiscussionStatus:
@@ -155,7 +159,10 @@ def build_speaker_selection_prompt(
 当前讨论记录：
 {transcript_text}
 
-请根据讨论进展，选择下一个最应该发言的人。如果讨论已足够充分可以产出共识纪要，返回 NONE。
+请根据讨论进展，选择下一个最应该发言的人。以下情况都应返回 NONE（暂停，等老板回应），而不是换个人继续发言：
+1. 讨论已足够充分，可以产出共识纪要。
+2. 最近一条发言是在向老板提问 / 索要信息或决策（比如要链接、要素材、要拍板），且老板还没有回应——这种情况下让别的成员再问一遍同样的问题没有意义，应该停下来等老板回答，不要接力提问。
+3. 最近几条发言已经在重复表达同一个意思（比如都在说"我打不开这个文件/权限不够"），继续发言只是重复噪音。
 
 输出严格 JSON（不要多余文字）：
 {{"next_speaker": "<agent_id>|NONE", "reason": "选择原因"}}
@@ -280,6 +287,7 @@ async def run_discussion_round(
     turn_executor: TurnExecutor,
     llm_complete: LlmComplete | None = None,
     max_turns: int = MAX_AGENT_TURNS_PER_ROUND,
+    debounce_seconds: float = DISCUSSION_DEBOUNCE_SECONDS,
 ) -> AsyncIterator[dict]:
     """Run one round of multi-agent discussion as an async event stream.
 
@@ -290,6 +298,13 @@ async def run_discussion_round(
     (``llm_complete``), and translates the yielded events to its transport
     (SSE frames for streaming, an accumulated list for non-streaming).
 
+    Debounce: a human sending a quick burst of messages (elaborating a thought
+    across several sends) shouldn't get the group jumping in after the first
+    one. Before the round starts, wait ``debounce_seconds`` and re-check the
+    latest message — if the boss sent something newer in the meantime, bail
+    out silently; that follow-up message's own request will run the round
+    (and sees the full transcript, so nothing is lost).
+
     Yields event dicts:
       - {"type": "speaker", "agent_id": str}
       - {"type": "chunk", "content": str}          (re-emitted from turn_executor)
@@ -299,6 +314,14 @@ async def run_discussion_round(
     """
     turns_used = 0
     converged = False
+
+    if debounce_seconds > 0:
+        pre_debounce_message = _load_last_message(conn, conversation_id)
+        await asyncio.sleep(debounce_seconds)
+        latest_message = _load_last_message(conn, conversation_id)
+        if latest_message != pre_debounce_message:
+            yield {"type": "end", "converged": False, "turns_used": 0}
+            return
 
     for _turn in range(max_turns):
         last_message = _load_last_message(conn, conversation_id)

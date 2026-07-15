@@ -18,6 +18,24 @@ from pathlib import Path
 from typing import Protocol
 
 
+# Built-in Hermes toolsets that reach outside the chat (network, filesystem,
+# code execution, real browser, real desktop, external media/search APIs).
+# `hermes profile create` ships every one of these ON by default — verified
+# 2026-07-15 against Hermes v0.18.2: a fresh profile granted only
+# ("web", "browser") via `hermes tools enable` still had computer_use,
+# terminal, file and code_execution enabled, because `tools enable` is
+# additive and never touches the rest of the default set. Any capability not
+# explicitly listed in the requesting agent_capabilities row must be disabled
+# here, or the capability catalog's risk_gate is cosmetic — every employee
+# gets full desktop/shell/network access the moment they're real-provisioned,
+# regardless of what was actually granted.
+GATED_TOOLSETS = frozenset({
+    "web", "browser", "terminal", "file", "code_execution", "computer_use",
+    "image_gen", "video_gen", "video", "x_search", "tts",
+    "homeassistant", "spotify", "yuanbao",
+})
+
+
 @dataclass
 class ProvisioningAction:
     """Record of a single provisioning action (for audit/testing)."""
@@ -342,6 +360,13 @@ class LocalHermesProvisioner:
         )
         if toolsets:
             self._run(["tools", "enable", *toolsets], profile=profile_name)
+        # Deny-by-default: disable every gated toolset this agent's granted
+        # capabilities didn't ask for (see GATED_TOOLSETS docstring — a fresh
+        # profile ships with computer_use/terminal/file/code_execution/web/
+        # browser already on, and `tools enable` above is additive only).
+        to_disable = sorted(GATED_TOOLSETS - set(toolsets))
+        if to_disable:
+            self._run(["tools", "disable", *to_disable], profile=profile_name)
         # NOTE: real MCP servers need endpoints/auth (`hermes mcp add ...`); the
         # catalog only carries logical names, so MCP wiring is deferred until a
         # channel/tool endpoint exists. Left intentionally unhandled here.

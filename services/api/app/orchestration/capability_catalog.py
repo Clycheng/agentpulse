@@ -196,6 +196,18 @@ CATALOG: dict[str, CapabilityDef] = {
         toolsets=("web", "terminal"),
         risk_gate="auto",
     ),
+    "browser_automation": CapabilityDef(
+        key="browser_automation",
+        description="真实浏览器自动化——打开网页、点击、填表、登录站点",
+        toolsets=("browser", "web"),
+        risk_gate="approval",
+    ),
+    "computer_use": CapabilityDef(
+        key="computer_use",
+        description="直接操作电脑桌面——控制鼠标键盘、操作任意本地 App（Hermes cua-driver）",
+        toolsets=("computer_use",),
+        risk_gate="approval",
+    ),
     # Human resources
     "resume_screening": CapabilityDef(
         key="resume_screening",
