@@ -67,3 +67,33 @@ class LlmChatResponse(BaseModel):
     provider: str = "deepseek"
     model: str
     usage: dict[str, Any] | None = None
+
+
+class RunStepOut(BaseModel):
+    """One entry in a run's activity trace (audit/timeline view)."""
+
+    id: str
+    type: str  # message | thinking | tool_call | tool_result | approval_required | status | final
+    status: str
+    title: str
+    detail: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class RunOut(BaseModel):
+    """One agent run, with its full step-by-step trace — the audit/timeline
+    view requested independently by multiple early users (see README/CHANGELOG
+    for the Product Hunt feedback this responds to)."""
+
+    id: str
+    agent_id: str
+    agent_name: str
+    task_id: str | None
+    status: str
+    provider: str
+    model: str
+    error: str
+    created_at: str
+    completed_at: str | None
+    steps: list[RunStepOut] = Field(default_factory=list)

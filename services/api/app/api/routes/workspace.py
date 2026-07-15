@@ -27,6 +27,8 @@ from app.schemas.run import (
     LlmChatRequest,
     LlmKnowledgeSource,
     LlmTaskContext,
+    RunOut,
+    RunStepOut,
 )
 from app.schemas.workspace import (
     AddConversationMembersRequest,
@@ -988,6 +990,72 @@ async def send_message_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/conversations/{conversation_id}/runs", response_model=list[RunOut])
+def list_conversation_runs(
+    conversation_id: str,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    """Run/activity trace for a conversation — the audit/timeline view
+    multiple early users asked for independently (see CHANGELOG): trace
+    every agent action (message, tool call, tool result, approval request)
+    back to the run and message that triggered it, in order."""
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    conversation = conn.execute(
+        "SELECT id FROM conversations WHERE id = ? AND workspace_id = ?",
+        (conversation_id, workspace["id"]),
+    ).fetchone()
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    runs = conn.execute(
+        """
+        SELECT runs.*, agents.name AS agent_name
+        FROM runs
+        JOIN agents ON agents.id = runs.agent_id
+        WHERE runs.conversation_id = ?
+        ORDER BY runs.created_at
+        """,
+        (conversation_id,),
+    ).fetchall()
+
+    result = []
+    for run in runs:
+        steps = conn.execute(
+            "SELECT * FROM run_steps WHERE run_id = ? ORDER BY created_at, id",
+            (run["id"],),
+        ).fetchall()
+        result.append(
+            RunOut(
+                id=run["id"],
+                agent_id=run["agent_id"],
+                agent_name=run["agent_name"],
+                task_id=run["task_id"],
+                status=run["status"],
+                provider=run["provider"],
+                model=run["model"],
+                error=run["error"],
+                created_at=run["created_at"],
+                completed_at=run["completed_at"],
+                steps=[
+                    RunStepOut(
+                        id=step["id"],
+                        type=step["type"],
+                        status=step["status"],
+                        title=step["title"],
+                        detail=step["detail"],
+                        payload=json.loads(step["payload_json"] or "{}"),
+                        created_at=step["created_at"],
+                    )
+                    for step in steps
+                ],
+            )
+        )
+    return result
 
 
 @router.post("/approvals/{approval_id}/resolve")

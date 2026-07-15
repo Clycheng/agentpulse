@@ -1792,6 +1792,8 @@ function App() {
       <section className="main-stage">
         {view === 'chat' && activeChat && (
           <ChatView
+            conversationId={activeChat.id}
+            token={token}
             title={chatTitle}
             meta={chatMeta}
             members={chatMembers}
@@ -2959,6 +2961,8 @@ function EmptyWorkbenchState({ title, text }: { title: string; text: string }) {
 }
 
 function ChatView({
+  conversationId,
+  token,
   title,
   meta,
   members,
@@ -2984,6 +2988,8 @@ function ChatView({
   onResolveCardApproval,
   onAnswerCardClarification,
 }: {
+  conversationId: string;
+  token: string | null;
   title: string;
   meta: string;
   members: string[];
@@ -3024,6 +3030,7 @@ function ChatView({
   ) => Promise<boolean>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [runTraceOpen, setRunTraceOpen] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionStart, setMentionStart] = useState<number | null>(null);
@@ -3131,7 +3138,24 @@ function ChatView({
           {materialIcon('task_alt')}
           {relatedTaskCount ? `关联任务 ${relatedTaskCount}` : '关联任务'}
         </button>
+        <button
+          className="related-task-button"
+          type="button"
+          onClick={() => setRunTraceOpen(true)}
+        >
+          {materialIcon('timeline')}
+          运行轨迹
+        </button>
       </header>
+
+      {runTraceOpen && (
+        <RunTraceModal
+          conversationId={conversationId}
+          token={token}
+          agents={agents}
+          onClose={() => setRunTraceOpen(false)}
+        />
+      )}
 
       {relatedTasks.length > 0 && (
         <div className="chat-task-rail">
@@ -5750,6 +5774,151 @@ function OnboardingFeature({
     </div>
   );
 }
+
+type RunStepTrace = {
+  id: string;
+  type: string;
+  status: string;
+  title: string;
+  detail: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+type RunTrace = {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  task_id: string | null;
+  status: string;
+  provider: string;
+  model: string;
+  error: string;
+  created_at: string;
+  completed_at: string | null;
+  steps: RunStepTrace[];
+};
+
+const RUN_STEP_ICON: Record<string, string> = {
+  message: 'chat_bubble',
+  thinking: 'psychology',
+  tool_call: 'bolt',
+  tool_result: 'task_alt',
+  approval_required: 'gpp_maybe',
+  status: 'info',
+  final: 'flag',
+};
+
+// Audit/timeline view — surfaces the run/run_steps trace that already gets
+// written on every run but had zero UI before this (see CHANGELOG: multiple
+// early users independently asked for exactly this on Product Hunt).
+function RunTraceModal({
+  conversationId,
+  token,
+  agents,
+  onClose,
+}: {
+  conversationId: string;
+  token: string | null;
+  agents: Agent[];
+  onClose: () => void;
+}) {
+  const [runs, setRuns] = useState<RunTrace[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRuns(null);
+    setError(null);
+    apiRequest<RunTrace[]>(`/conversations/${conversationId}/runs`, { token: token ?? undefined })
+      .then((data) => {
+        if (!cancelled) setRuns(data);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(err.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, token]);
+
+  const agentById = (id: string) => agents.find((agent) => agent.id === id);
+
+  return (
+    <Modal
+      title="运行轨迹"
+      description="按时间顺序回放这个会话里每次运行的完整过程——消息、工具调用、工具结果、审批请求都摊开显示。"
+      width={720}
+      onClose={onClose}
+    >
+      {error && <EmptyState>{error}</EmptyState>}
+      {!error && runs === null && <EmptyState>加载中…</EmptyState>}
+      {!error && runs !== null && runs.length === 0 && (
+        <EmptyState>这个会话还没有运行记录</EmptyState>
+      )}
+      {!error && runs !== null && runs.length > 0 && (
+        <div className="run-trace-list">
+          {runs.map((run) => {
+            const agent = agentById(run.agent_id);
+            return (
+              <div className="run-trace-card" key={run.id}>
+                <header className="run-trace-card-header">
+                  <div
+                    className="run-trace-avatar"
+                    style={{ background: agent ? avatarColor(agent) : '#94a3b8' }}
+                  >
+                    {avatarText(run.agent_name)}
+                  </div>
+                  <div className="run-trace-card-meta">
+                    <strong>{run.agent_name}</strong>
+                    <span>
+                      {run.provider} · {run.model || '—'} · {formatTime(run.created_at)}
+                    </span>
+                  </div>
+                  <span className={`run-trace-status run-trace-status-${run.status}`}>
+                    {RUN_STATUS_LABEL[run.status] ?? run.status}
+                  </span>
+                </header>
+                {run.error && <p className="run-trace-error">{run.error}</p>}
+                <ol className="run-trace-steps">
+                  {run.steps.map((step) => (
+                    <li key={step.id}>
+                      <span className="run-trace-step-icon">
+                        {materialIcon(RUN_STEP_ICON[step.type] ?? 'circle')}
+                      </span>
+                      <div className="run-trace-step-body">
+                        <strong>{step.title || step.type}</strong>
+                        {step.detail && <p>{step.detail}</p>}
+                        {Object.keys(step.payload).length > 0 && (
+                          <pre className="run-trace-step-payload">
+                            {JSON.stringify(step.payload, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                      <time>{formatTime(step.created_at)}</time>
+                    </li>
+                  ))}
+                  {run.steps.length === 0 && (
+                    <li className="run-trace-step-empty">暂无步骤记录</li>
+                  )}
+                </ol>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+const RUN_STATUS_LABEL: Record<string, string> = {
+  queued: '排队中',
+  running: '执行中',
+  waiting_user: '等待老板确认',
+  waiting_clarify: '等待澄清',
+  completed: '已完成',
+  failed: '失败',
+};
 
 function Modal({
   title,

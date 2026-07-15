@@ -1138,3 +1138,56 @@ def test_task_out_includes_consensus_brief_id(tmp_path, monkeypatch):
         t for t in reloaded["tasks"] if t["id"] == task_data["id"]
     )
     assert task_in_bootstrap["consensus_brief_id"] == brief["id"]
+
+
+def test_conversation_runs_endpoint_returns_step_by_step_trace(tmp_path, monkeypatch):
+    """Audit/timeline view requested independently by multiple early users
+    (Product Hunt feedback, see CHANGELOG): GET .../runs must return every
+    run for a conversation with its full run_steps trace, in order."""
+    from app.runtime.runs import append_run_step, create_run, transition_run
+
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]
+
+    conn = connect()
+    try:
+        run_id = create_run(
+            conn,
+            workspace_id=auth["workspace"]["id"],
+            conversation_id=secretary_chat["id"],
+            agent_id=secretary_agent["id"],
+            input_message_id="msg_seed",
+            provider="hermes",
+            model="deepseek-v4-pro",
+        )
+        append_run_step(
+            conn, run_id=run_id, type="tool_call", title="rm -rf test.txt",
+            detail="recursive delete", payload={"command": "rm -rf test.txt"},
+        )
+        append_run_step(
+            conn, run_id=run_id, type="approval_required", title="需要确认",
+            detail="高风险操作", payload={"category": "high_risk"},
+        )
+        transition_run(conn, run_id, "running")
+        transition_run(conn, run_id, "completed")
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get(
+        f"/api/conversations/{secretary_chat['id']}/runs",
+        headers=auth_header(token),
+    )
+    assert resp.status_code == 200
+    runs = resp.json()
+    assert len(runs) == 1
+    assert runs[0]["id"] == run_id
+    assert runs[0]["agent_name"] == secretary_agent["name"]
+    assert runs[0]["status"] == "completed"
+    step_types = [s["type"] for s in runs[0]["steps"]]
+    assert step_types == ["tool_call", "approval_required"]
+    assert runs[0]["steps"][0]["payload"]["command"] == "rm -rf test.txt"

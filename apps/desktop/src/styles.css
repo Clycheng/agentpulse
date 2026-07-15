@@ -1167,6 +1167,156 @@ textarea:focus-visible,
   color: var(--primary);
 }
 
+.run-trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.run-trace-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--surface);
+  padding: 14px 16px;
+}
+
+.run-trace-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.run-trace-avatar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.run-trace-card-meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.run-trace-card-meta strong {
+  color: var(--text-strong);
+  font-size: 13.5px;
+}
+
+.run-trace-card-meta span {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.run-trace-status {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--border-soft, #eef0f4);
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.run-trace-status-completed {
+  background: rgba(45, 212, 191, 0.15);
+  color: #0d9488;
+}
+
+.run-trace-status-failed {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.run-trace-status-waiting_user,
+.run-trace-status-waiting_clarify {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.run-trace-error {
+  margin: 8px 0 0;
+  color: #dc2626;
+  font-size: 12px;
+}
+
+.run-trace-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  gap: 10px;
+}
+
+.run-trace-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft, #eef0f4);
+}
+
+.run-trace-steps li:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.run-trace-step-icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--muted);
+}
+
+.run-trace-step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.run-trace-step-body strong {
+  color: var(--text-strong);
+  font-size: 12.5px;
+}
+
+.run-trace-step-body p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.run-trace-step-payload {
+  overflow-x: auto;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--border-soft, #f3f4f6);
+  color: var(--text-strong);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.run-trace-steps time {
+  flex-shrink: 0;
+  color: var(--subtle, var(--muted));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.run-trace-step-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .messages {
   display: flex;
   overflow-y: auto;
