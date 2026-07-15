@@ -8,7 +8,7 @@ from starlette.responses import StreamingResponse
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.database import Database, Row, get_db
+from app.core.database import Database, Row, connect, get_db
 from app.runtime.deepseek import DeepSeekAPIError, DeepSeekChatClient, DeepSeekNotConfigured
 from app.runtime.hermes_client import HermesBackend, RunContext
 from app.runtime.runner import (
@@ -885,6 +885,19 @@ async def send_message_stream(
         conn.commit()
 
     async def event_generator():
+        # The `conn` dependency is closed by FastAPI the instant this route's
+        # sync body returns — but StreamingResponse only starts iterating this
+        # generator afterwards. Every DB op below must use its own connection,
+        # opened here, or it hits "Cannot operate on a closed database" and the
+        # stream dies silently mid-reply (root cause of agents never acting).
+        conn = connect()
+        try:
+            async for chunk in _generate_stream_events(conn):
+                yield chunk
+        finally:
+            conn.close()
+
+    async def _generate_stream_events(conn):
         # Emit user message
         yield f"event: user_message\ndata: {json.dumps(serialize_message(user_message), ensure_ascii=False)}\n\n"
 
