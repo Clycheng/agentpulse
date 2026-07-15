@@ -1259,11 +1259,45 @@ async def _stream_reply_events(
 ) -> AsyncGenerator:
     """Produce an agent's reply as {type: chunk|message|...} events.
 
-    Routes execution to Hermes when the employee has a ready profile
-    (TD-03-T3), else falls back to the temporary DeepSeek path. Both persist an
-    agent message and end with a single {"type": "message", "message": row|None}.
+    Routing order matters: an employee with a real, ready Hermes profile must
+    go straight to Hermes — that's the only path that can ever hit the
+    approval gate (ADR 0008) for dangerous actions. Previously this tried the
+    Agent Action Bridge (function_loop) FIRST for every employee regardless
+    of Hermes status; since function_loop always "succeeds" (it has its own
+    no-tool-needed conversational fallback), Hermes was never reached even
+    for employees explicitly granted real capabilities — the approval gate
+    was unreachable dead code in production. Verified live (2026-07-15):
+    an employee with a granted `run_tests` capability and a real ready
+    Hermes profile was still answering "I don't have file system access"
+    from the Agent Action Bridge fallback instead of running for real.
+
+    Employees without a Hermes profile keep using the Agent Action Bridge
+    (create_employee/create_task/etc.), then the temporary DeepSeek path.
     """
-    # ── Agent Action Bridge (streaming): try function loop first ──
+    profile = resolve_hermes_profile(conn, agent["id"])
+    if profile:
+        logger.info("agent_reply_via_hermes", agent_id=agent["id"], profile=profile)
+        work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
+        ctx = RunContext(
+            run_id="",
+            prompt=_build_hermes_prompt(user_message, discussion_context),
+            workdir=os.path.join(work_root, profile, "work", "runs", new_id("run")),
+            profile=profile,
+            agent_id=agent["id"],
+            workspace_id=workspace["id"],
+            conversation_id=conversation["id"],
+        )
+        async for event in stream_agent_run(
+            conn,
+            ctx=ctx,
+            backend=HermesBackend(hermes_bin=settings.hermes_bin),
+            input_message_id=user_message["id"],
+            permission_resolver=make_bridge_resolver(),  # TD-03-T4: suspend/resume
+        ):
+            yield event
+        return
+
+    # ── Agent Action Bridge (streaming): no Hermes profile, try function loop ──
     deepseek = DeepSeekChatClient()
     history = load_llm_history(conn, conversation["id"])
     related_tasks, knowledge_sources, agent_experiences = load_agent_llm_context(
@@ -1304,29 +1338,6 @@ async def _stream_reply_events(
         return
     except Exception:
         pass
-
-    profile = resolve_hermes_profile(conn, agent["id"])
-    if profile:
-        logger.info("agent_reply_via_hermes", agent_id=agent["id"], profile=profile)
-        work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
-        ctx = RunContext(
-            run_id="",
-            prompt=_build_hermes_prompt(user_message, discussion_context),
-            workdir=os.path.join(work_root, profile, "work", "runs", new_id("run")),
-            profile=profile,
-            agent_id=agent["id"],
-            workspace_id=workspace["id"],
-            conversation_id=conversation["id"],
-        )
-        async for event in stream_agent_run(
-            conn,
-            ctx=ctx,
-            backend=HermesBackend(hermes_bin=settings.hermes_bin),
-            input_message_id=user_message["id"],
-            permission_resolver=make_bridge_resolver(),  # TD-03-T4: suspend/resume
-        ):
-            yield event
-        return
 
     # Temporary DeepSeek execution layer (employees without a Hermes profile).
     logger.info("agent_reply_via_deepseek", agent_id=agent["id"])
@@ -1442,6 +1453,34 @@ async def complete_agent_reply(
     discussion_context: str = "",
     use_tools: bool = True,
 ) -> Row:
+    # Same routing-order fix as _stream_reply_events: an employee with a real
+    # ready Hermes profile must go straight to Hermes, or the approval gate
+    # (ADR 0008) is unreachable for this (non-streaming) path too.
+    profile = resolve_hermes_profile(conn, agent["id"])
+    if profile:
+        logger.info("agent_reply_via_hermes", agent_id=agent["id"], profile=profile)
+        work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
+        ctx = RunContext(
+            run_id="",
+            prompt=_build_hermes_prompt(user_message, discussion_context),
+            workdir=os.path.join(work_root, profile, "work", "runs", new_id("run")),
+            profile=profile,
+            agent_id=agent["id"],
+            workspace_id=workspace["id"],
+            conversation_id=conversation_id,
+        )
+        final_message = None
+        async for event in stream_agent_run(
+            conn,
+            ctx=ctx,
+            backend=HermesBackend(hermes_bin=settings.hermes_bin),
+            input_message_id=user_message["id"],
+            permission_resolver=make_bridge_resolver(),
+        ):
+            if event.get("type") == "message" and event.get("message"):
+                final_message = event["message"]
+        return final_message
+
     # ── Agent Action Bridge: function-calling loop ──
     # When use_tools is True (default for DM), the agent can call tools to
     # create employees, tasks, groups, etc. instead of just chatting.

@@ -128,6 +128,93 @@ def test_admin_talent_market_catalog_exposes_official_templates(tmp_path, monkey
         conn.close()
 
 
+def test_employee_with_ready_hermes_profile_routes_to_hermes_not_function_loop(
+    tmp_path, monkeypatch
+):
+    """An employee with a real, ready Hermes profile must go straight to
+    Hermes — that's the only path that can ever hit the approval gate
+    (ADR 0008). Regression test for a bug where _stream_reply_events tried
+    the Agent Action Bridge (function_loop) FIRST for every employee
+    regardless of Hermes status; since function_loop always "succeeds" (it
+    has its own no-tool-needed fallback), Hermes was silently never reached
+    even for employees explicitly granted real capabilities. Found live
+    2026-07-15: a "运维小哥" employee with a granted run_tests capability and
+    a real ready Hermes profile still answered "I don't have file system
+    access" from the function_loop fallback instead of running for real."""
+
+    async def fail_if_called(*_a, **_kw):
+        raise AssertionError(
+            "run_function_loop must not be called for an employee with a "
+            "ready Hermes profile — Hermes must be tried first"
+        )
+        yield  # pragma: no cover — makes this an async generator
+
+    async def fake_stream_agent_run(conn, *, ctx, backend, input_message_id, permission_resolver=None):
+        from app.services.workspace import add_message
+        msg = add_message(
+            conn, conversation_id=ctx.conversation_id,
+            sender_type="agent", sender_id=ctx.agent_id,
+            content="来自 Hermes 的真实回复", provider="hermes", model="deepseek-v4-pro",
+        )
+        conn.commit()
+        yield {"type": "chunk", "content": "来自 Hermes 的真实回复"}
+        yield {"type": "message", "message": msg}
+
+    monkeypatch.setattr(workspace_routes, "run_function_loop", fail_if_called)
+    monkeypatch.setattr(workspace_routes, "stream_agent_run", fake_stream_agent_run)
+
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    agent = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "运维小哥",
+            "description": "负责服务器运维",
+            "department_name": "技术部",
+            "prompt": "你负责服务器运维操作。",
+        },
+    ).json()
+
+    # Simulate a completed real Hermes provisioning (bypassing the actual
+    # `hermes` CLI, which this test suite must never invoke — see the .env
+    # comment on AGENTPULSE_HERMES_PROVISIONING for why).
+    conn = connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO agent_specs (
+              id, agent_id, workspace_id, role_name, source_request,
+              responsibilities_json, hermes_profile, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+            """,
+            (
+                new_id("spec"), agent["id"], auth["workspace"]["id"], "运维工程师",
+                "test", "[]", "ap_test_profile", now_iso(), now_iso(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    dm = next(
+        c for c in bootstrap["conversations"]
+        if c["kind"] == "dm" and c.get("agent_id") == agent["id"]
+    )
+
+    with client.stream(
+        "POST", f"/api/conversations/{dm['id']}/messages/stream",
+        headers=auth_header(token),
+        json={"content": "帮我删除一个测试文件"},
+    ) as resp:
+        body = "".join(resp.iter_text())
+
+    assert "来自 Hermes 的真实回复" in body
+
+
 def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
     async def fake_complete(self, payload):
         assert payload.agent.name == "小秘"
