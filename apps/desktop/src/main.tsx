@@ -1,7 +1,11 @@
 import { Fragment, StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
+import { useTranslation } from 'react-i18next';
+import './i18n';
 import './styles.css';
+import { getAppLanguage, setAppLanguage } from './i18n';
+import type { AppLanguage } from './i18n';
 
 type View = 'chat' | 'staff' | 'market' | 'tasks' | 'ideas' | 'lib' | 'channels';
 type ThemeMode = 'system' | 'light' | 'dark';
@@ -322,11 +326,11 @@ type ApiBootstrap = {
 const themeOptions: Array<{
   mode: ThemeMode;
   icon: string;
-  label: string;
+  labelKey: 'nav.light' | 'nav.dark' | 'nav.system';
 }> = [
-  { mode: 'light', icon: 'light_mode', label: '浅色' },
-  { mode: 'dark', icon: 'dark_mode', label: '深色' },
-  { mode: 'system', icon: 'computer', label: '跟随系统' },
+  { mode: 'light', icon: 'light_mode', labelKey: 'nav.light' },
+  { mode: 'dark', icon: 'dark_mode', labelKey: 'nav.dark' },
+  { mode: 'system', icon: 'computer', labelKey: 'nav.system' },
 ];
 
 const apiBaseUrl =
@@ -773,6 +777,7 @@ function mapBootstrap(data: ApiBootstrap) {
 }
 
 function App() {
+  const { t } = useTranslation();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialThemeMode);
   const [systemTheme, setSystemTheme] =
     useState<EffectiveTheme>(getSystemTheme);
@@ -1805,8 +1810,8 @@ function App() {
             draft={draft}
             placeholder={
               activeChat.kind === 'group'
-                ? `发消息给 # ${activeChat.name}，@员工 可点名`
-                : `发消息给 ${currentChatAgent?.name ?? ''}`
+                ? t('chat.sendPlaceholderGroup', { name: activeChat.name })
+                : t('chat.sendPlaceholderDm', { name: currentChatAgent?.name ?? '' })
             }
             typingName={typingName}
             messagesRef={messagesRef}
@@ -1829,8 +1834,8 @@ function App() {
 
         {view === 'chat' && !activeChat && (
           <EmptyWorkbenchState
-            title="暂无会话"
-            text="注册后系统会自动创建小秘私聊。"
+            title={t('chat.noConversation')}
+            text={t('chat.noConversationHint')}
           />
         )}
 
@@ -2119,6 +2124,7 @@ function AuthScreen({
     workspace: Workspace;
   }) => void;
 }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<'login' | 'register'>('register');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -2134,23 +2140,23 @@ function AuthScreen({
     const nextWorkspaceName = workspaceName.trim();
 
     if (!nextEmail) {
-      setLocalError('请填写邮箱');
+      setLocalError(t('auth.emailRequired'));
       return;
     }
     if (mode === 'register' && nextPassword.length < 6) {
-      setLocalError('密码至少需要 6 位');
+      setLocalError(t('auth.passwordMinLength'));
       return;
     }
     if (mode === 'login' && !nextPassword) {
-      setLocalError('请填写密码');
+      setLocalError(t('auth.passwordRequired'));
       return;
     }
     if (mode === 'register' && !nextDisplayName) {
-      setLocalError('请填写你的称呼');
+      setLocalError(t('auth.displayNameRequired'));
       return;
     }
     if (mode === 'register' && !nextWorkspaceName) {
-      setLocalError('请填写公司/工作室名称');
+      setLocalError(t('auth.workspaceNameRequired'));
       return;
     }
 
@@ -2178,7 +2184,7 @@ function AuthScreen({
       await onAuthSuccess(payload);
     } catch (authError) {
       setLocalError(
-        authError instanceof Error ? authError.message : '登录失败',
+        authError instanceof Error ? authError.message : t('auth.loginFailed'),
       );
     } finally {
       setSubmitting(false);
@@ -2204,31 +2210,28 @@ function AuthScreen({
           </div>
           <span>AgentPulse</span>
         </div>
-        <h1>把一人公司，搭成一支 AI 团队。</h1>
-        <p>
-          创建工作区后，小秘、组织架构、人才市场和会话数据都会写入
-          PostgreSQL。第一版先跑通真实 DeepSeek 对话闭环。
-        </p>
+        <h1>{t('auth.heroTitle')}</h1>
+        <p>{t('auth.heroSubtitle')}</p>
         <div className="auth-feature-list">
           <div>
             {materialIcon('account_tree')}
             <span>
-              <strong>组织化智能体</strong>
-              <em>部门、员工、职责 Prompt 都能沉淀</em>
+              <strong>{t('auth.feature1Title')}</strong>
+              <em>{t('auth.feature1Desc')}</em>
             </span>
           </div>
           <div>
             {materialIcon('forum')}
             <span>
-              <strong>从消息开始协作</strong>
-              <em>默认进入小秘私聊，后续拉群推进</em>
+              <strong>{t('auth.feature2Title')}</strong>
+              <em>{t('auth.feature2Desc')}</em>
             </span>
           </div>
           <div>
             {materialIcon('verified')}
             <span>
-              <strong>真实模型调用</strong>
-              <em>回复会标记 provider 与 model</em>
+              <strong>{t('auth.feature3Title')}</strong>
+              <em>{t('auth.feature3Desc')}</em>
             </span>
           </div>
         </div>
@@ -2236,12 +2239,10 @@ function AuthScreen({
 
       <section className="auth-panel">
         <div className="auth-panel-header">
-          <span>{mode === 'register' ? '开始搭建' : '欢迎回来'}</span>
-          <h2>{mode === 'register' ? '创建你的 AI 公司' : '登录工作台'}</h2>
+          <span>{mode === 'register' ? t('auth.registerEyebrow') : t('auth.loginEyebrow')}</span>
+          <h2>{mode === 'register' ? t('auth.registerTitle') : t('auth.loginTitle')}</h2>
           <p>
-            {mode === 'register'
-              ? '没有演示账号，提交后会创建你的真实本地工作区。'
-              : '使用平台注册邮箱和密码继续进入工作台。'}
+            {mode === 'register' ? t('auth.registerSubtitle') : t('auth.loginSubtitle')}
           </p>
         </div>
 
@@ -2254,7 +2255,7 @@ function AuthScreen({
               setLocalError('');
             }}
           >
-            注册
+            {t('auth.tabRegister')}
           </button>
           <button
             className={mode === 'login' ? 'active' : ''}
@@ -2264,13 +2265,13 @@ function AuthScreen({
               setLocalError('');
             }}
           >
-            登录
+            {t('auth.tabLogin')}
           </button>
         </div>
 
         <div className="auth-form">
           <label>
-            <span>邮箱</span>
+            <span>{t('auth.email')}</span>
             <input
               value={email}
               placeholder="you@example.com"
@@ -2278,29 +2279,29 @@ function AuthScreen({
             />
           </label>
           <label>
-            <span>密码</span>
+            <span>{t('auth.password')}</span>
             <input
               type="password"
               value={password}
-              placeholder="至少 6 位"
+              placeholder={t('auth.passwordPlaceholder')}
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
           {mode === 'register' && (
             <>
               <label>
-                <span>你的称呼</span>
+                <span>{t('auth.displayName')}</span>
                 <input
                   value={displayName}
-                  placeholder="例如：老板"
+                  placeholder={t('auth.displayNamePlaceholder')}
                   onChange={(event) => setDisplayName(event.target.value)}
                 />
               </label>
               <label>
-                <span>公司/工作室名称</span>
+                <span>{t('auth.workspaceName')}</span>
                 <input
                   value={workspaceName}
-                  placeholder="例如：我的一人公司"
+                  placeholder={t('auth.workspaceNamePlaceholder')}
                   onChange={(event) => setWorkspaceName(event.target.value)}
                 />
               </label>
@@ -2318,10 +2319,10 @@ function AuthScreen({
           disabled={submitting}
         >
           {submitting
-            ? '请稍候...'
+            ? t('auth.submitting')
             : mode === 'register'
-              ? '注册并进入'
-              : '登录'}
+              ? t('auth.submitRegister')
+              : t('auth.submitLogin')}
         </button>
       </section>
     </main>
@@ -2345,20 +2346,29 @@ function Sidebar({
   onLogout: () => void;
   onNavigate: (view: View) => void;
 }) {
+  const { t } = useTranslation();
+  const [language, setLanguage] = useState<AppLanguage>(getAppLanguage);
+
   const items: Array<{
     key: View;
     icon: string;
     label: string;
     badge: number;
   }> = [
-    { key: 'chat', icon: 'forum', label: '消息', badge: unreadTotal },
-    { key: 'staff', icon: 'group', label: '员工', badge: 0 },
-    { key: 'market', icon: 'storefront', label: '人才市场', badge: 0 },
-    { key: 'tasks', icon: 'task_alt', label: '任务', badge: taskAlerts },
-    { key: 'ideas', icon: 'lightbulb', label: '想法', badge: 0 },
-    { key: 'channels', icon: 'hub', label: '渠道', badge: 0 },
-    { key: 'lib', icon: 'folder_open', label: '资料库', badge: 0 },
+    { key: 'chat', icon: 'forum', label: t('nav.chat'), badge: unreadTotal },
+    { key: 'staff', icon: 'group', label: t('nav.staff'), badge: 0 },
+    { key: 'market', icon: 'storefront', label: t('nav.market'), badge: 0 },
+    { key: 'tasks', icon: 'task_alt', label: t('nav.tasks'), badge: taskAlerts },
+    { key: 'ideas', icon: 'lightbulb', label: t('nav.ideas'), badge: 0 },
+    { key: 'channels', icon: 'hub', label: t('nav.channels'), badge: 0 },
+    { key: 'lib', icon: 'folder_open', label: t('nav.lib'), badge: 0 },
   ];
+
+  const toggleLanguage = () => {
+    const next: AppLanguage = language === 'zh' ? 'en' : 'zh';
+    setAppLanguage(next);
+    setLanguage(next);
+  };
 
   return (
     <aside className="sidebar">
@@ -2383,14 +2393,23 @@ function Sidebar({
         </button>
       ))}
       <div className="sidebar-spacer" />
-      <div className="theme-switcher" aria-label="主题设置">
+      <button
+        className="language-switch-button"
+        type="button"
+        title={t('nav.language')}
+        aria-label={t('nav.language')}
+        onClick={toggleLanguage}
+      >
+        {language === 'zh' ? 'EN' : '中'}
+      </button>
+      <div className="theme-switcher" aria-label={t('nav.themeSettings')}>
         {themeOptions.map((option) => (
           <button
             className={themeMode === option.mode ? 'active' : ''}
             key={option.mode}
             type="button"
-            title={option.label}
-            aria-label={option.label}
+            title={t(option.labelKey)}
+            aria-label={t(option.labelKey)}
             onClick={() => onThemeModeChange(option.mode)}
           >
             {materialIcon(option.icon)}
@@ -2400,8 +2419,8 @@ function Sidebar({
       <button
         className="logout-nav-button"
         type="button"
-        title="退出登录"
-        aria-label="退出登录"
+        title={t('nav.logout')}
+        aria-label={t('nav.logout')}
         onClick={onLogout}
       >
         <span className="owner-avatar">我</span>
@@ -2854,6 +2873,7 @@ function ConversationList({
   onOpenChat: (id: string) => void;
   onOpenGroupModal: () => void;
 }) {
+  const { t } = useTranslation();
   const agentById = (id: string) => agents.find((agent) => agent.id === id);
   const pinnedChats = chats.filter(
     (chat) =>
@@ -2910,14 +2930,14 @@ function ConversationList({
   return (
     <aside className="conversation-list">
       <div className="conversation-title">
-        <strong>消息</strong>
-        <button type="button" title="拉群讨论" onClick={onOpenGroupModal}>
+        <strong>{t('nav.chat')}</strong>
+        <button type="button" title={t('chat.groupDiscussion')} onClick={onOpenGroupModal}>
           {materialIcon('group_add')}
         </button>
       </div>
       <div className="search-box">
         {materialIcon('search')}
-        <span>搜索会话、员工、任务</span>
+        <span>{t('chat.searchPlaceholder')}</span>
       </div>
       <div className="conversation-scroll">
         <SectionLabel label="秘书" />
@@ -3029,6 +3049,7 @@ function ChatView({
     answer: string,
   ) => Promise<boolean>;
 }) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [runTraceOpen, setRunTraceOpen] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -3111,7 +3132,7 @@ function ChatView({
               <button
                 key={memberId}
                 style={{ background: avatarColor(agent) }}
-                title={`${agent.name} · 查看状态`}
+                title={`${agent.name} · ${t('chat.viewStatus')}`}
                 type="button"
                 onClick={() => onOpenAgent(memberId)}
               >
@@ -3123,7 +3144,7 @@ function ChatView({
         {onInviteMembers && (
           <button
             className="chat-icon-button"
-            title="邀请员工"
+            title={t('chat.inviteMembers')}
             type="button"
             onClick={onInviteMembers}
           >
@@ -3136,7 +3157,9 @@ function ChatView({
           onClick={onOpenTasks}
         >
           {materialIcon('task_alt')}
-          {relatedTaskCount ? `关联任务 ${relatedTaskCount}` : '关联任务'}
+          {relatedTaskCount
+            ? t('chat.relatedTasksWithCount', { count: relatedTaskCount })
+            : t('chat.relatedTasks')}
         </button>
         <button
           className="related-task-button"
@@ -3144,7 +3167,7 @@ function ChatView({
           onClick={() => setRunTraceOpen(true)}
         >
           {materialIcon('timeline')}
-          运行轨迹
+          {t('chat.runTrace')}
         </button>
       </header>
 
@@ -3690,6 +3713,7 @@ function StaffView({
   onOpenCreate: () => void;
   onOpenAgent: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   // Breadcrumb path of department ids, root → current. Multi-level org chart
   // (technical dept → backend center → data group), not a flat list — a
   // department can nest under another via parent_id.
@@ -3736,7 +3760,7 @@ function StaffView({
         <div className="org-member-copy">
           <strong>
             {agent.name}
-            {agent.role === '老板秘书' && <em>内置秘书</em>}
+            {agent.role === '老板秘书' && <em>{t('staff.builtinSecretary')}</em>}
           </strong>
           <p>
             {agent.role}
@@ -3757,10 +3781,14 @@ function StaffView({
         <section className="org-directory">
           <header className="org-header">
             <div>
-              <h1>组织内联系人</h1>
+              <h1>{t('staff.title')}</h1>
               <p>
-                {companyName} · {agents.length} 名 AI 员工 ·{' '}
-                {departments.length} 个部门 · {busyCount} 人执行中
+                {t('staff.summary', {
+                  company: companyName,
+                  agentCount: agents.length,
+                  deptCount: departments.length,
+                  busyCount,
+                })}
               </p>
             </div>
             <button
@@ -3768,7 +3796,7 @@ function StaffView({
               type="button"
               onClick={onOpenCreate}
             >
-              {materialIcon('add_circle')}创建员工
+              {materialIcon('add_circle')}{t('staff.createEmployee')}
             </button>
           </header>
 
@@ -3811,14 +3839,15 @@ function StaffView({
                         <span>({members.length})</span>
                       </strong>
                       <p>
-                        {busyMembers} 人执行中 · {waitingMembers} 个待确认
+                        {t('staff.busyMembers', { count: busyMembers })} ·{' '}
+                        {t('staff.waitingMembers', { count: waitingMembers })}
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => setPath([...path, dept.id])}
                     >
-                      下级
+                      {t('staff.subLevel')}
                     </button>
                   </div>
                 );
@@ -3828,7 +3857,9 @@ function StaffView({
 
               {!childDepts.length && !directMembers.length && (
                 <EmptyState>
-                  {currentDept ? `${currentDept.name} 暂无下级部门或成员` : '暂无部门'}
+                  {currentDept
+                    ? t('staff.noSubDeptOrMember', { name: currentDept.name })
+                    : t('staff.noDept')}
                 </EmptyState>
               )}
             </div>
@@ -5823,6 +5854,7 @@ function RunTraceModal({
   agents: Agent[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [runs, setRuns] = useState<RunTrace[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -5846,15 +5878,15 @@ function RunTraceModal({
 
   return (
     <Modal
-      title="运行轨迹"
-      description="按时间顺序回放这个会话里每次运行的完整过程——消息、工具调用、工具结果、审批请求都摊开显示。"
+      title={t('runTrace.title')}
+      description={t('runTrace.description')}
       width={720}
       onClose={onClose}
     >
       {error && <EmptyState>{error}</EmptyState>}
-      {!error && runs === null && <EmptyState>加载中…</EmptyState>}
+      {!error && runs === null && <EmptyState>{t('runTrace.loading')}</EmptyState>}
       {!error && runs !== null && runs.length === 0 && (
-        <EmptyState>这个会话还没有运行记录</EmptyState>
+        <EmptyState>{t('runTrace.empty')}</EmptyState>
       )}
       {!error && runs !== null && runs.length > 0 && (
         <div className="run-trace-list">
@@ -5876,7 +5908,7 @@ function RunTraceModal({
                     </span>
                   </div>
                   <span className={`run-trace-status run-trace-status-${run.status}`}>
-                    {RUN_STATUS_LABEL[run.status] ?? run.status}
+                    {t(`runTrace.status.${run.status}`, { defaultValue: run.status })}
                   </span>
                 </header>
                 {run.error && <p className="run-trace-error">{run.error}</p>}
@@ -5899,7 +5931,7 @@ function RunTraceModal({
                     </li>
                   ))}
                   {run.steps.length === 0 && (
-                    <li className="run-trace-step-empty">暂无步骤记录</li>
+                    <li className="run-trace-step-empty">{t('runTrace.noSteps')}</li>
                   )}
                 </ol>
               </div>
@@ -5910,15 +5942,6 @@ function RunTraceModal({
     </Modal>
   );
 }
-
-const RUN_STATUS_LABEL: Record<string, string> = {
-  queued: '排队中',
-  running: '执行中',
-  waiting_user: '等待老板确认',
-  waiting_clarify: '等待澄清',
-  completed: '已完成',
-  failed: '失败',
-};
 
 function Modal({
   title,
