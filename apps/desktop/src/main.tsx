@@ -1689,9 +1689,9 @@ function App() {
         : scopedTasks.filter((task) => task.status === status).length,
   }));
   const libraryTabs: Array<{ key: LibraryTab; label: string }> = [
-    { key: 'docs', label: '公司资料库' },
-    { key: 'skills', label: 'Skills 技能' },
-    { key: 'mcp', label: 'MCP 服务' },
+    { key: 'docs', label: t('library.tabDocs') },
+    { key: 'skills', label: t('library.tabSkills') },
+    { key: 'mcp', label: t('library.tabMcp') },
   ];
 
   const currentChatAgent =
@@ -2003,14 +2003,14 @@ function App() {
 
       {inviteOpen && activeChat?.kind === 'group' && (
         <GroupMembersModal
-          title="邀请员工"
-          description="把更多员工拉进当前群聊，后续可以用 @ 点名。"
+          title={t('chat.inviteMembers')}
+          description={t('groupMembersModal.inviteDescription')}
           agents={agents.filter(
             (agent) => !activeChat.memberIds.includes(agent.id),
           )}
           selectedMembers={inviteMembers}
-          submitLabel="拉入群聊"
-          emptyText="所有员工都已经在这个群聊里"
+          submitLabel={t('groupMembersModal.inviteSubmit')}
+          emptyText={t('groupMembersModal.allInvited')}
           onToggleMember={(id) =>
             setInviteMembers((current) =>
               current.includes(id)
@@ -2443,19 +2443,11 @@ type Idea = {
   reviewed_at: string | null;
 };
 
-const IDEA_CATEGORIES: Record<string, { label: string; color: string }> = {
-  improvement: { label: '改进', color: 'var(--primary)' },
-  opportunity: { label: '机会', color: 'var(--success)' },
-  risk: { label: '风险', color: 'var(--danger)' },
-  learning: { label: '学习', color: 'var(--warning)' },
-};
-
-const IDEA_STATUS_LABEL: Record<string, string> = {
-  new: '待处理',
-  accepted: '已接受',
-  dismissed: '已忽略',
-  converted: '已转讨论',
-  reviewed: '已查看',
+const IDEA_CATEGORIES: Record<string, { key: string; color: string }> = {
+  improvement: { key: 'improvement', color: 'var(--primary)' },
+  opportunity: { key: 'opportunity', color: 'var(--success)' },
+  risk: { key: 'risk', color: 'var(--danger)' },
+  learning: { key: 'learning', color: 'var(--warning)' },
 };
 
 function IdeasView({
@@ -2467,6 +2459,7 @@ function IdeasView({
   agents: Agent[];
   onConverted: (conversationId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -2480,7 +2473,7 @@ function IdeasView({
         if (alive) setIdeas(data);
       })
       .catch((err: unknown) => {
-        if (alive) setError(err instanceof Error ? err.message : '加载失败');
+        if (alive) setError(err instanceof Error ? err.message : t('ideas.loadFailed'));
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -2488,7 +2481,7 @@ function IdeasView({
     return () => {
       alive = false;
     };
-  }, [token]);
+  }, [token, t]);
 
   const review = async (id: string, action: 'accept' | 'dismiss') => {
     try {
@@ -2499,7 +2492,7 @@ function IdeasView({
       });
       setIdeas((prev) => prev.map((item) => (item.id === id ? updated : item)));
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '操作失败');
+      setError(err instanceof Error ? err.message : t('ideas.actionFailed'));
     }
   };
 
@@ -2512,7 +2505,7 @@ function IdeasView({
       setIdeas((prev) => prev.map((item) => (item.id === id ? res.idea : item)));
       onConverted(res.conversation_id);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '转化失败');
+      setError(err instanceof Error ? err.message : t('ideas.convertFailed'));
     }
   };
 
@@ -2524,25 +2517,28 @@ function IdeasView({
   const filtered =
     filter === 'all' ? ideas : ideas.filter((idea) => idea.category === filter);
   const summary = ideas.length
-    ? `共 ${ideas.length} 条想法，来自 ${new Set(ideas.map((i) => i.source_agent_id)).size} 位员工`
-    : '员工空闲时会主动琢磨业务，把想法沉淀到这里';
+    ? t('ideas.summary', {
+        count: ideas.length,
+        agentCount: new Set(ideas.map((i) => i.source_agent_id)).size,
+      })
+    : t('ideas.summaryEmpty');
 
   return (
     <div className="screen-scroll">
       <div className="screen-inner">
         <header className="page-header">
           <div>
-            <h1>想法中心</h1>
+            <h1>{t('ideas.title')}</h1>
             <p>{summary}</p>
           </div>
         </header>
 
         <div className="tabs">
           {[
-            { key: 'all', label: '全部' },
+            { key: 'all', label: t('ideas.filterAll') },
             ...Object.entries(IDEA_CATEGORIES).map(([key, meta]) => ({
               key,
-              label: meta.label,
+              label: t(`ideas.category.${meta.key}`),
             })),
           ].map((tab) => (
             <button
@@ -2559,19 +2555,15 @@ function IdeasView({
         {error && <div className="auth-error">{error}</div>}
 
         {loading ? (
-          <div className="empty-state">加载中…</div>
+          <div className="empty-state">{t('common.loading')}</div>
         ) : filtered.length === 0 ? (
-          <div className="empty-state">
-            还没有想法。员工空闲时会主动复盘、发现机会与风险，产出的 idea 会出现在这里，
-            你可以一键转成讨论。
-          </div>
+          <div className="empty-state">{t('ideas.empty')}</div>
         ) : (
           <div className="idea-list">
             {filtered.map((idea) => {
-              const cat = IDEA_CATEGORIES[idea.category] ?? {
-                label: idea.category,
-                color: 'var(--muted)',
-              };
+              const cat = IDEA_CATEGORIES[idea.category];
+              const catLabel = cat ? t(`ideas.category.${cat.key}`) : idea.category;
+              const catColor = cat?.color ?? 'var(--muted)';
               return (
                 <article className="card idea-card" key={idea.id}>
                   <div className="idea-head">
@@ -2587,13 +2579,13 @@ function IdeasView({
                     </div>
                     <span
                       className="idea-cat"
-                      style={{ background: cat.color + '1f', color: cat.color }}
+                      style={{ background: catColor + '1f', color: catColor }}
                     >
-                      {cat.label}
+                      {catLabel}
                     </span>
                     {idea.status !== 'new' && (
                       <span className="idea-status-tag">
-                        {IDEA_STATUS_LABEL[idea.status] ?? idea.status}
+                        {t(`ideas.status.${idea.status}`, { defaultValue: idea.status })}
                       </span>
                     )}
                   </div>
@@ -2606,21 +2598,21 @@ function IdeasView({
                         type="button"
                         onClick={() => convert(idea.id)}
                       >
-                        {materialIcon('forum')}转为讨论
+                        {materialIcon('forum')}{t('ideas.convertToDiscussion')}
                       </button>
                       <button
                         className="small-button"
                         type="button"
                         onClick={() => review(idea.id, 'accept')}
                       >
-                        接受
+                        {t('ideas.accept')}
                       </button>
                       <button
                         className="small-button"
                         type="button"
                         onClick={() => review(idea.id, 'dismiss')}
                       >
-                        忽略
+                        {t('ideas.dismiss')}
                       </button>
                     </div>
                   )}
@@ -2647,18 +2639,20 @@ type ChannelConfig = {
   webhook_url: string;
 };
 
-const CHANNEL_TYPES: Array<{ value: string; label: string }> = [
-  { value: 'generic_webhook', label: '通用 Webhook' },
-  { value: 'email', label: '邮件' },
-  { value: 'web_widget', label: '网页 Widget' },
-  { value: 'wechat', label: '微信' },
+const CHANNEL_TYPES: Array<{ value: string; labelKey: string }> = [
+  { value: 'generic_webhook', labelKey: 'channels.type.generic_webhook' },
+  { value: 'email', labelKey: 'channels.type.email' },
+  { value: 'web_widget', labelKey: 'channels.type.web_widget' },
+  { value: 'wechat', labelKey: 'channels.type.wechat' },
 ];
 
-function channelTypeLabel(type: string) {
-  return CHANNEL_TYPES.find((item) => item.value === type)?.label ?? type;
+function channelTypeLabel(type: string, t: (key: string, opts?: Record<string, unknown>) => string) {
+  const match = CHANNEL_TYPES.find((item) => item.value === type);
+  return match ? t(match.labelKey) : type;
 }
 
 function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
+  const { t } = useTranslation();
   const [channels, setChannels] = useState<ChannelConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -2679,7 +2673,7 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
         if (alive) setChannels(data);
       })
       .catch((err: unknown) => {
-        if (alive) setError(err instanceof Error ? err.message : '加载失败');
+        if (alive) setError(err instanceof Error ? err.message : t('channels.loadFailed'));
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -2687,7 +2681,7 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
     return () => {
       alive = false;
     };
-  }, [token]);
+  }, [token, t]);
 
   const create = async () => {
     if (!name.trim() || creating) return;
@@ -2707,7 +2701,7 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
       setName('');
       setTargetAgentId('');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '创建失败');
+      setError(err instanceof Error ? err.message : t('channels.createFailed'));
     } finally {
       setCreating(false);
     }
@@ -2722,7 +2716,7 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
       });
       setChannels((prev) => prev.map((item) => (item.id === id ? updated : item)));
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '操作失败');
+      setError(err instanceof Error ? err.message : t('channels.actionFailed'));
     }
   };
 
@@ -2737,51 +2731,48 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
   };
 
   const agentName = (id: string | null) =>
-    id ? (agents.find((agent) => agent.id === id)?.name ?? id) : '按路由决定';
+    id ? (agents.find((agent) => agent.id === id)?.name ?? id) : t('channels.byRouting');
 
   return (
     <div className="screen-scroll">
       <div className="screen-inner">
         <header className="page-header">
           <div>
-            <h1>渠道接入</h1>
-            <p>
-              把微信 / 邮件 / 网页 / 通用 webhook 接进来，外部消息自动进入会话，
-              AI 员工像内部对话一样处理——渠道对员工完全透明。
-            </p>
+            <h1>{t('channels.title')}</h1>
+            <p>{t('channels.subtitle')}</p>
           </div>
         </header>
 
-        <section className="card channel-create" aria-label="创建渠道">
+        <section className="card channel-create" aria-label={t('channels.createAria')}>
           <div className="channel-form-row">
             <label className="channel-field">
-              <span>渠道名称</span>
+              <span>{t('channels.name')}</span>
               <input
                 value={name}
-                placeholder="例如：官网客服入口"
+                placeholder={t('channels.namePlaceholder')}
                 onChange={(event) => setName(event.target.value)}
               />
             </label>
             <label className="channel-field">
-              <span>类型</span>
+              <span>{t('channels.typeLabel')}</span>
               <select
                 value={channelType}
                 onChange={(event) => setChannelType(event.target.value)}
               >
                 {CHANNEL_TYPES.map((item) => (
                   <option key={item.value} value={item.value}>
-                    {item.label}
+                    {t(item.labelKey)}
                   </option>
                 ))}
               </select>
             </label>
             <label className="channel-field">
-              <span>默认分配员工</span>
+              <span>{t('channels.defaultAgent')}</span>
               <select
                 value={targetAgentId}
                 onChange={(event) => setTargetAgentId(event.target.value)}
               >
-                <option value="">（按路由决定）</option>
+                <option value="">{t('channels.byRoutingOption')}</option>
                 {agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
                     {agent.name}
@@ -2796,7 +2787,7 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
               disabled={creating || !name.trim()}
             >
               {materialIcon('add_link')}
-              {creating ? '创建中…' : '创建渠道'}
+              {creating ? t('channels.creating') : t('channels.create')}
             </button>
           </div>
         </section>
@@ -2804,12 +2795,9 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
         {error && <div className="auth-error">{error}</div>}
 
         {loading ? (
-          <div className="empty-state">加载中…</div>
+          <div className="empty-state">{t('common.loading')}</div>
         ) : channels.length === 0 ? (
-          <div className="empty-state">
-            还没有渠道。创建一个通用 Webhook，把它的地址填到你的官网表单或客服系统，
-            外部消息就会自动进来。
-          </div>
+          <div className="empty-state">{t('channels.empty')}</div>
         ) : (
           <div className="channel-list">
             {channels.map((channel) => (
@@ -2817,13 +2805,13 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
                 <div className="channel-card-head">
                   <strong>{channel.name}</strong>
                   <span className="channel-type-tag">
-                    {channelTypeLabel(channel.channel_type)}
+                    {channelTypeLabel(channel.channel_type, t)}
                   </span>
                   <span
                     className={channel.active ? 'channel-status on' : 'channel-status off'}
                   >
                     <i className="channel-dot" />
-                    {channel.active ? '已启用' : '已停用'}
+                    {channel.active ? t('channels.active') : t('channels.inactive')}
                   </span>
                 </div>
                 <div className="channel-url">
@@ -2834,18 +2822,18 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
                     type="button"
                     onClick={() => copyUrl(channel)}
                   >
-                    {copiedId === channel.id ? '已复制' : '复制'}
+                    {copiedId === channel.id ? t('channels.copied') : t('channels.copy')}
                   </button>
                 </div>
                 <div className="channel-meta">
-                  <span>默认员工：{agentName(channel.target_agent_id)}</span>
+                  <span>{t('channels.defaultAgentLabel', { name: agentName(channel.target_agent_id) })}</span>
                   {channel.active && (
                     <button
                       className="channel-link-button"
                       type="button"
                       onClick={() => deactivate(channel.id)}
                     >
-                      停用
+                      {t('channels.deactivate')}
                     </button>
                   )}
                 </div>
@@ -3885,14 +3873,15 @@ function TalentMarketView({
   mcpCount: number;
   onRecruit: (templateId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [activeCategory, setActiveCategory] = useState('全部');
   const [keyword, setKeyword] = useState('');
   const [detailTemplateId, setDetailTemplateId] = useState<string | null>(null);
   const categoryOptions = [
     {
       id: '全部',
-      name: '全部',
-      description: '查看官方人才市场里的全部可招募员工模板',
+      name: t('market.all'),
+      description: t('market.allDescription'),
     },
     ...categories,
   ];
@@ -3922,57 +3911,53 @@ function TalentMarketView({
     : null;
   const activeCategoryName =
     categoryOptions.find((category) => category.id === activeCategory)?.name ??
-    '全部';
+    t('market.all');
 
   return (
     <>
       <div className="market-screen">
         <header className="page-header compact">
           <div>
-            <h1>人才市场中心</h1>
-            <p>
-              浏览官方发布的 AI 员工档案，确认 Prompt、Skills、MCP 后再招募入职
-            </p>
+            <h1>{t('market.title')}</h1>
+            <p>{t('market.subtitle')}</p>
           </div>
         </header>
 
-        <section className="market-summary" aria-label="人才市场概览">
+        <section className="market-summary" aria-label={t('market.overviewAria')}>
           <div>
             {materialIcon('badge')}
             <span>
               <strong>{templates.length}</strong>
-              <em>官方人才</em>
+              <em>{t('market.officialTalent')}</em>
             </span>
           </div>
           <div>
             {materialIcon('verified_user')}
             <span>
               <strong>{skillCount}</strong>
-              <em>可绑定技能</em>
+              <em>{t('market.bindableSkills')}</em>
             </span>
           </div>
           <div>
             {materialIcon('extension')}
             <span>
               <strong>{mcpCount}</strong>
-              <em>MCP 工具</em>
+              <em>{t('market.mcpTools')}</em>
             </span>
           </div>
           <div>
             {materialIcon('group')}
             <span>
               <strong>{agents.length}</strong>
-              <em>已入职员工</em>
+              <em>{t('market.hiredEmployees')}</em>
             </span>
           </div>
         </section>
 
         <section className="market-layout">
-          <aside className="market-filter" aria-label="岗位筛选">
-            <strong>官方岗位类目</strong>
-            <p>
-              类目来自 AgentPulse Admin，不等同于你的公司部门。
-            </p>
+          <aside className="market-filter" aria-label={t('market.filterAria')}>
+            <strong>{t('market.officialCategories')}</strong>
+            <p>{t('market.categoriesNote')}</p>
             <div>
               {categoryOptions.map((category) => {
                 const count =
@@ -3995,9 +3980,7 @@ function TalentMarketView({
                 );
               })}
             </div>
-            <footer>
-              分类、员工模板、默认能力和发布版本由官方后台维护；招募时再选择加入你的部门。
-            </footer>
+            <footer>{t('market.footerNote')}</footer>
           </aside>
 
           <div className="market-main">
@@ -4006,12 +3989,15 @@ function TalentMarketView({
                 {materialIcon('search')}
                 <input
                   value={keyword}
-                  placeholder="搜索人才、Prompt、Skills 或 MCP"
+                  placeholder={t('market.searchPlaceholder')}
                   onChange={(event) => setKeyword(event.target.value)}
                 />
               </label>
               <span>
-                {activeCategoryName} · {visibleTemplates.length} 个官方人才
+                {t('market.categoryCount', {
+                  category: activeCategoryName,
+                  count: visibleTemplates.length,
+                })}
               </span>
             </div>
 
@@ -4035,11 +4021,14 @@ function TalentMarketView({
                     <div className="market-copy">
                       <div>
                         <strong>{template.name}</strong>
-                        <span>官方发布</span>
+                        <span>{t('market.officiallyPublished')}</span>
                       </div>
                       <p>
-                        {template.category} · 建议入职 {template.dept} ·{' '}
-                        {template.desc}
+                        {t('market.cardMeta', {
+                          category: template.category,
+                          dept: template.dept,
+                          desc: template.desc,
+                        })}
                       </p>
                       <em>{template.prompt}</em>
                       <div className="market-tags">
@@ -4060,12 +4049,12 @@ function TalentMarketView({
                   </div>
                   <div className="market-card-actions">
                     <span>{template.version}</span>
-                    <small>{materialIcon('badge')}人才档案</small>
+                    <small>{materialIcon('badge')}{t('market.talentProfile')}</small>
                   </div>
                 </button>
               ))}
               {visibleTemplates.length === 0 && (
-                <div className="market-empty">没有匹配的人才模板</div>
+                <div className="market-empty">{t('market.noMatch')}</div>
               )}
             </div>
           </div>
@@ -4094,10 +4083,14 @@ function TalentDetailModal({
   onClose: () => void;
   onRecruit: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal
       title={template.name}
-      description={`官方人才档案 · ${template.category} · ${template.version}`}
+      description={t('market.detailDescription', {
+        category: template.category,
+        version: template.version,
+      })}
       width={760}
       onClose={onClose}
     >
@@ -4112,63 +4105,60 @@ function TalentDetailModal({
           <strong>{template.name}</strong>
           <p>{template.desc}</p>
           <span>
-            {template.publisher} · {template.status === 'published' ? '已发布' : template.status}
+            {template.publisher} · {template.status === 'published' ? t('market.published') : template.status}
           </span>
         </div>
       </div>
 
-      <FieldLabel>基础信息</FieldLabel>
+      <FieldLabel>{t('market.basicInfo')}</FieldLabel>
       <div className="talent-detail-grid">
         <div>
-          <span>官方岗位类目</span>
+          <span>{t('market.officialCategory')}</span>
           <strong>{template.category}</strong>
         </div>
         <div>
-          <span>建议入职部门</span>
+          <span>{t('market.suggestedDept')}</span>
           <strong>{template.dept}</strong>
         </div>
         <div>
-          <span>发布版本</span>
+          <span>{t('market.version')}</span>
           <strong>{template.version}</strong>
         </div>
         <div>
-          <span>模板 ID</span>
+          <span>{t('market.templateId')}</span>
           <strong>{template.id}</strong>
         </div>
         <div>
-          <span>模板来源</span>
+          <span>{t('market.templateSource')}</span>
           <strong>{template.publisher}</strong>
         </div>
         <div>
-          <span>类目 ID</span>
+          <span>{t('market.categoryId')}</span>
           <strong>{template.categoryId}</strong>
         </div>
       </div>
 
-      <FieldLabel>人才说明</FieldLabel>
+      <FieldLabel>{t('market.talentDescription')}</FieldLabel>
       <div className="talent-profile-note">{template.desc}</div>
 
-      <FieldLabel>工作职责 Prompt</FieldLabel>
+      <FieldLabel>{t('market.rolePrompt')}</FieldLabel>
       <div className="prompt-box">{template.prompt}</div>
 
       <FieldLabel>Skills</FieldLabel>
-      <ChipList items={template.skills} emptyText="暂无技能" />
+      <ChipList items={template.skills} emptyText={t('market.noSkills')} />
 
-      <FieldLabel>MCP 工具</FieldLabel>
-      <ChipList items={template.mcps} emptyText="暂无 MCP 工具" />
+      <FieldLabel>{t('market.mcpTools')}</FieldLabel>
+      <ChipList items={template.mcps} emptyText={t('market.noMcp')} />
 
-      <FieldLabel>平台说明</FieldLabel>
-      <div className="market-admin-note">
-        官方后台负责创建岗位类目、维护员工模板、审核默认 Prompt、Skills、MCP
-        权限和发布版本。用户侧只浏览人才档案并招募到自己的组织，不在这里维护市场分类。
-      </div>
+      <FieldLabel>{t('market.platformNote')}</FieldLabel>
+      <div className="market-admin-note">{t('market.platformNoteBody')}</div>
 
       <div className="modal-actions">
         <button className="button secondary" type="button" onClick={onClose}>
-          关闭
+          {t('common.close')}
         </button>
         <button className="button primary" type="button" onClick={onRecruit}>
-          {materialIcon('person_add')}招募
+          {materialIcon('person_add')}{t('market.recruit')}
         </button>
       </div>
     </Modal>
@@ -4204,13 +4194,14 @@ function TasksView({
   onOpenChat: (id: string) => void;
   onOpenAgent: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="screen-scroll">
       <div className="screen-inner">
         <header className="page-header compact">
           <div>
-            <h1>任务中心</h1>
-            <p>任务数据来自后端；后续会由小秘自动拆解生成</p>
+            <h1>{t('tasks.title')}</h1>
+            <p>{t('tasks.subtitle')}</p>
           </div>
           <div className="header-actions">
             <button
@@ -4218,7 +4209,7 @@ function TasksView({
               type="button"
               onClick={onOpenCreateTask}
             >
-              {materialIcon('add_task')}创建任务
+              {materialIcon('add_task')}{t('tasks.create')}
             </button>
           </div>
         </header>
@@ -4226,15 +4217,15 @@ function TasksView({
         {scopeLabel && (
           <div className="task-scope-bar">
             <span>
-              {materialIcon('forum')}正在查看 {scopeLabel} 的关联任务
+              {materialIcon('forum')}{t('tasks.viewingScope', { scope: scopeLabel })}
             </span>
             <button type="button" onClick={onClearScope}>
-              查看全部任务
+              {t('tasks.viewAll')}
             </button>
           </div>
         )}
 
-        <div className="task-filter-bar" aria-label="任务状态筛选">
+        <div className="task-filter-bar" aria-label={t('tasks.filterAria')}>
           {tabs.map((tab) => (
             <button
               className={
@@ -4254,18 +4245,16 @@ function TasksView({
 
         <article className="card task-table">
           <div className="task-table-head">
-            <span>等级</span>
-            <span>任务</span>
-            <span>负责人</span>
-            <span>进度</span>
-            <span>状态</span>
-            <span>操作</span>
+            <span>{t('tasks.colPriority')}</span>
+            <span>{t('tasks.colTask')}</span>
+            <span>{t('tasks.colOwner')}</span>
+            <span>{t('tasks.colProgress')}</span>
+            <span>{t('tasks.colStatus')}</span>
+            <span>{t('tasks.colActions')}</span>
           </div>
           {tasks.length === 0 && (
             <div className="task-table-empty">
-              {scopeLabel
-                ? '这个群聊还没有关联任务，可以在创建群聊时选择任务，后续也会支持从任务详情绑定。'
-                : '暂无任务。先从给小秘发消息开始。'}
+              {scopeLabel ? t('tasks.emptyScoped') : t('tasks.emptyGlobal')}
             </div>
           )}
           {tasks.map((task) => {
@@ -4299,10 +4288,10 @@ function TasksView({
                       {avatarText(owner.name)}
                     </button>
                   )}
-                  <span>{owner?.name ?? '未分配'}</span>
+                  <span>{owner?.name ?? t('tasks.unassigned')}</span>
                   {!owner && suggestedAgent && (
                     <em className="owner-suggestion">
-                      推荐 {suggestedAgent.name}
+                      {t('tasks.suggested', { name: suggestedAgent.name })}
                     </em>
                   )}
                 </div>
@@ -4325,18 +4314,18 @@ function TasksView({
                 </span>
                 <div className="task-actions">
                   <button type="button" onClick={() => onOpenTask(task.id)}>
-                    详情
+                    {t('tasks.detail')}
                   </button>
                   {task.status === '待认领' ? (
                     <button
                       type="button"
                       onClick={() => onOpenClaimTask(task.id)}
                     >
-                      认领
+                      {t('tasks.claim')}
                     </button>
                   ) : (
                     <button type="button" onClick={() => onAdvanceTask(task)}>
-                      {task.status === '已完成' ? '已完成' : '推进'}
+                      {task.status === '已完成' ? task.status : t('tasks.advance')}
                     </button>
                   )}
                 </div>
@@ -4366,6 +4355,7 @@ function LibraryView({
   mcps: string[];
   onOpenKnowledge: () => void;
 }) {
+  const { t } = useTranslation();
   const categoryCount = new Set(knowledgeSources.map((source) => source.category))
     .size;
 
@@ -4374,12 +4364,12 @@ function LibraryView({
       <div className="screen-inner">
         <header className="page-header compact">
           <div>
-            <h1>资料库与能力</h1>
-            <p>公司资料会进入员工回复上下文，让 AI 员工先理解你的业务再干活</p>
+            <h1>{t('library.title')}</h1>
+            <p>{t('library.subtitle')}</p>
           </div>
           {activeTab === 'docs' && (
             <button className="button primary" type="button" onClick={onOpenKnowledge}>
-              {materialIcon('note_add')}新增资料
+              {materialIcon('note_add')}{t('library.addSource')}
             </button>
           )}
         </header>
@@ -4399,26 +4389,26 @@ function LibraryView({
 
         {activeTab === 'docs' && (
           <>
-            <section className="library-summary" aria-label="资料库概览">
+            <section className="library-summary" aria-label={t('library.overviewAria')}>
               <div>
                 {materialIcon('folder_copy')}
                 <span>
                   <strong>{knowledgeSources.length}</strong>
-                  <em>资料条目</em>
+                  <em>{t('library.entries')}</em>
                 </span>
               </div>
               <div>
                 {materialIcon('category')}
                 <span>
                   <strong>{categoryCount}</strong>
-                  <em>资料分区</em>
+                  <em>{t('library.categories')}</em>
                 </span>
               </div>
               <div>
                 {materialIcon('psychology')}
                 <span>
                   <strong>LLM</strong>
-                  <em>自动注入上下文</em>
+                  <em>{t('library.autoInjected')}</em>
                 </span>
               </div>
             </section>
@@ -4433,7 +4423,7 @@ function LibraryView({
                     <p>{excerpt(source.content, 130)}</p>
                     <em>
                       {materialIcon('schedule')}
-                      更新于 {source.updatedAt}
+                      {t('library.updatedAt', { date: source.updatedAt })}
                     </em>
                   </section>
                 </article>
@@ -4443,15 +4433,13 @@ function LibraryView({
                 type="button"
                 onClick={onOpenKnowledge}
               >
-                {materialIcon('note_add')}新增公司资料
+                {materialIcon('note_add')}{t('library.addCompanySource')}
               </button>
             </div>
             {!knowledgeSources.length && (
               <div className="knowledge-empty">
-                <strong>先放一条品牌、产品或客户资料</strong>
-                <p>
-                  后续你和员工聊天时，系统会把相关资料放进员工上下文，而不是让员工凭空猜业务。
-                </p>
+                <strong>{t('library.emptyTitle')}</strong>
+                <p>{t('library.emptyBody')}</p>
               </div>
             )}
           </>
@@ -4464,11 +4452,11 @@ function LibraryView({
                 <div className="library-icon">{materialIcon('bolt')}</div>
                 <div>
                   <strong>{skill}</strong>
-                  <p>来自后端人才模板，可绑定给员工。</p>
+                  <p>{t('library.skillSource')}</p>
                 </div>
               </div>
             ))}
-            {!skills.length && <EmptyState>暂无 Skills</EmptyState>}
+            {!skills.length && <EmptyState>{t('library.noSkills')}</EmptyState>}
           </article>
         )}
 
@@ -4481,15 +4469,15 @@ function LibraryView({
                 </div>
                 <div>
                   <strong>{mcp}</strong>
-                  <p>来自后端人才模板，第一版仅做权限占位。</p>
+                  <p>{t('library.mcpSource')}</p>
                 </div>
                 <span>
                   <i />
-                  未连接
+                  {t('library.notConnected')}
                 </span>
               </div>
             ))}
-            {!mcps.length && <EmptyState>暂无 MCP</EmptyState>}
+            {!mcps.length && <EmptyState>{t('library.noMcp')}</EmptyState>}
           </article>
         )}
       </div>
@@ -4510,6 +4498,7 @@ function AgentDetail({
   onClose: () => void;
   onDm: () => void;
 }) {
+  const { t } = useTranslation();
   const [learned, setLearned] = useState<
     { name: string; content: string }[] | null
   >(null);
@@ -4549,12 +4538,12 @@ function AgentDetail({
       );
       setReflectMsg(
         r.skills_learned.length
-          ? `新沉淀 ${r.skills_learned.length} 条技能`
-          : '这轮暂无值得沉淀的',
+          ? t('agentDetail.newSkillsLearned', { count: r.skills_learned.length })
+          : t('agentDetail.nothingToLearn'),
       );
       loadGrowth();
     } catch (err) {
-      setReflectMsg(err instanceof Error ? err.message : '反思失败');
+      setReflectMsg(err instanceof Error ? err.message : t('agentDetail.reflectFailed'));
     } finally {
       setReflecting(false);
     }
@@ -4566,16 +4555,16 @@ function AgentDetail({
   };
 
   const capLabel: Record<string, string> = {
-    enabled: '已启用',
-    credential_missing: '待补凭证',
-    pending: '待生效',
-    disabled: '已停用',
+    enabled: t('agentDetail.capEnabled'),
+    credential_missing: t('agentDetail.capCredentialMissing'),
+    pending: t('agentDetail.capPending'),
+    disabled: t('agentDetail.capDisabled'),
   };
 
   return (
     <>
       <div className="overlay" onClick={onClose} />
-      <aside className="agent-drawer" aria-label={`${agent.name} 详情`}>
+      <aside className="agent-drawer" aria-label={t('agentDetail.aria', { name: agent.name })}>
         <header>
           <div className="drawer-topline">
             <div
@@ -4584,7 +4573,7 @@ function AgentDetail({
             >
               {avatarText(agent.name)}
             </div>
-            <button type="button" title="关闭" onClick={onClose}>
+            <button type="button" title={t('common.close')} onClick={onClose}>
               {materialIcon('close')}
             </button>
           </div>
@@ -4600,35 +4589,35 @@ function AgentDetail({
           </p>
           <div className="drawer-actions">
             <button className="button primary" type="button" onClick={onDm}>
-              {materialIcon('chat')}私信
+              {materialIcon('chat')}{t('agentDetail.dm')}
             </button>
           </div>
         </header>
 
         <div className="drawer-scroll">
           <section className="drawer-section">
-            <h3>员工描述</h3>
-            <p className="prompt-box">{agent.description || '暂无描述'}</p>
+            <h3>{t('agentDetail.description')}</h3>
+            <p className="prompt-box">{agent.description || t('agentDetail.noDescription')}</p>
           </section>
 
           <section className="drawer-section">
-            <h3>工作职责 Prompt</h3>
+            <h3>{t('market.rolePrompt')}</h3>
             <p className="prompt-box">{agent.prompt}</p>
           </section>
 
           <section className="drawer-section">
             <h3>Skills</h3>
-            <ChipList items={agent.skills} emptyText="暂无绑定技能" />
+            <ChipList items={agent.skills} emptyText={t('agentDetail.noSkillsBound')} />
           </section>
 
           <section className="drawer-section">
             <h3>MCP</h3>
-            <ChipList items={agent.mcps} emptyText="暂无 MCP" muted />
+            <ChipList items={agent.mcps} emptyText={t('market.noMcp')} muted />
           </section>
 
           <section className="drawer-section">
             <div className="growth-head">
-              <h3>成长轨迹</h3>
+              <h3>{t('agentDetail.growthTrajectory')}</h3>
               <button
                 type="button"
                 className="button small"
@@ -4636,14 +4625,14 @@ function AgentDetail({
                 disabled={reflecting}
               >
                 {materialIcon('auto_awesome')}
-                {reflecting ? '反思中…' : '触发反思'}
+                {reflecting ? t('agentDetail.reflecting') : t('agentDetail.triggerReflect')}
               </button>
             </div>
             {reflectMsg && <p className="growth-msg">{reflectMsg}</p>}
 
-            <h4 className="growth-sub">已获得能力</h4>
+            <h4 className="growth-sub">{t('agentDetail.capabilitiesGained')}</h4>
             {caps && caps.length === 0 && (
-              <EmptyState>暂无升级获得的能力</EmptyState>
+              <EmptyState>{t('agentDetail.noCapabilities')}</EmptyState>
             )}
             <div className="growth-caps">
               {(caps ?? []).map((cap) => (
@@ -4657,9 +4646,9 @@ function AgentDetail({
               ))}
             </div>
 
-            <h4 className="growth-sub">已习得技能（自动沉淀）</h4>
+            <h4 className="growth-sub">{t('agentDetail.skillsLearned')}</h4>
             {learned && learned.length === 0 && (
-              <EmptyState>干活满一定轮次后会自动沉淀可复用技能</EmptyState>
+              <EmptyState>{t('agentDetail.noLearnedSkills')}</EmptyState>
             )}
             {(learned ?? []).map((skill) => (
               <article className="skill-card" key={skill.name}>
@@ -4673,9 +4662,9 @@ function AgentDetail({
           </section>
 
           <section className="drawer-section">
-            <h3>经验沉淀</h3>
+            <h3>{t('agentDetail.experience')}</h3>
             {agent.experiences.length === 0 && (
-              <EmptyState>完成并确认任务后会自动沉淀经验</EmptyState>
+              <EmptyState>{t('agentDetail.noExperience')}</EmptyState>
             )}
             {agent.experiences.slice(0, 5).map((experience) => (
               <article
@@ -4689,7 +4678,7 @@ function AgentDetail({
                       : 'report',
                   )}
                   <strong>
-                    {experience.outcome === 'success' ? '成功经验' : '复盘教训'}
+                    {experience.outcome === 'success' ? t('agentDetail.successExperience') : t('agentDetail.lessonLearned')}
                   </strong>
                   <span>{experience.time}</span>
                 </div>
@@ -4700,8 +4689,8 @@ function AgentDetail({
           </section>
 
           <section className="drawer-section">
-            <h3>相关任务</h3>
-            {tasks.length === 0 && <EmptyState>暂无任务</EmptyState>}
+            <h3>{t('agentDetail.relatedTasks')}</h3>
+            {tasks.length === 0 && <EmptyState>{t('agentDetail.noTasks')}</EmptyState>}
             {tasks.map((task) => {
               const status = statusStyle(task.status);
               const priority = priorityStyle(task.pr);
@@ -4752,6 +4741,7 @@ function TaskDetail({
     status: 'approved' | 'rejected',
   ) => void;
 }) {
+  const { t } = useTranslation();
   const status = statusStyle(task.status);
   const priority = priorityStyle(task.pr);
   const pendingApprovals = task.approvals.filter(
@@ -4762,13 +4752,13 @@ function TaskDetail({
   return (
     <>
       <div className="overlay" onClick={onClose} />
-      <aside className="agent-drawer task-detail-drawer" aria-label="任务详情">
+      <aside className="agent-drawer task-detail-drawer" aria-label={t('taskDetail.aria')}>
         <header>
           <div className="drawer-topline">
             <span className="priority-pill" style={priority}>
               {task.pr}
             </span>
-            <button type="button" title="关闭" onClick={onClose}>
+            <button type="button" title={t('common.close')} onClick={onClose}>
               {materialIcon('close')}
             </button>
           </div>
@@ -4779,7 +4769,7 @@ function TaskDetail({
               {task.status}
             </span>
           </h2>
-          <p>{task.description || '暂无任务说明'}</p>
+          <p>{task.description || t('taskDetail.noDescription')}</p>
           <div className="drawer-actions">
             {task.src && (
               <button
@@ -4787,7 +4777,7 @@ function TaskDetail({
                 type="button"
                 onClick={() => onOpenChat(task.src)}
               >
-                {materialIcon('forum')}关联会话
+                {materialIcon('forum')}{t('taskDetail.relatedConversation')}
               </button>
             )}
             <button
@@ -4795,35 +4785,35 @@ function TaskDetail({
               type="button"
               onClick={() => onAdvanceTask(task)}
             >
-              {task.status === '已完成' ? '已完成' : '推进任务'}
+              {task.status === '已完成' ? task.status : t('taskDetail.advance')}
             </button>
           </div>
         </header>
 
         <div className="drawer-scroll">
           <section className="drawer-section">
-            <h3>任务概览</h3>
+            <h3>{t('taskDetail.overview')}</h3>
             <div className="task-detail-grid">
               <div>
-                <span>负责人</span>
+                <span>{t('tasks.colOwner')}</span>
                 {agent ? (
                   <button type="button" onClick={() => onOpenAgent(agent.id)}>
                     {avatarText(agent.name)} · {agent.name}
                   </button>
                 ) : (
-                  <strong>未分配</strong>
+                  <strong>{t('tasks.unassigned')}</strong>
                 )}
               </div>
               <div>
-                <span>关联会话</span>
+                <span>{t('taskDetail.relatedConversation')}</span>
                 <strong>{task.srcLabel}</strong>
               </div>
               <div>
-                <span>创建时间</span>
+                <span>{t('taskDetail.createdAt')}</span>
                 <strong>{task.createdAt}</strong>
               </div>
               <div>
-                <span>更新时间</span>
+                <span>{t('taskDetail.updatedAt')}</span>
                 <strong>{task.updatedAt}</strong>
               </div>
             </div>
@@ -4842,7 +4832,7 @@ function TaskDetail({
 
           {pendingApprovals.length > 0 && (
             <section className="drawer-section">
-              <h3>待老板确认</h3>
+              <h3>{t('taskDetail.pendingApproval')}</h3>
               {pendingApprovals.map((approval) => (
                 <article className="approval-request" key={approval.id}>
                   <div>
@@ -4858,14 +4848,14 @@ function TaskDetail({
                       type="button"
                       onClick={() => onResolveApproval(approval, 'rejected')}
                     >
-                      驳回
+                      {t('taskDetail.reject')}
                     </button>
                     <button
                       className="button primary"
                       type="button"
                       onClick={() => onResolveApproval(approval, 'approved')}
                     >
-                      确认通过
+                      {t('taskDetail.approve')}
                     </button>
                   </footer>
                 </article>
@@ -4874,7 +4864,7 @@ function TaskDetail({
           )}
 
           <section className="drawer-section">
-            <h3>最新产出</h3>
+            <h3>{t('taskDetail.latestOutput')}</h3>
             {latestOutput ? (
               <article className="task-output-card">
                 <header>
@@ -4884,15 +4874,15 @@ function TaskDetail({
                 <pre>{latestOutput.content}</pre>
               </article>
             ) : (
-              <EmptyState>暂无产出，员工回复后会自动沉淀到这里。</EmptyState>
+              <EmptyState>{t('taskDetail.noOutput')}</EmptyState>
             )}
           </section>
 
           <section className="drawer-section">
-            <h3>执行记录</h3>
+            <h3>{t('taskDetail.executionLog')}</h3>
             <div className="task-timeline">
               {task.events.length === 0 && (
-                <EmptyState>暂无执行记录</EmptyState>
+                <EmptyState>{t('taskDetail.noEvents')}</EmptyState>
               )}
               {task.events.map((event) => (
                 <article className="timeline-event" key={event.id}>
@@ -4927,12 +4917,13 @@ function HireModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const { t } = useTranslation();
   if (!template) return null;
 
   return (
     <Modal
-      title="招募员工"
-      description="从人才市场招募预设岗位，确认部门后加入你的组织。"
+      title={t('hireModal.title')}
+      description={t('hireModal.description')}
       width={560}
       onClose={onClose}
     >
@@ -4951,15 +4942,15 @@ function HireModal({
         </div>
       </div>
 
-      <FieldLabel>入职部门</FieldLabel>
+      <FieldLabel>{t('hireModal.dept')}</FieldLabel>
       <input
         value={hireDept}
-        placeholder={`例如：${template.dept}`}
+        placeholder={t('hireModal.deptPlaceholder', { dept: template.dept })}
         onChange={(event) => onDeptChange(event.currentTarget.value)}
       />
       {departments.length > 0 && (
         <>
-          <FieldLabel>已有部门</FieldLabel>
+          <FieldLabel>{t('hireModal.existingDepts')}</FieldLabel>
           <div className="chip-row compact">
             {departments.map((department) => (
               <button
@@ -4979,18 +4970,18 @@ function HireModal({
         </>
       )}
 
-      <FieldLabel>岗位 Prompt</FieldLabel>
+      <FieldLabel>{t('hireModal.rolePrompt')}</FieldLabel>
       <textarea readOnly rows={5} value={template.prompt} />
 
-      <FieldLabel>能力标签</FieldLabel>
-      <ChipList items={template.skills} emptyText="暂无技能" />
+      <FieldLabel>{t('hireModal.capabilityTags')}</FieldLabel>
+      <ChipList items={template.skills} emptyText={t('market.noSkills')} />
 
       <div className="modal-actions">
         <button className="button secondary" type="button" onClick={onClose}>
-          取消
+          {t('common.cancel')}
         </button>
         <button className="button primary" type="button" onClick={onSubmit}>
-          {materialIcon('person_add')}确认招募
+          {materialIcon('person_add')}{t('hireModal.confirm')}
         </button>
       </div>
     </Modal>
@@ -5030,36 +5021,37 @@ function CreateTaskModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal
-      title="创建任务"
-      description="把想法沉淀成可追踪的工作项，后续会进入员工上下文。"
+      title={t('createTask.title')}
+      description={t('createTask.description')}
       width={680}
       onClose={onClose}
     >
-      <FieldLabel>任务标题</FieldLabel>
+      <FieldLabel>{t('createTask.taskTitle')}</FieldLabel>
       <input
         value={taskTitle}
-        placeholder="例如：官网首屏文案确认"
+        placeholder={t('createTask.taskTitlePlaceholder')}
         onChange={(event) => onTitleChange(event.currentTarget.value)}
       />
 
-      <FieldLabel>任务说明</FieldLabel>
+      <FieldLabel>{t('createTask.taskDesc')}</FieldLabel>
       <textarea
         rows={4}
         value={taskDesc}
-        placeholder="写清楚目标、产出格式和验收标准"
+        placeholder={t('createTask.taskDescPlaceholder')}
         onChange={(event) => onDescChange(event.currentTarget.value)}
       />
 
       <div className="form-grid even">
         <label>
-          <FieldLabel>负责人</FieldLabel>
+          <FieldLabel>{t('tasks.colOwner')}</FieldLabel>
           <select
             value={taskOwnerId}
             onChange={(event) => onOwnerChange(event.currentTarget.value)}
           >
-            <option value="">未分配</option>
+            <option value="">{t('tasks.unassigned')}</option>
             {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.name} · {agent.role}
@@ -5068,26 +5060,26 @@ function CreateTaskModal({
           </select>
         </label>
         <label>
-          <FieldLabel>关联会话</FieldLabel>
+          <FieldLabel>{t('createTask.relatedConversation')}</FieldLabel>
           <select
             value={taskConversationId}
             onChange={(event) =>
               onConversationChange(event.currentTarget.value)
             }
           >
-            <option value="">不关联</option>
+            <option value="">{t('createTask.noRelated')}</option>
             {chats.map((chat) => (
               <option key={chat.id} value={chat.id}>
                 {chat.kind === 'group'
                   ? `# ${chat.name}`
-                  : `私聊 · ${agentById(chat.agentId)?.name ?? '员工'}`}
+                  : t('createTask.dmOption', { name: agentById(chat.agentId)?.name ?? t('createTask.employeeFallback') })}
               </option>
             ))}
           </select>
         </label>
       </div>
 
-      <FieldLabel>优先级</FieldLabel>
+      <FieldLabel>{t('createTask.priority')}</FieldLabel>
       <div className="chip-row compact">
         {(['P0', 'P1', 'P2'] as const).map((priority) => (
           <button
@@ -5107,10 +5099,10 @@ function CreateTaskModal({
 
       <div className="modal-actions">
         <button className="button secondary" type="button" onClick={onClose}>
-          取消
+          {t('common.cancel')}
         </button>
         <button className="button primary" type="button" onClick={onSubmit}>
-          {materialIcon('add_task')}创建任务
+          {materialIcon('add_task')}{t('tasks.create')}
         </button>
       </div>
     </Modal>
@@ -5118,20 +5110,20 @@ function CreateTaskModal({
 }
 
 const CAPABILITY_OPTIONS = [
-  { key: 'write_code', label: '编写代码', desc: '编写、修改代码文件', risk: 'auto' },
-  { key: 'run_tests', label: '运行测试', desc: '运行测试套件并收集结果', risk: 'auto' },
-  { key: 'git_push', label: '推送代码', desc: '推送代码到远程仓库（需审批）', risk: 'approval' },
-  { key: 'deploy_preview', label: '部署预览', desc: '部署到预览/测试环境', risk: 'auto' },
-  { key: 'deploy_prod', label: '部署生产', desc: '部署到生产环境（需审批）', risk: 'approval' },
-  { key: 'domain_register', label: '域名管理', desc: '注册/续费域名（必须人工操作）', risk: 'prohibited_auto' },
-  { key: 'seo_audit', label: 'SEO 审计', desc: '执行 SEO 审计', risk: 'auto' },
-  { key: 'social_content', label: '社媒内容', desc: '生成社交媒体内容（发布需审批）', risk: 'approval' },
+  { key: 'write_code', risk: 'auto' },
+  { key: 'run_tests', risk: 'auto' },
+  { key: 'git_push', risk: 'approval' },
+  { key: 'deploy_preview', risk: 'auto' },
+  { key: 'deploy_prod', risk: 'approval' },
+  { key: 'domain_register', risk: 'prohibited_auto' },
+  { key: 'seo_audit', risk: 'auto' },
+  { key: 'social_content', risk: 'approval' },
 ] as const;
 
-const RISK_BADGE: Record<string, { label: string; color: string }> = {
-  auto: { label: '自动', color: '#4caf50' },
-  approval: { label: '需审批', color: '#ff9800' },
-  prohibited_auto: { label: '仅人工', color: '#f44336' },
+const RISK_BADGE_COLOR: Record<string, string> = {
+  auto: '#4caf50',
+  approval: '#ff9800',
+  prohibited_auto: '#f44336',
 };
 
 type RoleBundle = {
@@ -5171,6 +5163,7 @@ function CreateAgentModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const { t } = useTranslation();
   const [bundles, setBundles] = useState<RoleBundle[]>([]);
 
   useEffect(() => {
@@ -5208,26 +5201,26 @@ function CreateAgentModal({
 
   return (
     <Modal
-      title="创建新员工"
-      description="自定义员工名称、描述、部门、能力和工作职责。"
+      title={t('createAgent.title')}
+      description={t('createAgent.description')}
       width={720}
       onClose={onClose}
     >
       <div className="form-grid even">
         <label>
-          <FieldLabel>员工名称</FieldLabel>
+          <FieldLabel>{t('createAgent.name')}</FieldLabel>
           <input
             value={createName}
-            placeholder="例如：增长分析师"
+            placeholder={t('createAgent.namePlaceholder')}
             onChange={(event) => onNameChange(event.currentTarget.value)}
           />
         </label>
         <label>
-          <FieldLabel>所属部门</FieldLabel>
+          <FieldLabel>{t('createAgent.dept')}</FieldLabel>
           <input
             value={createDept}
             list="agentpulse-departments"
-            placeholder="例如：增长与客户"
+            placeholder={t('createAgent.deptPlaceholder')}
             onChange={(event) => onDeptChange(event.currentTarget.value)}
           />
           <datalist id="agentpulse-departments">
@@ -5238,16 +5231,16 @@ function CreateAgentModal({
         </label>
       </div>
 
-      <FieldLabel>员工描述</FieldLabel>
+      <FieldLabel>{t('createAgent.employeeDesc')}</FieldLabel>
       <input
         value={createDesc}
-        placeholder="一句话说明他擅长什么"
+        placeholder={t('createAgent.employeeDescPlaceholder')}
         onChange={(event) => onDescChange(event.currentTarget.value)}
       />
 
       {bundles.length > 0 && (
         <>
-          <FieldLabel>按职位快速配置（可选）</FieldLabel>
+          <FieldLabel>{t('createAgent.quickConfig')}</FieldLabel>
           <div className="role-bundle-row">
             {bundles.map((bundle) => (
               <button
@@ -5267,25 +5260,25 @@ function CreateAgentModal({
         </>
       )}
 
-      <FieldLabel>能力配置</FieldLabel>
+      <FieldLabel>{t('createAgent.capabilities')}</FieldLabel>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
         {CAPABILITY_OPTIONS.map((cap) => {
           const selected = createCapKeys.includes(cap.key);
-          const badge = RISK_BADGE[cap.risk];
+          const badgeColor = RISK_BADGE_COLOR[cap.risk];
           return (
             <button
               key={cap.key}
               type="button"
-              title={cap.desc}
+              title={t(`capability.${cap.key}.desc`)}
               className={selected ? 'cap-chip selected' : 'cap-chip'}
               onClick={() => toggleCap(cap.key)}
             >
-              <span>{cap.label}</span>
+              <span>{t(`capability.${cap.key}.label`)}</span>
               <span
                 className="risk-badge"
-                style={{ background: badge.color + '22', color: badge.color }}
+                style={{ background: badgeColor + '22', color: badgeColor }}
               >
-                {badge.label}
+                {t(`createAgent.risk.${cap.risk}`)}
               </span>
             </button>
           );
@@ -5293,24 +5286,27 @@ function CreateAgentModal({
       </div>
       {createCapKeys.length > 0 && (
         <p className="cap-summary">
-          已选 {createCapKeys.length} 项能力：{createCapKeys.join(' · ')}
+          {t('createAgent.selectedCount', {
+            count: createCapKeys.length,
+            keys: createCapKeys.join(' · '),
+          })}
         </p>
       )}
 
-      <FieldLabel>工作职责 Prompt</FieldLabel>
+      <FieldLabel>{t('market.rolePrompt')}</FieldLabel>
       <textarea
         rows={8}
         value={createPrompt}
-        placeholder="写清楚这个员工的职责、边界、输出格式和协作方式"
+        placeholder={t('createAgent.promptPlaceholder')}
         onChange={(event) => onPromptChange(event.currentTarget.value)}
       />
 
       <div className="modal-actions">
         <button className="button secondary" type="button" onClick={onClose}>
-          取消
+          {t('common.cancel')}
         </button>
         <button className="button primary" type="button" onClick={onSubmit}>
-          {materialIcon('add_circle')}创建
+          {materialIcon('add_circle')}{t('createAgent.submit')}
         </button>
       </div>
     </Modal>
@@ -5332,18 +5328,19 @@ function ClaimTaskModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const { t } = useTranslation();
   const suggestedAgent = task?.suggestedAgentId
     ? agents.find((agent) => agent.id === task.suggestedAgentId)
     : null;
 
   return (
     <Modal
-      title="认领任务"
-      description={task ? `从任务池认领「${task.title}」` : '从任务池认领任务'}
+      title={t('claimTask.title')}
+      description={task ? t('claimTask.descriptionWithTitle', { title: task.title }) : t('claimTask.description')}
       width={520}
       onClose={onClose}
     >
-      <FieldLabel>执行员工</FieldLabel>
+      <FieldLabel>{t('claimTask.assignee')}</FieldLabel>
       {suggestedAgent && (
         <div className="claim-suggestion">
           <div
@@ -5353,8 +5350,8 @@ function ClaimTaskModal({
             {avatarText(suggestedAgent.name)}
           </div>
           <span>
-            <strong>推荐 {suggestedAgent.name}</strong>
-            <p>{task?.suggestedAgentReason || '岗位说明与任务内容匹配'}</p>
+            <strong>{t('tasks.suggested', { name: suggestedAgent.name })}</strong>
+            <p>{task?.suggestedAgentReason || t('claimTask.defaultReason')}</p>
           </span>
         </div>
       )}
@@ -5362,22 +5359,20 @@ function ClaimTaskModal({
         value={selectedAgentId}
         onChange={(event) => onAgentChange(event.currentTarget.value)}
       >
-        <option value="">选择员工</option>
+        <option value="">{t('claimTask.selectEmployee')}</option>
         {agents.map((agent) => (
           <option key={agent.id} value={agent.id}>
             {agent.name} · {agent.role}
           </option>
         ))}
       </select>
-      <div className="market-admin-note">
-        认领后任务会进入进行中，并写入任务时间线。后续可以让员工在相关会话里继续执行。
-      </div>
+      <div className="market-admin-note">{t('claimTask.note')}</div>
       <div className="modal-actions">
         <button className="button secondary" type="button" onClick={onClose}>
-          取消
+          {t('common.cancel')}
         </button>
         <button className="button primary" type="button" onClick={onSubmit}>
-          {materialIcon('assignment_ind')}确认认领
+          {materialIcon('assignment_ind')}{t('claimTask.confirm')}
         </button>
       </div>
     </Modal>
@@ -5403,55 +5398,54 @@ function KnowledgeSourceModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal
-      title="新增公司资料"
-      description="保存后会进入公司资料库，员工回复时会自动读取相关资料。"
+      title={t('knowledgeModal.title')}
+      description={t('knowledgeModal.description')}
       width={640}
       onClose={onClose}
     >
       <div className="form-grid even">
         <label>
-          <FieldLabel>资料标题</FieldLabel>
+          <FieldLabel>{t('knowledgeModal.sourceTitle')}</FieldLabel>
           <input
             value={title}
-            placeholder="例如：品牌定位"
+            placeholder={t('knowledgeModal.sourceTitlePlaceholder')}
             onChange={(event) => onTitleChange(event.currentTarget.value)}
           />
         </label>
         <label>
-          <FieldLabel>资料分区</FieldLabel>
+          <FieldLabel>{t('knowledgeModal.category')}</FieldLabel>
           <select
             value={category}
             onChange={(event) => onCategoryChange(event.currentTarget.value)}
           >
-            <option value="品牌资料">品牌资料</option>
-            <option value="产品资料">产品资料</option>
-            <option value="客户资料">客户资料</option>
-            <option value="运营记录">运营记录</option>
-            <option value="通用资料">通用资料</option>
+            <option value="品牌资料">{t('knowledgeModal.categoryBrand')}</option>
+            <option value="产品资料">{t('knowledgeModal.categoryProduct')}</option>
+            <option value="客户资料">{t('knowledgeModal.categoryCustomer')}</option>
+            <option value="运营记录">{t('knowledgeModal.categoryOps')}</option>
+            <option value="通用资料">{t('knowledgeModal.categoryGeneral')}</option>
           </select>
         </label>
       </div>
 
-      <FieldLabel>正文内容</FieldLabel>
+      <FieldLabel>{t('knowledgeModal.content')}</FieldLabel>
       <textarea
         rows={9}
         value={content}
-        placeholder="写下公司的定位、产品、目标客户、常用话术、历史复盘或其他业务事实"
+        placeholder={t('knowledgeModal.contentPlaceholder')}
         onChange={(event) => onContentChange(event.currentTarget.value)}
       />
 
-      <div className="market-admin-note">
-        第一版使用文本资料检索和最近资料注入，后续可以升级为向量索引、资料权限和工具调用记录。
-      </div>
+      <div className="market-admin-note">{t('knowledgeModal.note')}</div>
 
       <div className="modal-actions">
         <button className="button secondary" type="button" onClick={onClose}>
-          取消
+          {t('common.cancel')}
         </button>
         <button className="button primary" type="button" onClick={onSubmit}>
-          {materialIcon('save')}保存资料
+          {materialIcon('save')}{t('knowledgeModal.save')}
         </button>
       </div>
     </Modal>
@@ -5481,28 +5475,29 @@ function GroupModal({
   onClose: () => void;
   onCreate: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal
-      title="创建群聊"
-      description="把相关员工拉到同一个会话里，后续可以用 @ 点名。"
+      title={t('groupModal.title')}
+      description={t('groupModal.description')}
       width={620}
       onClose={onClose}
     >
-      <FieldLabel>群聊名称</FieldLabel>
+      <FieldLabel>{t('groupModal.name')}</FieldLabel>
       <input
         value={groupName}
-        placeholder="例如：官网上线作战室"
+        placeholder={t('groupModal.namePlaceholder')}
         onChange={(event) => onGroupNameChange(event.currentTarget.value)}
       />
 
-      <FieldLabel>选择成员</FieldLabel>
+      <FieldLabel>{t('groupModal.selectMembers')}</FieldLabel>
       <MemberPicker
         agents={agents}
         selectedMembers={groupMembers}
         onToggleMember={onToggleMember}
       />
 
-      <FieldLabel>关联任务（可选）</FieldLabel>
+      <FieldLabel>{t('groupModal.relatedTasks')}</FieldLabel>
       <TaskPicker
         tasks={tasks}
         selectedTaskIds={selectedTaskIds}
@@ -5511,10 +5506,10 @@ function GroupModal({
 
       <div className="modal-actions">
         <button className="button secondary" type="button" onClick={onClose}>
-          取消
+          {t('common.cancel')}
         </button>
         <button className="button primary" type="button" onClick={onCreate}>
-          {materialIcon('group_add')}创建群聊
+          {materialIcon('group_add')}{t('groupModal.create')}
         </button>
       </div>
     </Modal>
@@ -5530,8 +5525,9 @@ function TaskPicker({
   selectedTaskIds: string[];
   onToggleTask: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!tasks.length) {
-    return <div className="member-picker-empty">暂无可关联任务</div>;
+    return <div className="member-picker-empty">{t('groupModal.noTasks')}</div>;
   }
 
   return (
@@ -5585,6 +5581,7 @@ function GroupMembersModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal
       title={title}
@@ -5592,7 +5589,7 @@ function GroupMembersModal({
       width={620}
       onClose={onClose}
     >
-      <FieldLabel>选择成员</FieldLabel>
+      <FieldLabel>{t('groupModal.selectMembers')}</FieldLabel>
       <MemberPicker
         agents={agents}
         selectedMembers={selectedMembers}
@@ -5602,7 +5599,7 @@ function GroupMembersModal({
 
       <div className="modal-actions">
         <button className="button secondary" type="button" onClick={onClose}>
-          取消
+          {t('common.cancel')}
         </button>
         <button className="button primary" type="button" onClick={onSubmit}>
           {materialIcon('person_add')}
@@ -5616,7 +5613,7 @@ function GroupMembersModal({
 function MemberPicker({
   agents,
   selectedMembers,
-  emptyText = '暂无可选员工',
+  emptyText,
   onToggleMember,
 }: {
   agents: Agent[];
@@ -5624,8 +5621,9 @@ function MemberPicker({
   emptyText?: string;
   onToggleMember: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!agents.length) {
-    return <div className="member-picker-empty">{emptyText}</div>;
+    return <div className="member-picker-empty">{emptyText ?? t('groupModal.noEmployees')}</div>;
   }
 
   return (
@@ -5670,12 +5668,13 @@ function OnboardingModal({
   onNext: () => void;
   onFinish: () => void;
 }) {
+  const { t } = useTranslation();
   const featuredTemplates = templates.slice(0, 4);
 
   return (
     <>
       <div className="overlay blur" />
-      <section className="onboarding-modal" aria-label="新手引导">
+      <section className="onboarding-modal" aria-label={t('onboarding.aria')}>
         {step === 0 && (
           <div className="onboarding-content centered">
             <div className="onboarding-logo big" aria-hidden="true">
@@ -5685,26 +5684,23 @@ function OnboardingModal({
                 <circle cx="16" cy="20.25" r="2.25" fill="#eef4f2" />
               </svg>
             </div>
-            <h2>欢迎来到 AgentPulse</h2>
-            <p>
-              这里不是聊天 Demo，而是你的 AI
-              公司工作台。第一版已经接入账号、组织、员工和真实 LLM 调用链。
-            </p>
+            <h2>{t('onboarding.welcomeTitle')}</h2>
+            <p>{t('onboarding.welcomeBody')}</p>
             <div className="onboarding-feature-grid">
               <OnboardingFeature
                 icon="forum"
-                title="从消息开始"
-                text="默认进入小秘私聊，把想法直接丢进来。"
+                title={t('onboarding.feature1Title')}
+                text={t('onboarding.feature1Text')}
               />
               <OnboardingFeature
                 icon="storefront"
-                title="人才市场"
-                text="按岗位招募 AI 员工，入职后进入组织。"
+                title={t('onboarding.feature2Title')}
+                text={t('onboarding.feature2Text')}
               />
               <OnboardingFeature
                 icon="account_tree"
-                title="组织协作"
-                text="创建群聊，用 @ 点名具体员工推进。"
+                title={t('onboarding.feature3Title')}
+                text={t('onboarding.feature3Text')}
               />
             </div>
           </div>
@@ -5719,10 +5715,8 @@ function OnboardingModal({
                 <circle cx="16" cy="20.25" r="2.25" fill="#eef4f2" />
               </svg>
             </div>
-            <h2>先认识你的第一批员工</h2>
-            <p>
-              小秘已经就位。你可以继续从人才市场招募这些角色，让一人公司开始分工。
-            </p>
+            <h2>{t('onboarding.meetTitle')}</h2>
+            <p>{t('onboarding.meetBody')}</p>
             <div className="role-grid">
               {featuredTemplates.map((template, index) => (
                 <div className="role-option active" key={template.id}>
@@ -5753,14 +5747,11 @@ function OnboardingModal({
                 <circle cx="16" cy="20.25" r="2.25" fill="#eef4f2" />
               </svg>
             </div>
-            <h2>从给小秘发消息开始</h2>
-            <p>
-              你可以说“帮我把 AgentPulse
-              第一版拆成今天能做的任务”，小秘会用后端真实模型返回下一步。
-            </p>
+            <h2>{t('onboarding.startTitle')}</h2>
+            <p>{t('onboarding.startBody')}</p>
             <div className="try-chip">
               {materialIcon('chat')}
-              试试：今天我们先推进什么？
+              {t('onboarding.tryChip')}
             </div>
           </div>
         )}
@@ -5773,14 +5764,14 @@ function OnboardingModal({
           </div>
           <span />
           <button className="skip-button" type="button" onClick={onFinish}>
-            跳过
+            {t('onboarding.skip')}
           </button>
           <button
             className="button primary"
             type="button"
             onClick={step >= 2 ? onFinish : onNext}
           >
-            {step >= 2 ? '开始使用' : '下一步'}
+            {step >= 2 ? t('onboarding.getStarted') : t('onboarding.next')}
           </button>
         </footer>
       </section>
