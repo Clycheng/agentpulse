@@ -121,7 +121,59 @@ def create_workspace_for_user(
         sender_id=secretary_id,
         content="欢迎老板。我是小秘。你可以直接把想法丢给我，我会帮你拆任务、建议招募谁、或者拉群推进。",
     )
+    _bootstrap_secretary_capabilities(conn, secretary_id, workspace_id)
     return get_workspace_by_id(conn, workspace_id)
+
+
+# Default capabilities every new secretary gets — deliberately restricted to
+# risk_gate='auto' entries with zero required_credentials (see
+# capability_catalog.CATALOG). provision() is all-or-nothing: a single
+# credential-missing capability blocks the whole spec at
+# 'blocked_on_credentials' with no real Hermes profile at all (see ADR 0008 /
+# supply.provision docstring), so anything needing a token the owner hasn't
+# configured would leave the secretary worse off than having no spec at all.
+SECRETARY_DEFAULT_CAPABILITIES = [
+    "write_code",
+    "run_tests",
+    "task_delegation",
+    "content_writing",
+    "data_analysis",
+]
+
+
+def _bootstrap_secretary_capabilities(
+    conn: Database, secretary_id: str, workspace_id: str
+) -> None:
+    """Give the default secretary a real, ready Hermes profile on day one.
+
+    Only runs when Hermes provisioning is actually configured
+    (settings.hermes_provisioning) — otherwise every dev/test environment
+    (which never sets that flag; see services/api/.env's own warning about
+    pytest silently spawning real `hermes profile create` calls) would get a
+    RecordOnlyProvisioner-fabricated 'ready' spec + fake hermes_profile,
+    which would then wrongly route every secretary chat in the test suite
+    through HermesBackend against a profile that was never really created.
+    Imports are local to avoid a circular import
+    (orchestration.supply imports app.services.workspace itself).
+    """
+    from app.core.config import settings
+
+    if not settings.hermes_provisioning:
+        return
+    from app.orchestration.supply import ProvisioningError, create_agent_spec, provision
+
+    try:
+        create_agent_spec(
+            conn,
+            agent_id=secretary_id,
+            workspace_id=workspace_id,
+            role_name="老板秘书",
+            source_request="系统默认配置：秘书上岗即具备基础助理能力",
+            capability_keys=SECRETARY_DEFAULT_CAPABILITIES,
+        )
+        provision(conn, secretary_id)
+    except ProvisioningError:
+        pass  # non-fatal — secretary still usable via the DeepSeek fallback
 
 
 def create_agent(

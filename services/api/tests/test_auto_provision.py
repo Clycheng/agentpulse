@@ -95,6 +95,84 @@ def test_default_provisioner_is_record_only_when_flag_off(monkeypatch):
     assert isinstance(build_provisioner_from_settings(), RecordOnlyProvisioner)
 
 
+# --------------------------------------------------- secretary bootstrap default
+
+
+def test_secretary_gets_default_capabilities_when_provisioning_enabled(tmp_path, monkeypatch):
+    from app.core.database import connect, init_db
+    from app.services.workspace import (
+        SECRETARY_DEFAULT_CAPABILITIES,
+        create_workspace_for_user,
+        new_id,
+        now_iso,
+    )
+
+    monkeypatch.setattr(
+        settings, "database_url", f"sqlite:///{tmp_path / 'secretary_on.sqlite3'}"
+    )
+    monkeypatch.setattr(settings, "hermes_provisioning", True)
+    init_db()
+    conn = connect()
+    user_id = new_id("user")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, "boss3@ex.com", "x", "老板", now_iso()),
+    )
+    ws = create_workspace_for_user(conn, user_id, "公司3")
+    conn.commit()
+
+    secretary = conn.execute(
+        "SELECT id FROM agents WHERE workspace_id = ? AND name = '小秘'", (ws["id"],)
+    ).fetchone()
+    spec = conn.execute(
+        "SELECT status, hermes_profile FROM agent_specs WHERE agent_id = ?",
+        (secretary["id"],),
+    ).fetchone()
+    assert spec is not None
+    assert spec["status"] == "ready" and spec["hermes_profile"]
+
+    caps = {
+        row["capability_key"]
+        for row in conn.execute(
+            "SELECT capability_key FROM agent_capabilities WHERE agent_id = ? AND status = 'enabled'",
+            (secretary["id"],),
+        ).fetchall()
+    }
+    assert caps == set(SECRETARY_DEFAULT_CAPABILITIES)
+
+
+def test_secretary_has_no_spec_when_provisioning_disabled(tmp_path, monkeypatch):
+    """Default (no Hermes configured): the secretary stays exactly as before —
+    no spec row at all — so the whole test suite's DeepSeek-fallback
+    assumptions for the bootstrap secretary aren't disturbed."""
+    from app.core.database import connect, init_db
+    from app.services.workspace import create_workspace_for_user, new_id, now_iso
+
+    monkeypatch.setattr(
+        settings, "database_url", f"sqlite:///{tmp_path / 'secretary_off.sqlite3'}"
+    )
+    monkeypatch.setattr(settings, "hermes_provisioning", False)
+    init_db()
+    conn = connect()
+    user_id = new_id("user")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, "boss4@ex.com", "x", "老板", now_iso()),
+    )
+    ws = create_workspace_for_user(conn, user_id, "公司4")
+    conn.commit()
+
+    secretary = conn.execute(
+        "SELECT id FROM agents WHERE workspace_id = ? AND name = '小秘'", (ws["id"],)
+    ).fetchone()
+    spec = conn.execute(
+        "SELECT id FROM agent_specs WHERE agent_id = ?", (secretary["id"],)
+    ).fetchone()
+    assert spec is None
+
+
 _E2E = os.environ.get("HERMES_E2E") == "1" and shutil.which("hermes") is not None
 
 
