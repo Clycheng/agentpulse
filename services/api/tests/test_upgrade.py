@@ -99,15 +99,55 @@ def test_upgrade_unknown_key_raises(tmp_path, monkeypatch):
         )
 
 
-def test_upgrade_no_profile_raises(tmp_path, monkeypatch):
-    conn, ws_id, agent_id = _setup(tmp_path, monkeypatch)
-    conn.execute("UPDATE agent_specs SET hermes_profile = '' WHERE agent_id = ?", (agent_id,))
+def test_upgrade_bootstraps_profile_for_agent_with_no_spec(tmp_path, monkeypatch):
+    """An employee with no agent_specs row at all — the default bootstrap
+    secretary every workspace starts with, or anyone hired without going
+    through the capability-drafting form — used to be permanently refused a
+    capability grant ("no provisioned Hermes profile"). Granting one now
+    bootstraps a real spec + profile from scratch instead of refusing."""
+    monkeypatch.setattr(
+        settings, "database_url", f"sqlite:///{tmp_path / 'upgrade_bootstrap.sqlite3'}"
+    )
+    init_db()
+    conn = connect()
+    user_id = new_id("user")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, "boss2@ex.com", "x", "老板", now_iso()),
+    )
+    ws = create_workspace_for_user(conn, user_id, "公司2")
+    dept = conn.execute(
+        "SELECT id FROM departments WHERE workspace_id = ? LIMIT 1", (ws["id"],)
+    ).fetchone()["id"]
+    # No agent_specs row at all — mirrors the default bootstrap secretary.
+    agent_id = create_agent(
+        conn, workspace_id=ws["id"], department_id=dept, name="小秘", role="老板秘书",
+        description="", prompt="", skills=[], mcps=[],
+    )
     conn.commit()
-    with pytest.raises(UpgradeError):
-        execute_upgrade(
-            conn, approval=_approval(ws_id, agent_id),
-            approved_capability_key="write_code", provisioner=RecordOnlyProvisioner(),
-        )
+
+    result = execute_upgrade(
+        conn, approval=_approval(ws["id"], agent_id),
+        approved_capability_key="write_code", provisioner=RecordOnlyProvisioner(),
+    )
+    assert result["status"] == "enabled"
+    assert result["profile"]  # a real profile name was generated
+
+    spec = conn.execute(
+        "SELECT hermes_profile, status FROM agent_specs WHERE agent_id = ?", (agent_id,)
+    ).fetchone()
+    assert spec is not None and spec["status"] == "ready" and spec["hermes_profile"]
+
+    # Idempotent: granting again doesn't create a second spec/profile row.
+    execute_upgrade(
+        conn, approval=_approval(ws["id"], agent_id),
+        approved_capability_key="run_tests", provisioner=RecordOnlyProvisioner(),
+    )
+    spec_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM agent_specs WHERE agent_id = ?", (agent_id,)
+    ).fetchone()["c"]
+    assert spec_count == 1
 
 
 def test_upgrade_idempotent_upsert(tmp_path, monkeypatch):

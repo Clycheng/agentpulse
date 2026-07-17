@@ -224,7 +224,7 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
         return LlmChatResponse(
             reply="先做三件事：确认目标、拆任务、安排负责人。",
             provider="deepseek",
-            model="deepseek-v4-flash",
+            model=settings.deepseek_model,
             usage={"total_tokens": 88},
         )
 
