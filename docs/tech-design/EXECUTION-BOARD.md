@@ -11,9 +11,10 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | **审批门后续分片**（[ADR 0008](../decisions/0008-human-in-the-loop-approval-model.md) 剩余） | 技术危险动作真门**已完成并真机验证**(分片1-3,见下方已完成)。剩:④挂起超时 vs Hermes 60s fail-closed 对齐 ⑤业务受控工具门(发布/花钱/对外发送,独立 TD) ⑥删 clarification/capability 的 agent 触发伪装(求援走普通对话、能力升级改老板发起) | **agentpulse** | ⚪ |
-| 2 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
-| 3 | TD-09-T3 剩余(渠道出站回复 + 微信/widget 适配器) | 渠道入站已通，出站未接 | 否（微信/widget 需真账号） | ⚪ |
+| 1 | **审批门分片④⑥**（[ADR 0008](../decisions/0008-human-in-the-loop-approval-model.md)） | ④挂起超时 vs Hermes 60s fail-closed 对齐（实测 ACP 路径超时硬编码 60s、`approvals.timeout` 配置对该路径无效，改为我们侧 `approval_bridge` 用 50s 内部超时抢先收敛）+ ⑥删 clarification/capability 的 agent 触发伪装（SOUL 不再指示调用不存在的 `clarify` 工具；新增老板发起的"+ 授予能力"真路径：`GET /api/capabilities` + `POST /agents/{id}/capabilities`） | **agentpulse** | 🔵 进行中（2026-07-16，本会话，代码+单测完成，真机实测中） |
+| 2 | **TD-10：业务受控工具门设计**（ADR 0008 §6，原分片⑤） | 从分片④⑥中拆出独立立项——本质是全新的、员工侧自研 MCP 工具拦截层（拦截发布/花钱/对外发送类动作 + 风险分类策略层），工作量与④⑥不同量级，需要先写 TD-10 设计文档（拦截架构、风险判定策略、与现有审批 UI/多选项的对接方式）再实现 | **agentpulse** | ⚪ |
+| 3 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
+| 4 | TD-09-T3 剩余(渠道出站回复 + 微信/widget 适配器) | 渠道入站已通，出站未接 | 否（微信/widget 需真账号） | ⚪ |
 
 ## 有依赖，等前置完成后做
 

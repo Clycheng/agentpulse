@@ -1,10 +1,17 @@
 """Tests for HermesBackend (TD-03-T2, ACP transport per ADR 0007).
 
-The e2e test drives real Hermes over ACP and calls DeepSeek, so it is SKIPPED by
-default. To run it you need Hermes installed, the `agentpulse` profile
+The e2e tests drive real Hermes over ACP and call DeepSeek, so they are SKIPPED
+by default. To run them you need Hermes installed, the `agentpulse` profile
 provisioned with a DeepSeek key, and an agentpulse-anchored shell (ADR 0005):
 
     HERMES_E2E=1 pytest tests/test_hermes_backend.py
+
+`test_run_expires_pending_approval_instead_of_hanging` additionally needs the
+`agentpulse` profile's `approvals.mode` set to `manual` (real employee profiles
+get this from `LocalHermesProvisioner.configure`, but a hand-provisioned e2e
+test profile won't have it unless set explicitly):
+
+    hermes -p agentpulse config set approvals.mode manual
 
 The always-on tests cover the ADR 0005 safety invariants without touching Hermes.
 """
@@ -13,6 +20,7 @@ import asyncio
 import os
 import shutil
 import tempfile
+import time
 
 import pytest
 
@@ -83,3 +91,41 @@ def test_run_reaches_final_with_message():
         if e.type == "message"
     )
     assert "OK" in text
+
+
+@requires_hermes
+def test_run_expires_pending_approval_instead_of_hanging():
+    """ADR 0008 item 4, against real Hermes: an unanswered request_permission
+    resolves via our own bounded wait (approval_bridge.await_decision), not by
+    hanging forever or racing Hermes's own hardcoded 60s ACP fail-close. Uses a
+    short 5s timeout (rather than the production ~50s default) so the test
+    stays fast while still exercising the real ACP round trip."""
+    from app.runtime.approval_bridge import await_decision
+
+    work = tempfile.mkdtemp(prefix="ap-hermes-timeout-")
+    be = HermesBackend()
+    ctx = RunContext(
+        run_id="run_e2e_timeout",
+        prompt=(
+            "Run the shell command `mkdir -p scratch && rm -rf scratch` in "
+            "your working directory."
+        ),
+        workdir=work,
+        profile="agentpulse",
+        timeout=120,
+    )
+
+    async def resolver(info: dict) -> str:
+        # Nobody ever answers — this exercises the real timeout path.
+        return await await_decision(info["approval_id"], timeout=5)
+
+    async def collect() -> list[AgentEvent]:
+        return [ev async for ev in be.run(ctx, permission_resolver=resolver)]
+
+    started = time.monotonic()
+    events = asyncio.run(collect())
+    elapsed = time.monotonic() - started
+    types = [e.type for e in events]
+    assert "approval_required" in types
+    assert "final" in types
+    assert elapsed < 30, f"run did not resolve promptly after expiry: {elapsed}s"

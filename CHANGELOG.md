@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 2026-07-16（审批门分片④⑥补齐 + 真机全链路验证 + 截图拍摄清单）
+
+- **fix(runtime)**: 补齐 ADR 0008 分片④——挂起超时对齐 Hermes ACP 的 fail-close。实测确认 `acp_adapter/permissions.py::make_approval_callback` 硬编码 60s 超时、且从不读 `approvals.timeout` 配置（该 key 只喂 CLI 交互式审批路径），所以没有去写这个死配置，而是给 `approval_bridge.await_decision` 加 `asyncio.wait_for`（新配置 `settings.approval_bridge_timeout_seconds`，默认 50s，明显小于 Hermes 的 60s 以确保我们先收敛），超时返回 `"expired"` 哨兵值并把对应 `approvals` 行标记 `status='expired'`（不再永远卡在 `pending`）。`/resolve`、`/answer` 端点对已过期的审批返回明确的"已超时自动拒绝"提示。
+- **fix(orchestration)**: 补齐分片⑥——去掉 clarification/capability_upgrade 的 agent 自触发伪装。SOUL.md 不再指示员工调用 ACP 会话里根本不存在的 `clarify` 工具，改为"直接在对话里正常提问"；`runner.py` 里对应的建审批分支保留但标注为兼容历史行/未来⑤。新增**老板发起**的能力授予真路径：`GET /api/capabilities`（目录）+ `POST /api/agents/{id}/capabilities`（直接调 `execute_upgrade`，不经过挂起审批）+ 员工详情页"+ 授予能力"选择器；顺手插入 `capability_upgrade` 类型的已批准审批行供审计追溯。
+- **docs**: 更新 [ADR 0008](docs/decisions/0008-human-in-the-loop-approval-model.md)（勾掉分片5/7，分片6拆成独立 TD-10）、[EXECUTION-BOARD.md](docs/tech-design/EXECUTION-BOARD.md)、`AGENTS.md` §4（更正"审批门未强制"的旧结论——路由 bug 已在 `27e34bf` 修好）。
+- **fix(chore)**: `app/core/logging.py` 之前只存在于主仓库的未提交工作区（`git status` 显示 `??`），从未真正进过任何 commit——导致任何全新 clone/worktree 在 `app.main` 都会 `ModuleNotFoundError`。补提交这个文件。
+- **test**: 新增审批超时的常开单测（`test_run_expires_and_marks_approval_row`）+ 真机 HERMES_E2E 测试（`test_run_expires_pending_approval_instead_of_hanging`，需要 `agentpulse` profile 提前 `config set approvals.mode manual`）；新增老板发起能力授予的 HTTP 层测试。全套 269 passed / 8 skipped / 1 xpassed（1 个无关的既有失败：`test_login_secretary_chat_persists_deepseek_metadata` 断言的 mock 模型名与 `settings.deepseek_model` 默认值不一致，与本次改动无关）。
+- **真机全链路验证**（复制主仓库真实 `.env`，`AGENTPULSE_HERMES_PROVISIONING=true` 起 dev server，走真实浏览器）：招了一个真 Hermes profile 员工「阿工」，DM 它执行 `rm -rf`——审批卡真实弹出（允许一次/永远允许/拒绝三选项）；一次手动批准（真删除+员工确认消息）、一次故意晾着直到 50s 自动过期（`approvals.status='expired'`，run 正常 `completed`，员工自己汇报"第二步被系统拦截"）；用新的"+ 授予能力"按钮给阿工授予 `run_tests`，真实写入 profile + `agent_capabilities`。过程中意外发现小秘（老板秘书）在真群聊里自主判断团队缺人、自己招了 4 个新员工（产品经理/市场/设计/运营）拉进群——Agent Action Bridge 的真实自主协作能力超出预期。
+- **发现（未修，已登记）**：① Talent Market 的"Hire"官方模板招聘流程从不创建 `agent_specs`/走供给，只有"Create employee"自定义招聘（带 `role_spec`）才会真的拿到 Hermes profile——意味着从人才市场招的员工永远走临时 DeepSeek 兜底，成长轨迹/真执行都摸不到。② 本地 `services/api/.env` 若含真实 DeepSeek key，裸跑 `pytest`（不加 `HERMES_E2E`）会让 3 个原本 mock 掉的测试改走真实网络，把 8 秒的测试跑成 22 分钟且引入新的假失败——和已知的 Hermes-provisioning-泄漏问题同源但是另一个坑，值得给 `.env`加一条类似的警告注释。
+- **docs**: 新增 [docs/SCREENSHOT-CHECKLIST.md](docs/SCREENSHOT-CHECKLIST.md)——README 双语截图拍摄清单（10 个场景 × 中英文，基于本次会话已经拍好的真实丰富状态：8 员工/真群聊/真审批卡）。AI 助手没有能把 Browser 截图存成文件的工具，本轮改为交付清单，图片由人工拍摄后按清单文件名接上 README。
+
 ### 2026-07-15（新 logo：Checkpoint 标记，全项目/官网统一替换）
 - **feat(brand)**: 设计并落地新 logo——「Checkpoint」：几何化字母 A，横杠切成一个卡口 + 一个常亮检查点，呼应产品"每个高风险动作都要过老板这道闸"的核心承诺；同时仍可读作字母 A（AgentPulse），能和文字标一起用。手绘矢量 SVG（无图像生成模型可用，矢量本就是 logo 该有的交付形态），在 16px favicon 尺寸下实测依然清晰。
   - `apps/site/favicon.svg`：换成新标（深底 + teal 渐变 A + 卡口 + 检查点）。

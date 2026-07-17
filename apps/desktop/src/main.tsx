@@ -4507,6 +4507,13 @@ function AgentDetail({
   >(null);
   const [reflecting, setReflecting] = useState(false);
   const [reflectMsg, setReflectMsg] = useState('');
+  const [catalog, setCatalog] = useState<
+    { key: string; description: string }[] | null
+  >(null);
+  const [showGrantPicker, setShowGrantPicker] = useState(false);
+  const [grantKey, setGrantKey] = useState('');
+  const [granting, setGranting] = useState(false);
+  const [grantMsg, setGrantMsg] = useState('');
 
   const loadGrowth = () => {
     apiRequest<{ skills: { name: string; content: string }[] }>(
@@ -4548,6 +4555,43 @@ function AgentDetail({
       setReflecting(false);
     }
   };
+
+  const openGrantPicker = () => {
+    setGrantMsg('');
+    setShowGrantPicker(true);
+    if (!catalog) {
+      apiRequest<{ key: string; description: string }[]>('/capabilities', { token })
+        .then(setCatalog)
+        .catch(() => setCatalog([]));
+    }
+  };
+
+  const grantCapability = async () => {
+    if (!grantKey) return;
+    setGranting(true);
+    setGrantMsg('');
+    try {
+      await apiRequest(`/agents/${agent.id}/capabilities`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ capability_key: grantKey }),
+      });
+      setGrantMsg(t('agentDetail.grantCapabilitySuccess'));
+      setShowGrantPicker(false);
+      setGrantKey('');
+      loadGrowth();
+    } catch (err) {
+      setGrantMsg(
+        err instanceof Error ? err.message : t('agentDetail.grantCapabilityFailed'),
+      );
+    } finally {
+      setGranting(false);
+    }
+  };
+
+  const grantableCapabilities = (catalog ?? []).filter(
+    (entry) => !(caps ?? []).some((cap) => cap.capability_key === entry.key),
+  );
 
   const skillTitle = (content: string, fallback: string) => {
     const first = content.split('\n').find((l) => l.trim());
@@ -4630,7 +4674,60 @@ function AgentDetail({
             </div>
             {reflectMsg && <p className="growth-msg">{reflectMsg}</p>}
 
-            <h4 className="growth-sub">{t('agentDetail.capabilitiesGained')}</h4>
+            <div className="growth-head">
+              <h4 className="growth-sub">{t('agentDetail.capabilitiesGained')}</h4>
+              <button
+                type="button"
+                className="button small"
+                onClick={openGrantPicker}
+              >
+                {t('agentDetail.grantCapability')}
+              </button>
+            </div>
+            {grantMsg && <p className="growth-msg">{grantMsg}</p>}
+            {showGrantPicker && (
+              <div className="grant-capability-picker">
+                {catalog === null ? null : grantableCapabilities.length === 0 ? (
+                  <EmptyState>{t('agentDetail.grantCapabilityNoneLeft')}</EmptyState>
+                ) : (
+                  <>
+                    <label>
+                      {t('agentDetail.grantCapabilityPick')}
+                      <select
+                        value={grantKey}
+                        onChange={(e) => setGrantKey(e.target.value)}
+                      >
+                        <option value="" disabled>
+                          —
+                        </option>
+                        {grantableCapabilities.map((entry) => (
+                          <option key={entry.key} value={entry.key}>
+                            {entry.key} — {entry.description}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="drawer-actions">
+                      <button
+                        type="button"
+                        className="button primary small"
+                        disabled={!grantKey || granting}
+                        onClick={grantCapability}
+                      >
+                        {t('agentDetail.grantCapabilityConfirm')}
+                      </button>
+                      <button
+                        type="button"
+                        className="button small"
+                        onClick={() => setShowGrantPicker(false)}
+                      >
+                        {t('agentDetail.grantCapabilityCancel')}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             {caps && caps.length === 0 && (
               <EmptyState>{t('agentDetail.noCapabilities')}</EmptyState>
             )}

@@ -253,7 +253,14 @@ const translations = {
     "capEnabled": "已启用",
     "capCredentialMissing": "待补凭证",
     "capPending": "待生效",
-    "capDisabled": "已停用"
+    "capDisabled": "已停用",
+    "grantCapability": "+ 授予能力",
+    "grantCapabilityPick": "选择要授予的能力",
+    "grantCapabilityConfirm": "授予",
+    "grantCapabilityCancel": "取消",
+    "grantCapabilitySuccess": "已授予能力",
+    "grantCapabilityFailed": "授予失败",
+    "grantCapabilityNoneLeft": "该员工已拥有目录里的全部能力"
   },
   "taskDetail": {
     "aria": "任务详情",

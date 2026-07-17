@@ -32,6 +32,17 @@ class Settings(BaseSettings):
     hermes_bin: str = "hermes"
     # When true, provisioning drives the real `hermes` CLI (creates profiles).
     hermes_provisioning: bool = False
+    # ADR 0008 item 4: how long our own approval_bridge waits for the owner
+    # before auto-denying a suspended run. MUST stay comfortably under 60 —
+    # Hermes's ACP adapter hardcodes a 60s fail-closed timeout for
+    # request_permission (acp_adapter/permissions.py::make_approval_callback,
+    # called with no `timeout=` override at acp_adapter/server.py:1421) and
+    # does NOT read the `approvals.timeout` config key on that path (only the
+    # CLI-interactive prompt_dangerous_approval() does). If our timeout ever
+    # creeps above ~55s, Hermes's own timeout can fire first, racing our
+    # bridge Future's cancellation against a late owner click. Re-verify this
+    # constant against the installed Hermes version after any `hermes update`.
+    approval_bridge_timeout_seconds: int = 50
     # TD-08-T2: idle-reflection cron.
     idle_thinking_cron: bool = False
     idle_cron_interval_seconds: int = 3600

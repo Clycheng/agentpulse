@@ -253,7 +253,14 @@ const translations = {
     "capEnabled": "Enabled",
     "capCredentialMissing": "Needs credentials",
     "capPending": "Pending",
-    "capDisabled": "Disabled"
+    "capDisabled": "Disabled",
+    "grantCapability": "+ Grant capability",
+    "grantCapabilityPick": "Pick a capability to grant",
+    "grantCapabilityConfirm": "Grant",
+    "grantCapabilityCancel": "Cancel",
+    "grantCapabilitySuccess": "Capability granted",
+    "grantCapabilityFailed": "Grant failed",
+    "grantCapabilityNoneLeft": "This employee already has every catalog capability"
   },
   "taskDetail": {
     "aria": "Task details",

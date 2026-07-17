@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 
+from app.core.config import settings
+
 _pending: dict[str, asyncio.Future] = {}
 
 
@@ -25,15 +27,27 @@ def register_pending(approval_id: str) -> asyncio.Future:
     return fut
 
 
-async def await_decision(approval_id: str) -> str:
+async def await_decision(approval_id: str, *, timeout: float | None = None) -> str:
     """Suspend until the owner resolves ``approval_id``; return the decision string.
 
     Used by the permission resolver inside HermesBackend: registering here and
     awaiting keeps the ACP session (and thus the run) paused in place.
+
+    ADR 0008 item 4: bounded by ``timeout`` (default
+    ``settings.approval_bridge_timeout_seconds``) so we resolve to the sentinel
+    ``"expired"`` *before* Hermes's own hardcoded 60s ACP fail-close would fire
+    — see the constant's docstring in ``app.core.config``. Without this, a
+    silent owner would leave the run suspended until Hermes's side times out
+    on its own, at which point this Future gets cancelled out from under us
+    (unnoticed) instead of us controlling the outcome.
     """
     fut = register_pending(approval_id)
+    if timeout is None:
+        timeout = settings.approval_bridge_timeout_seconds
     try:
-        return await fut
+        return await asyncio.wait_for(fut, timeout=timeout)
+    except TimeoutError:
+        return "expired"
     finally:
         discard_pending(approval_id)
 

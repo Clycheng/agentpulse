@@ -3466,6 +3466,37 @@ textarea::placeholder {
   background: var(--subtle);
 }
 
+.grant-capability-picker {
+  margin: 4px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface-muted);
+}
+
+.grant-capability-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.grant-capability-picker select {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.grant-capability-picker .drawer-actions {
+  margin-top: 10px;
+}
+
 .skill-card {
   margin-bottom: 8px;
   padding: 11px 13px;

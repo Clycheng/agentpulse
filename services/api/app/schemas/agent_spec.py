@@ -75,6 +75,23 @@ class AgentSpecOut(BaseModel):
     updated_at: str
 
 
+class CapabilityCatalogEntryOut(BaseModel):
+    """One entry from the full capability catalog (for the owner-initiated
+    '+ grant capability' picker — ADR 0008 §5)."""
+
+    key: str
+    description: str
+    risk_gate: str
+    required_credentials: list[str] = Field(default_factory=list)
+
+
+class GrantCapabilityRequest(BaseModel):
+    """Owner-initiated capability grant (ADR 0008 §5) — no pending approval
+    needed, the owner is directly deciding, not approving a suspended run."""
+
+    capability_key: str = Field(..., min_length=1, max_length=80)
+
+
 class CredentialRequest(BaseModel):
     """Input for providing a credential value."""
 

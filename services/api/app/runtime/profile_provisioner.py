@@ -358,6 +358,17 @@ class LocalHermesProvisioner:
             ["config", "set", "approvals.mode", "manual"],
             profile=profile_name,
         )
+        # Deliberately NOT writing `approvals.timeout` here (item 4 of ADR
+        # 0008's "待实现" list once suggested it). Verified against the
+        # installed Hermes source: the ACP adapter's approval callback
+        # (acp_adapter/permissions.py::make_approval_callback, invoked from
+        # acp_adapter/server.py:1421) hardcodes a 60s fail-close and never
+        # reads `approvals.timeout` — that config key only feeds the
+        # CLI-interactive prompt (tools/approval.py::prompt_dangerous_approval).
+        # Writing it here would be a dead config write. The real fix lives on
+        # our side: `settings.approval_bridge_timeout_seconds` in
+        # `approval_bridge.await_decision`, kept comfortably under 60s so we
+        # always resolve before Hermes's hardcoded timeout would.
         if toolsets:
             self._run(["tools", "enable", *toolsets], profile=profile_name)
         # Deny-by-default: disable every gated toolset this agent's granted
