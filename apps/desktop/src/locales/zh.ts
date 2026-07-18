@@ -12,7 +12,8 @@ const translations = {
     "dark": "深色",
     "system": "跟随系统",
     "logout": "退出登录",
-    "language": "切换语言"
+    "language": "切换语言",
+    "anomalyTooltip": "过去 24 小时有 {{count}} 个异常（失败的执行 / 超时未处理的审批）"
   },
   "auth": {
     "heroTitle": "把一人公司，搭成一支 AI 团队。",

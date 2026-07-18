@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 import re
 from uuid import uuid4
@@ -1302,7 +1302,31 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "agent_experiences_by_agent": agent_experiences_by_agent,
         "agent_template_categories": list_talent_categories(conn),
         "agent_templates": list_agent_templates(conn),
+        "anomaly_count_24h": count_anomalies_24h(conn, workspace_id),
     }
+
+
+def count_anomalies_24h(conn: Database, workspace_id: str) -> int:
+    """Failed runs + expired (timed-out, unanswered) approvals in the last
+    24h — a boss-facing "did anything actually go wrong" signal.
+
+    Borrowed from service-claw-cloud's playbook_runs.anomaly_count_24h: our
+    equivalent of its `anomaly_fired` activity-log events. Deliberately
+    excludes rejected approvals — a rejection is the owner's own considered
+    call, not something that went wrong.
+    """
+    cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+    failed_runs = conn.execute(
+        "SELECT COUNT(*) AS c FROM runs "
+        "WHERE workspace_id = ? AND status = 'failed' AND completed_at >= ?",
+        (workspace_id, cutoff),
+    ).fetchone()["c"]
+    expired_approvals = conn.execute(
+        "SELECT COUNT(*) AS c FROM approvals "
+        "WHERE workspace_id = ? AND status = 'expired' AND resolved_at >= ?",
+        (workspace_id, cutoff),
+    ).fetchone()["c"]
+    return failed_runs + expired_approvals
 
 
 def recruit_from_template(

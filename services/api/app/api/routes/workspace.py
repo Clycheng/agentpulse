@@ -1055,6 +1055,32 @@ async def send_message_stream(
     )
 
 
+_WAITING_ON_LABELS = {
+    "high_risk": "等老板批准",
+    "business_tool": "等老板批准",
+    "capability_upgrade": "等老板批准能力升级",
+    "clarification": "等老板回答",
+}
+
+
+def _waiting_on_text(conn: Database, run_id: str, run_status: str) -> str | None:
+    """"当前这条 run 在等谁/等什么"的一句话——service-claw-cloud 的
+    playbook_matter_state.waiting_on 同款：把审批卡片里已经有的信息，
+    也放进 run 列表本身，不用点进去才知道卡在哪。"""
+    if run_status not in (RunStatus.WAITING_USER, RunStatus.WAITING_CLARIFY):
+        return None
+    approval = conn.execute(
+        "SELECT type, title, description FROM approvals "
+        "WHERE run_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+        (run_id,),
+    ).fetchone()
+    if approval is None:
+        return "等老板拍板"
+    label = _WAITING_ON_LABELS.get(approval["type"], "等老板拍板")
+    detail = approval["description"] or approval["title"]
+    return f"{label}：{detail}" if detail else label
+
+
 @router.get("/conversations/{conversation_id}/runs", response_model=list[RunOut])
 def list_conversation_runs(
     conversation_id: str,
@@ -1104,6 +1130,7 @@ def list_conversation_runs(
                 error=run["error"],
                 created_at=run["created_at"],
                 completed_at=run["completed_at"],
+                waiting_on=_waiting_on_text(conn, run["id"], run["status"]),
                 steps=[
                     RunStepOut(
                         id=step["id"],

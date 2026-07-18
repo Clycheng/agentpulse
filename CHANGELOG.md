@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 2026-07-19（service-claw-cloud 借鉴：启动冒烟检查 + waiting_on + 24h 异常聚合）
+
+- **docs**: 新增 [docs/research/service-claw-cloud.md](docs/research/service-claw-cloud.md)——只读调研 UnitPulse（零关联，未触碰其任何文件/进程）的 `service-claw-cloud`（物业播本调度器的云端镜像：本地 Mac 跑 Playwright + 登录态 Chrome，云端只管状态镜像/UI/命令队列）。核心借鉴：它今天就在过 AgentPulse 迟早要过的桥——国内平台没有官方发布 API，TD-10 的 `publish_social_content` 真落地也要靠登录态浏览器/`computer_use`，已写进 TD-10"未来扩展"；命令队列+轮询认领模式是 `approval_bridge`（现在是进程内 Future，docstring 自己写明单进程 only）未来跨进程/跨机器时的现成范本；心跳/机器注册表戳破了员工卡"在线待命"目前是写死字符串的事实。
+- **feat(api)**: 启动冒烟检查——`AGENTPULSE_HERMES_PROVISIONING=true` 但 `hermes` 二进制不在 PATH 上时，`app/main.py` 的 lifespan 直接拒绝启动并打印清楚的错误，而不是等第一次有人发消息触发供给才在运行时才发现（借鉴 service-claw-cloud 的 lifespan `SELECT count(*)` 冒烟测试）。
+- **feat(api)**: `RunOut.waiting_on`——run 处于 `waiting_user`/`waiting_clarify` 时，查同一 run 上 pending 的审批行，拼一句"等老板批准：{描述}"/"等老板回答：{描述}"，运行轨迹卡片直接显示（借鉴 `playbook_matter_state.waiting_on`）。桌面端 `RunTraceModal` 同步渲染。
+- **feat(api)**: `count_anomalies_24h` + `/me/bootstrap` 新增 `anomaly_count_24h`——过去 24 小时 `status='failed'` 的 run + `status='expired'` 的审批计数，刻意不算 `rejected`（老板自己的决定，不是异常）。借鉴 `playbook_runs.anomaly_count_24h` 的"封面页缓存汇总数字"模式。桌面端 logo 上一个红色小徽章 + hover 提示（中英文案都加了）。
+- **test**: 新增 `test_main_startup.py`(3 例：关闭/找到/找不到二进制)、`test_conversation_runs_endpoint_surfaces_waiting_on`、`test_bootstrap_anomaly_count_24h`(含"rejected 不计入"的显式断言)。全套 277 passed / 8 skipped / 1 xpassed；`tsc --noEmit` 无错。
+
 ### 2026-07-17（能力授予补一个 bootstrap 缺口 + 秘书默认能力 + TD-10 设计文档）
 
 - **fix(runtime)**: `execute_upgrade` 之前对**完全没有 `agent_specs` 行**的员工（默认秘书、以及当时 Talent Market 招募流程还没走供给的员工）一律拒绝——"+ 授予能力"按钮对这类员工形同虚设。现在会走跟"创建员工时勾能力芯片"完全一样的 `create_agent_spec`+`provision` 路径，从零 bootstrap 一个真 spec + 真 Hermes profile，再装上被授予的能力；已经是真 Hermes 员工的走原有快速路径不受影响。真机验证：给一个全新的、`hermes_profile=None` 的秘书授予 `write_code`，`hermes profile list` 里真的多出一条对应 profile。

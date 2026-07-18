@@ -28,6 +28,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     logger.info("server_starting", version=settings.app_version)
     init_db()
     logger.info("database_initialized", kind=database_kind_label())
+    _check_hermes_binary_if_provisioning_enabled()
 
     cron_task = None
     if settings.idle_thinking_cron:
@@ -76,6 +77,41 @@ def create_app() -> FastAPI:
 def database_kind_label() -> str:
     from app.core.database import safe_database_label
     return safe_database_label()
+
+
+def _check_hermes_binary_if_provisioning_enabled() -> None:
+    """Fail loud at startup, not at the first chat message.
+
+    Borrowed from service-claw-cloud's lifespan smoke test (SELECT count(*)
+    against its own tables so a broken DB connection fails at boot, not on
+    first request) — same idea applied to our own "is the thing we depend on
+    actually there" check. Without this, turning on
+    AGENTPULSE_HERMES_PROVISIONING with a missing/misconfigured `hermes`
+    binary silently degrades every employee to the DeepSeek fallback until
+    someone notices runs never reach `ready`.
+    """
+    if not settings.hermes_provisioning:
+        return
+    import shutil
+    import sys
+
+    if shutil.which(settings.hermes_bin) is None:
+        logger.error(
+            "hermes_binary_not_found",
+            hermes_bin=settings.hermes_bin,
+            hint="AGENTPULSE_HERMES_PROVISIONING=true but the `hermes` CLI "
+            "isn't on PATH — every employee will silently fall back to "
+            "DeepSeek instead of becoming real Hermes employees.",
+        )
+        print(
+            f"ERROR: AGENTPULSE_HERMES_PROVISIONING=true but "
+            f"`{settings.hermes_bin}` was not found on PATH.\n"
+            f"       Install Hermes, or set AGENTPULSE_HERMES_BIN to its "
+            f"path, or unset AGENTPULSE_HERMES_PROVISIONING for local dev "
+            f"without real Hermes.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 async def _idle_cron_loop() -> None:

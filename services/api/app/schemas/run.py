@@ -96,4 +96,12 @@ class RunOut(BaseModel):
     error: str
     created_at: str
     completed_at: str | None
+    waiting_on: str | None = Field(
+        default=None,
+        description="Human-readable 'what/who this run is currently blocked "
+        "on' (e.g. '等老板批准：发送邮件'), set only while status is "
+        "waiting_user/waiting_clarify. Borrowed from service-claw-cloud's "
+        "playbook_matter_state.waiting_on — surfaces the same signal the "
+        "run trace already carries without requiring a click-through.",
+    )
     steps: list[RunStepOut] = Field(default_factory=list)

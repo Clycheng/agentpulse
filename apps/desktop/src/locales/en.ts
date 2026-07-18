@@ -12,7 +12,8 @@ const translations = {
     "dark": "Dark",
     "system": "System",
     "logout": "Log out",
-    "language": "Switch language"
+    "language": "Switch language",
+    "anomalyTooltip": "{{count}} anomalies in the last 24h (failed runs / approvals that timed out unanswered)"
   },
   "auth": {
     "heroTitle": "Turn your one-person company into an AI team.",
