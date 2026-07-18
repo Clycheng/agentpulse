@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 2026-07-17（能力授予补一个 bootstrap 缺口 + 秘书默认能力 + TD-10 设计文档）
+
+- **fix(runtime)**: `execute_upgrade` 之前对**完全没有 `agent_specs` 行**的员工（默认秘书、以及当时 Talent Market 招募流程还没走供给的员工）一律拒绝——"+ 授予能力"按钮对这类员工形同虚设。现在会走跟"创建员工时勾能力芯片"完全一样的 `create_agent_spec`+`provision` 路径，从零 bootstrap 一个真 spec + 真 Hermes profile，再装上被授予的能力；已经是真 Hermes 员工的走原有快速路径不受影响。真机验证：给一个全新的、`hermes_profile=None` 的秘书授予 `write_code`，`hermes profile list` 里真的多出一条对应 profile。
+- **feat(services)**: `create_workspace_for_user` 现在会在 `settings.hermes_provisioning` 打开时，给每个新公司的默认秘书自动配好一套免凭证、`risk_gate=auto` 的默认能力（`write_code`/`run_tests`/`task_delegation`/`content_writing`/`data_analysis`），秘书上岗即是真 Hermes 员工，不用老板手动点"+授予能力"才能用。刻意只挂全部无需凭证的能力——`provision()` 是全有或全无的供给（一个能力缺凭证就整体卡在 `blocked_on_credentials`，见"阿测"这个真实反例），塞进任何需要凭证的能力都会让秘书比现在还糟。刻意用 `hermes_provisioning` 这个已有的 flag 做门控（而不是"是否走了 HTTP 注册路由"），因为整个测试套件从不设这个 flag，如果无条件生效会让几十个假设"秘书走 DeepSeek 兜底"的既有测试全部悄悄改变行为。
+- **docs**: 新增 [TD-10-business-tool-gate.md](docs/tech-design/TD-10-business-tool-gate.md)——ADR 0008 分片⑥（业务受控工具门）的设计文档：整体架构（自建 MCP 服务 + 复用现有 `approval_bridge`/`approvals` 表挂起机制，而不是等 Hermes 自己识别业务危险——它压根不认识"发布/花钱/对外发送"这类语义）、`capability_catalog.CapabilityDef` 新增 `business_tool` 字段、run_id 定位的已知技术限制、v1 范围（`send_email` 试点 + 明确排除动态风险分级）、两个 Tech-Task。更新 `EXECUTION-BOARD.md`（分片④⑤⑦+秘书默认能力移入已完成，TD-10 列为"设计已完成待实现"）。
+- **test**: 新增 `test_upgrade_bootstraps_profile_for_agent_with_no_spec`（含幂等性断言）+ `test_secretary_gets_default_capabilities_when_provisioning_enabled` / `test_secretary_has_no_spec_when_provisioning_disabled`。顺手修了一个预先就存在、与本次改动无关的失败（`git stash` 验证过）：`test_login_secretary_chat_persists_deepseek_metadata` 的 mock 返回硬编码了旧的 model 字符串，改成读 `settings.deepseek_model`。全套 272 passed / 8 skipped / 1 xpassed。
+
 ### 2026-07-16（审批门分片④⑥补齐 + 真机全链路验证 + 截图拍摄清单）
 
 - **fix(runtime)**: 补齐 ADR 0008 分片④——挂起超时对齐 Hermes ACP 的 fail-close。实测确认 `acp_adapter/permissions.py::make_approval_callback` 硬编码 60s 超时、且从不读 `approvals.timeout` 配置（该 key 只喂 CLI 交互式审批路径），所以没有去写这个死配置，而是给 `approval_bridge.await_decision` 加 `asyncio.wait_for`（新配置 `settings.approval_bridge_timeout_seconds`，默认 50s，明显小于 Hermes 的 60s 以确保我们先收敛），超时返回 `"expired"` 哨兵值并把对应 `approvals` 行标记 `status='expired'`（不再永远卡在 `pending`）。`/resolve`、`/answer` 端点对已过期的审批返回明确的"已超时自动拒绝"提示。

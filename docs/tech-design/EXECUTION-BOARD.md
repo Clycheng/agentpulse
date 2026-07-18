@@ -11,10 +11,9 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | **审批门分片④⑥**（[ADR 0008](../decisions/0008-human-in-the-loop-approval-model.md)） | ④挂起超时 vs Hermes 60s fail-closed 对齐（实测 ACP 路径超时硬编码 60s、`approvals.timeout` 配置对该路径无效，改为我们侧 `approval_bridge` 用 50s 内部超时抢先收敛）+ ⑥删 clarification/capability 的 agent 触发伪装（SOUL 不再指示调用不存在的 `clarify` 工具；新增老板发起的"+ 授予能力"真路径：`GET /api/capabilities` + `POST /agents/{id}/capabilities`） | **agentpulse** | 🔵 进行中（2026-07-16，本会话，代码+单测完成，真机实测中） |
-| 2 | **TD-10：业务受控工具门设计**（ADR 0008 §6，原分片⑤） | 从分片④⑥中拆出独立立项——本质是全新的、员工侧自研 MCP 工具拦截层（拦截发布/花钱/对外发送类动作 + 风险分类策略层），工作量与④⑥不同量级，需要先写 TD-10 设计文档（拦截架构、风险判定策略、与现有审批 UI/多选项的对接方式）再实现 | **agentpulse** | ⚪ |
-| 3 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
-| 4 | TD-09-T3 剩余(渠道出站回复 + 微信/widget 适配器) | 渠道入站已通，出站未接 | 否（微信/widget 需真账号） | ⚪ |
+| 1 | TD-10 **实现**（[TD-10-business-tool-gate.md](TD-10-business-tool-gate.md)，设计已完成） | T1：MCP 服务地基 + `send_email` 试点工具全链路真机跑通；T2：推广到其余业务能力 + 前端卡片渲染 | **agentpulse** | ⚪ 待领（设计文档已完成 2026-07-17，见 TD-10 全文，待实现） |
+| 2 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
+| 3 | TD-09-T3 剩余(渠道出站回复 + 微信/widget 适配器) | 渠道入站已通，出站未接 | 否（微信/widget 需真账号） | ⚪ |
 
 ## 有依赖，等前置完成后做
 
@@ -27,6 +26,7 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| **审批门分片④⑤⑦ + 秘书默认能力**（[ADR 0008](../decisions/0008-human-in-the-loop-approval-model.md)）：④挂起超时对齐——实测 Hermes ACP 路径的 60s 超时硬编码在 `acp_adapter/permissions.py`，`approvals.timeout` 配置对该路径无效，`approval_bridge.await_decision` 改用 `asyncio.wait_for`(50s，可配) 抢先收敛，超时标 `approvals.status='expired'`（不再永远 pending）；⑦删 clarification/capability 的 agent 自触发伪装，SOUL 不再指示调用不存在的 `clarify` 工具，新增老板发起的"+ 授予能力"真路径(`GET /api/capabilities` + `POST /agents/{id}/capabilities`)，且这条路径现在对**没有任何 profile 的员工**（默认秘书、Talent Market 招的员工）也能用——会从零 bootstrap 一个真 spec+profile，而不是要求员工已经是真 Hermes 员工。顺带：默认秘书在 `hermes_provisioning` 打开时现在直接带 5 个免凭证默认能力（write_code/run_tests/task_delegation/content_writing/data_analysis）上岗，不用老板手动补。**真机验证**：真 Hermes 员工 `rm -rf` 触发审批→批准/拒绝/超时三条路径都测过；`+授予能力`对全新 profile-less 员工真的建出了 profile（`hermes profile list` 可见）；全量单测 272 通过 | 2026-07-16/17(`123d8a2` `228ee2e` `8ca69f3` `a282843`) | 分片⑥（业务受控工具门）拆出独立 TD-10，设计文档已完成待实现 |
 | **审批门真强制 分片1-3（ADR 0008，技术危险动作）**：①provisioner 设 `approvals.mode: manual` ②`hermes_client` 修关键 bug——批准原返回 `SelectedPermissionOutcome` 被 Hermes 当 deny,改 `AllowedOutcome`/`DeniedOutcome` + 按 option_id 选 ③桥/端点/前端加 `scope` + 「允许一次/永远允许/拒绝」。**真机验证**(provisioner 供给+HermesBackend 执行,非 seed):真 agent `rm -rf` → 拒绝目录保留、批准目录真删,request_permission 各 1 次全 PASS。250 通过、tsc 无错 | 2026-07-14(见 CHANGELOG) | 修好 T4 根本缺口;北极星「老板拍板制」技术类**真强制**;剩业务工具门/超时对齐/求援伪装清理 |
 | ⚠️ **聊天内审批/求援/能力升级卡片**（代码真、**真运行时触发不了**，见 2026-07-14 审计）：SSE `approval` 事件（带 category+approval_id+tool_call）→ 前端插一条 `APPROVAL_CARD:` 系统消息；新增 `ApprovalCard` 组件按类型渲染——高风险(批准/驳回)、澄清(文本框+提交回复→`/answer`)、能力升级(可改能力 key+批准并升级→`/resolve` 带 approved_capability_key)；`resolveChatApproval`/`answerChatClarification` 经 App→ChatPanel→MessageItem 传入；点后卡片原地翻转「已批准/已回复」。styles.css 加 `.approval-card`/三类配色。**浏览器实测**：3 类卡片渲染正确、点「批准」→run 关联 /resolve 翻转、点「批准并升级」→execute_upgrade 真装 `web_scraping`→`agent_capabilities` 落 `enabled`、无 console 报错 | 2026-07-14(见 CHANGELOG) | 至此「讨论→拍板→执行→挂起→续跑」在 UI 上真正可操作可演示 |
 | **TD-06-T3 成长轨迹前端（员工档案）**：`AgentDetail` 抽屉新增「成长轨迹」区——已获得能力（拉 `GET /agents/{id}/spec` 的 capabilities，`已启用`/`待补凭证`/`已停用` 徽章配色）+ 已习得技能（拉 `GET /agents/{id}/skills`，卡片显示 SKILL.md 标题+摘要）+「触发反思」按钮（调 `POST /reflect`，内联状态/错误）。styles.css 加 `.growth-*`/`.cap-badge`/`.skill-card`（复用 teal token）。**浏览器实测**：起 API(8001)+renderer(5175，`.env.local` 指向)→登录→员工→阿伦→成长轨迹正确渲染（social_content 已启用 + email_sending 待补凭证 + 技能空状态），tsc 无错、无 console 报错、截图留证 | 2026-07-14(见 CHANGELOG) | 纯前端；让 TD-06-T1/T2 的自进化成果「可见」；聊天内审批/求援卡片另立一项 |
