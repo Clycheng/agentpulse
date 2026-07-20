@@ -97,3 +97,44 @@ class CredentialRequest(BaseModel):
 
     credential_name: str = Field(..., min_length=1, max_length=120)
     value: str = Field(..., min_length=1, max_length=10000)
+
+
+class DraftTeamRequest(BaseModel):
+    """A free-text org/team description to compile into role drafts."""
+
+    description: str = Field(..., min_length=1, max_length=6000)
+
+
+class TeamMemberDraft(BaseModel):
+    """One drafted (not yet created) team member — editable before
+    POST /agents/create-team actually provisions it."""
+
+    name: str = Field(..., min_length=1, max_length=24)
+    role: str = Field(..., min_length=1, max_length=24)
+    department: str = Field("", max_length=40)
+    description: str = Field("", max_length=400)
+    responsibilities: list[str] = Field(default_factory=list, max_length=12)
+    capability_keys: list[str] = Field(default_factory=list)
+
+
+class DraftTeamResponse(BaseModel):
+    members: list[TeamMemberDraft]
+
+
+class CreateTeamRequest(BaseModel):
+    """The (owner-reviewed, possibly edited) member list to actually create."""
+
+    members: list[TeamMemberDraft] = Field(..., min_length=1, max_length=20)
+    group_name: str | None = Field(default=None, max_length=80)
+
+
+class CreateTeamMemberOut(BaseModel):
+    id: str
+    name: str
+    role: str
+    department: str
+
+
+class CreateTeamResponse(BaseModel):
+    agents: list[CreateTeamMemberOut]
+    conversation_id: str | None = None

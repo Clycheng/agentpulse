@@ -160,6 +160,85 @@ def test_execute_create_employee():
     assert new_agent["role"] == "后端工程师"
 
 
+def test_execute_create_employee_with_capability_keys_provisions_for_real(
+    tmp_path, monkeypatch
+):
+    """create_employee with capability_keys set must go through the same
+    provision_new_agent() path as Talent Market/the team compiler — this is
+    the fix that lets 小秘 hire a *working* employee from a chat message
+    instead of a name-tag placeholder. Uses the real schema (init_db), not
+    the tool suite's hand-rolled minimal one, since agent_specs/
+    agent_capabilities don't exist there."""
+    from app.core.config import settings
+    from app.core.database import connect, init_db
+    from app.runtime.profile_provisioner import RecordOnlyProvisioner
+    from app.services.workspace import create_workspace_for_user, new_id, now_iso
+
+    monkeypatch.setattr(
+        settings, "database_url", f"sqlite:///{tmp_path / 'tool_provision.sqlite3'}"
+    )
+    monkeypatch.setattr(settings, "hermes_provisioning", True)
+    import app.orchestration.supply as supply_module
+
+    monkeypatch.setattr(
+        supply_module, "build_provisioner_from_settings", lambda: RecordOnlyProvisioner()
+    )
+    init_db()
+    conn = connect()
+    user_id = new_id("user")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, "boss7@ex.com", "x", "老板", now_iso()),
+    )
+    ws = create_workspace_for_user(conn, user_id, "公司7")
+    conn.commit()
+    secretary = conn.execute(
+        "SELECT * FROM agents WHERE workspace_id = ? AND name = '小秘'", (ws["id"],)
+    ).fetchone()
+
+    tc = ToolCall(
+        id="call_real",
+        name="create_employee",
+        arguments={
+            "name": "护理质检小李",
+            "role": "质检专员",
+            "description": "核查护理员打卡照片，出具整改清单",
+            "department": "质检部",
+            "responsibilities": ["逐一核查上门打卡照片，核查服务真实性"],
+            "capability_keys": ["data_analysis", "content_writing"],
+        },
+    )
+    result = asyncio.run(execute_tool(conn, ws["id"], dict(secretary), tc))
+    data = json.loads(result.content)
+    assert data["success"] is True
+
+    spec = conn.execute(
+        "SELECT status, hermes_profile FROM agent_specs WHERE agent_id = ?",
+        (data["agent"]["id"],),
+    ).fetchone()
+    assert spec is not None
+    assert spec["status"] == "ready" and spec["hermes_profile"]
+    caps = {
+        row["capability_key"]
+        for row in conn.execute(
+            "SELECT capability_key FROM agent_capabilities WHERE agent_id = ?",
+            (data["agent"]["id"],),
+        ).fetchall()
+    }
+    assert caps == {"data_analysis", "content_writing"}
+
+
+def test_execute_list_capabilities_returns_catalog():
+    db = _make_db()
+    agent = dict(db.execute("SELECT * FROM agents WHERE id = 'agent_1'").fetchone())
+    tc = ToolCall(id="call_cap", name="list_capabilities", arguments={})
+    result = asyncio.run(execute_tool(db, "ws_test", agent, tc))
+    data = json.loads(result.content)
+    keys = {c["key"] for c in data["capabilities"]}
+    assert "write_code" in keys and "data_analysis" in keys
+
+
 def test_execute_create_group():
     """Test that create_group creates a group conversation."""
     db = _make_db()

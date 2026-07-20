@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from app.core.database import Database, Row
+from app.orchestration.capability_catalog import CATALOG
 from app.services.workspace import (
     add_message,
     claim_task,
@@ -25,6 +26,7 @@ from app.services.workspace import (
     get_bootstrap,
     new_id,
     now_iso,
+    provision_new_agent,
     serialize_agent,
     serialize_task,
     update_task,
@@ -64,6 +66,10 @@ TOOLS: list[dict[str, Any]] = [
                 "创建一个新的AI员工。用自然语言描述你想要什么样的员工，"
                 "系统会分配角色和技能。你可以一次创建多个员工来组建团队。"
                 "创建后员工需要经过配置才能开始工作，但可以立即和ta聊天。"
+                "如果老板描述的职责涉及真实操作（读写文件、跑代码、查数据、"
+                "分析统计等），先调用 list_capabilities 看目录里有没有对应的"
+                "能力，把匹配的 key 填进 capability_keys——不填的话这个员工"
+                "只能聊天，干不了实际工作。"
             ),
             "parameters": {
                 "type": "object",
@@ -89,9 +95,42 @@ TOOLS: list[dict[str, Any]] = [
                         "items": {"type": "string"},
                         "description": "技能列表，例如：[\"公众号文案\", \"SEO优化\"]",
                     },
+                    "responsibilities": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "从老板的描述里拆出来的具体职责清单，每条一句话，"
+                            "例如：[\"逐一核查上门打卡照片，核查服务真实性\", "
+                            "\"制作项目台账、工程量统计表\"]。写不清楚就写老板"
+                            "原话里那一段，不要替他编造没提过的内容。"
+                        ),
+                    },
+                    "capability_keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "先调 list_capabilities 看目录，再从里面选这个员工"
+                            "真正需要的能力 key（比如 write_code、data_analysis、"
+                            "customer_service）。目录里找不到贴切的就先不填——"
+                            "不要瞎编一个不存在的 key。"
+                        ),
+                    },
                 },
                 "required": ["name", "role", "description"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_capabilities",
+            "description": (
+                "列出系统里所有可授予员工的能力目录（key、说明、是否需要"
+                "老板配凭证）。创建员工前想给她真实工作能力时，先调这个看"
+                "有哪些 key 可选，再把匹配的填进 create_employee 的"
+                "capability_keys。"
+            ),
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -329,12 +368,26 @@ async def _handle_create_employee(
     agent: Row,
     args: dict,
 ) -> str:
-    """Create one employee."""
+    """Create one employee — and, if capability_keys are given, a real one.
+
+    Without capability_keys this is unchanged from before: a name-tag
+    employee that only ever talks through the temporary DeepSeek fallback.
+    With them, it runs through the same provision_new_agent() every other
+    hiring path uses (Talent Market, the team compiler), so an employee the
+    boss describes to the secretary in chat can come out just as real as
+    one hand-configured through a form.
+    """
     name = str(args.get("name", "")).strip()
     role = str(args.get("role", "")).strip()
     description = str(args.get("description", "")).strip()
     department_name = str(args.get("department", "新员工部")).strip()
     skills: list[str] = args.get("skills") or []
+    responsibilities: list[str] = [
+        str(item) for item in (args.get("responsibilities") or [])
+    ]
+    capability_keys: list[str] = [
+        str(item) for item in (args.get("capability_keys") or [])
+    ]
 
     if not name or not role:
         return json.dumps({"error": "员工名字和岗位不能为空"})
@@ -358,6 +411,16 @@ async def _handle_create_employee(
         source="custom",
     )
     create_dm_conversation(conn, workspace_id, agent_id)
+    if capability_keys:
+        provision_new_agent(
+            conn,
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            role_name=role,
+            source_request=f"由 {agent['name']} 在对话中创建",
+            responsibilities=responsibilities,
+            capability_keys=capability_keys,
+        )
     new_agent = conn.execute(
         "SELECT * FROM agents WHERE id = ?", (agent_id,)
     ).fetchone()
@@ -371,6 +434,30 @@ async def _handle_create_employee(
                 "role": role,
                 "department": department_name,
             },
+        },
+        ensure_ascii=False,
+    )
+
+
+async def _handle_list_capabilities(
+    conn: Database,
+    workspace_id: str,
+    agent: Row,
+    args: dict,
+) -> str:
+    """List the capability catalog so the caller can pick real keys instead
+    of guessing — same source as GET /api/capabilities."""
+    return json.dumps(
+        {
+            "capabilities": [
+                {
+                    "key": key,
+                    "description": cap.description,
+                    "risk_gate": cap.risk_gate,
+                    "needs_credentials": bool(cap.required_credentials),
+                }
+                for key, cap in CATALOG.items()
+            ],
         },
         ensure_ascii=False,
     )
@@ -763,6 +850,7 @@ async def _handle_no_action(_conn, _ws, _agent, _args) -> str:
 
 HANDLER_MAP: dict[str, Callable] = {
     "create_employee": _handle_create_employee,
+    "list_capabilities": _handle_list_capabilities,
     "create_task": _handle_create_task,
     "create_group": _handle_create_group,
     "add_group_member": _handle_add_group_member,

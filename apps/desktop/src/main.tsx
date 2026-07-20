@@ -79,6 +79,15 @@ type Message = {
   model?: string;
 };
 
+type TeamMemberDraft = {
+  name: string;
+  role: string;
+  department: string;
+  description: string;
+  responsibilities: string[];
+  capability_keys: string[];
+};
+
 type Task = {
   id: string;
   title: string;
@@ -818,6 +827,12 @@ function App() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [hireOpen, setHireOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [teamCompilerOpen, setTeamCompilerOpen] = useState(false);
+  const [teamDescription, setTeamDescription] = useState('');
+  const [teamDrafts, setTeamDrafts] = useState<TeamMemberDraft[] | null>(null);
+  const [teamDraftLoading, setTeamDraftLoading] = useState(false);
+  const [teamDraftError, setTeamDraftError] = useState('');
+  const [teamCreating, setTeamCreating] = useState(false);
   const [groupOpen, setGroupOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
@@ -1425,6 +1440,73 @@ function App() {
     }
   };
 
+  const openTeamCompiler = () => {
+    setTeamDescription('');
+    setTeamDrafts(null);
+    setTeamDraftError('');
+    setTeamCompilerOpen(true);
+  };
+
+  const draftTeamFromDescription = async () => {
+    if (!token) return;
+    const description = teamDescription.trim();
+    if (!description) {
+      showToast('先描述一下你想要的团队');
+      return;
+    }
+    setTeamDraftLoading(true);
+    setTeamDraftError('');
+    try {
+      const result = await apiRequest<{ members: TeamMemberDraft[] }>(
+        '/agents/draft-team',
+        { method: 'POST', token, body: JSON.stringify({ description }) },
+      );
+      setTeamDrafts(result.members);
+    } catch (error) {
+      setTeamDraftError(error instanceof Error ? error.message : '生成失败');
+    } finally {
+      setTeamDraftLoading(false);
+    }
+  };
+
+  const updateTeamDraftMember = (index: number, patch: Partial<TeamMemberDraft>) => {
+    setTeamDrafts((prev) =>
+      prev ? prev.map((m, i) => (i === index ? { ...m, ...patch } : m)) : prev,
+    );
+  };
+
+  const removeTeamDraftMember = (index: number) => {
+    setTeamDrafts((prev) => (prev ? prev.filter((_, i) => i !== index) : prev));
+  };
+
+  const confirmCreateTeam = async () => {
+    if (!token || !teamDrafts || teamDrafts.length === 0) return;
+    setTeamCreating(true);
+    try {
+      const result = await apiRequest<{
+        agents: { id: string; name: string }[];
+        conversation_id: string | null;
+      }>('/agents/create-team', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ members: teamDrafts }),
+      });
+      await loadBootstrap(token);
+      setTeamCompilerOpen(false);
+      showToast(`已创建 ${result.agents.length} 位员工`);
+      if (result.conversation_id) {
+        setChatId(result.conversation_id);
+        setView('chat');
+      } else {
+        setView('staff');
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '创建团队失败');
+    } finally {
+      setTeamCreating(false);
+    }
+  };
+
   const createGroup = async () => {
     if (!token) return;
     if (!groupMembers.length) {
@@ -1851,6 +1933,7 @@ function App() {
             tasks={tasks}
             busyCount={busyCount}
             onOpenCreate={openCreateAgent}
+            onOpenTeamCompiler={openTeamCompiler}
             onOpenAgent={(id) => setDetailId(id)}
           />
         )}
@@ -1975,6 +2058,24 @@ function App() {
           onCapKeysChange={setCreateCapKeys}
           onClose={() => setCreateOpen(false)}
           onSubmit={submitCreateAgent}
+        />
+      )}
+
+      {teamCompilerOpen && (
+        <TeamCompilerModal
+          token={token ?? ''}
+          description={teamDescription}
+          onDescriptionChange={setTeamDescription}
+          drafts={teamDrafts}
+          loading={teamDraftLoading}
+          error={teamDraftError}
+          creating={teamCreating}
+          onDraft={draftTeamFromDescription}
+          onUpdateMember={updateTeamDraftMember}
+          onRemoveMember={removeTeamDraftMember}
+          onBack={() => setTeamDrafts(null)}
+          onConfirm={confirmCreateTeam}
+          onClose={() => setTeamCompilerOpen(false)}
         />
       )}
 
@@ -3707,6 +3808,7 @@ function StaffView({
   tasks,
   busyCount,
   onOpenCreate,
+  onOpenTeamCompiler,
   onOpenAgent,
 }: {
   companyName: string;
@@ -3715,6 +3817,7 @@ function StaffView({
   tasks: Task[];
   busyCount: number;
   onOpenCreate: () => void;
+  onOpenTeamCompiler: () => void;
   onOpenAgent: (id: string) => void;
 }) {
   const { t } = useTranslation();
@@ -3795,13 +3898,22 @@ function StaffView({
                 })}
               </p>
             </div>
-            <button
-              className="button secondary blue"
-              type="button"
-              onClick={onOpenCreate}
-            >
-              {materialIcon('add_circle')}{t('staff.createEmployee')}
-            </button>
+            <div className="org-header-actions">
+              <button
+                className="button secondary"
+                type="button"
+                onClick={onOpenTeamCompiler}
+              >
+                {materialIcon('auto_awesome')}{t('staff.compileTeam')}
+              </button>
+              <button
+                className="button secondary blue"
+                type="button"
+                onClick={onOpenCreate}
+              >
+                {materialIcon('add_circle')}{t('staff.createEmployee')}
+              </button>
+            </div>
           </header>
 
           <div className="org-body">
@@ -5218,6 +5330,266 @@ function CreateTaskModal({
           {materialIcon('add_task')}{t('tasks.create')}
         </button>
       </div>
+    </Modal>
+  );
+}
+
+function TeamCompilerModal({
+  token,
+  description,
+  onDescriptionChange,
+  drafts,
+  loading,
+  error,
+  creating,
+  onDraft,
+  onUpdateMember,
+  onRemoveMember,
+  onBack,
+  onConfirm,
+  onClose,
+}: {
+  token: string;
+  description: string;
+  onDescriptionChange: (value: string) => void;
+  drafts: TeamMemberDraft[] | null;
+  loading: boolean;
+  error: string;
+  creating: boolean;
+  onDraft: () => void;
+  onUpdateMember: (index: number, patch: Partial<TeamMemberDraft>) => void;
+  onRemoveMember: (index: number) => void;
+  onBack: () => void;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [catalog, setCatalog] = useState<
+    { key: string; description: string; risk_gate: string }[] | null
+  >(null);
+  const [pickerOpenFor, setPickerOpenFor] = useState<number | null>(null);
+  const [pickerKey, setPickerKey] = useState('');
+
+  useEffect(() => {
+    if (!token || catalog !== null) return;
+    apiRequest<{ key: string; description: string; risk_gate: string }[]>(
+      '/capabilities',
+      { token },
+    )
+      .then(setCatalog)
+      .catch(() => setCatalog([]));
+  }, [token, catalog]);
+
+  const openPicker = (index: number) => {
+    setPickerKey('');
+    setPickerOpenFor(index);
+  };
+
+  const addCapability = (index: number) => {
+    if (!pickerKey) return;
+    const member = drafts?.[index];
+    if (!member || member.capability_keys.includes(pickerKey)) return;
+    onUpdateMember(index, { capability_keys: [...member.capability_keys, pickerKey] });
+    setPickerOpenFor(null);
+    setPickerKey('');
+  };
+
+  const removeCapability = (index: number, key: string) => {
+    const member = drafts?.[index];
+    if (!member) return;
+    onUpdateMember(index, {
+      capability_keys: member.capability_keys.filter((k) => k !== key),
+    });
+  };
+
+  return (
+    <Modal
+      title={t('teamCompiler.title')}
+      description={t('teamCompiler.description')}
+      width={780}
+      onClose={onClose}
+    >
+      {drafts === null ? (
+        <>
+          <FieldLabel>{t('teamCompiler.describeLabel')}</FieldLabel>
+          <textarea
+            rows={10}
+            value={description}
+            placeholder={t('teamCompiler.describePlaceholder')}
+            onChange={(event) => onDescriptionChange(event.currentTarget.value)}
+          />
+          {error && <div className="auth-error">{error}</div>}
+          <div className="modal-actions">
+            <button className="button secondary" type="button" onClick={onClose}>
+              {t('common.cancel')}
+            </button>
+            <button
+              className="button primary"
+              type="button"
+              disabled={loading || !description.trim()}
+              onClick={onDraft}
+            >
+              {materialIcon('auto_awesome')}
+              {loading ? t('teamCompiler.drafting') : t('teamCompiler.draftSubmit')}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="team-draft-list">
+            {drafts.map((member, index) => (
+              <div className="team-draft-card" key={index}>
+                <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
+                  <FieldLabel>{t('teamCompiler.memberN', { n: index + 1 })}</FieldLabel>
+                  <button
+                    type="button"
+                    className="button small"
+                    title={t('teamCompiler.removeMember')}
+                    onClick={() => onRemoveMember(index)}
+                  >
+                    {materialIcon('delete')}
+                  </button>
+                </div>
+                <div className="form-grid even">
+                  <label>
+                    <FieldLabel>{t('createAgent.name')}</FieldLabel>
+                    <input
+                      value={member.name}
+                      onChange={(event) =>
+                        onUpdateMember(index, { name: event.currentTarget.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    <FieldLabel>{t('teamCompiler.role')}</FieldLabel>
+                    <input
+                      value={member.role}
+                      onChange={(event) =>
+                        onUpdateMember(index, { role: event.currentTarget.value })
+                      }
+                    />
+                  </label>
+                </div>
+                <label>
+                  <FieldLabel>{t('createAgent.dept')}</FieldLabel>
+                  <input
+                    value={member.department}
+                    onChange={(event) =>
+                      onUpdateMember(index, { department: event.currentTarget.value })
+                    }
+                  />
+                </label>
+                <label>
+                  <FieldLabel>{t('createAgent.employeeDesc')}</FieldLabel>
+                  <input
+                    value={member.description}
+                    onChange={(event) =>
+                      onUpdateMember(index, { description: event.currentTarget.value })
+                    }
+                  />
+                </label>
+                <label>
+                  <FieldLabel>{t('teamCompiler.responsibilities')}</FieldLabel>
+                  <textarea
+                    rows={3}
+                    value={member.responsibilities.join('\n')}
+                    placeholder={t('teamCompiler.responsibilitiesPlaceholder')}
+                    onChange={(event) =>
+                      onUpdateMember(index, {
+                        responsibilities: event.currentTarget.value
+                          .split('\n')
+                          .map((line) => line.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                  />
+                </label>
+
+                <FieldLabel>{t('createAgent.capabilities')}</FieldLabel>
+                <div className="chip-list">
+                  {member.capability_keys.map((key) => (
+                    <span className="chip" key={key}>
+                      {key}
+                      <button
+                        type="button"
+                        title={t('teamCompiler.removeCapability')}
+                        onClick={() => removeCapability(index, key)}
+                      >
+                        {materialIcon('close')}
+                      </button>
+                    </span>
+                  ))}
+                  <button
+                    type="button"
+                    className="button small"
+                    onClick={() => openPicker(index)}
+                  >
+                    {t('teamCompiler.addCapability')}
+                  </button>
+                </div>
+                {pickerOpenFor === index && (
+                  <div className="grant-capability-picker">
+                    {catalog === null ? null : (
+                      <>
+                        <label>
+                          {t('agentDetail.grantCapabilityPick')}
+                          <select
+                            value={pickerKey}
+                            onChange={(e) => setPickerKey(e.target.value)}
+                          >
+                            <option value="" disabled>
+                              —
+                            </option>
+                            {catalog
+                              .filter((entry) => !member.capability_keys.includes(entry.key))
+                              .map((entry) => (
+                                <option key={entry.key} value={entry.key}>
+                                  {entry.key} — {entry.description}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                        <div className="drawer-actions">
+                          <button
+                            type="button"
+                            className="button primary small"
+                            disabled={!pickerKey}
+                            onClick={() => addCapability(index)}
+                          >
+                            {t('agentDetail.grantCapabilityConfirm')}
+                          </button>
+                          <button
+                            type="button"
+                            className="button small"
+                            onClick={() => setPickerOpenFor(null)}
+                          >
+                            {t('agentDetail.grantCapabilityCancel')}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="modal-actions">
+            <button className="button secondary" type="button" onClick={onBack}>
+              {t('teamCompiler.backToDescribe')}
+            </button>
+            <button
+              className="button primary"
+              type="button"
+              disabled={creating || drafts.length === 0}
+              onClick={onConfirm}
+            >
+              {materialIcon('add_circle')}
+              {creating ? t('teamCompiler.creating') : t('teamCompiler.confirmSubmit')}
+            </button>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }

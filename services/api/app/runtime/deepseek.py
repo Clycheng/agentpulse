@@ -35,16 +35,30 @@ class DeepSeekChatClient:
             else settings.deepseek_timeout_seconds
         )
 
-    async def complete(self, request: LlmChatRequest) -> LlmChatResponse:
+    async def complete(
+        self, request: LlmChatRequest, *, system_prompt_override: str | None = None
+    ) -> LlmChatResponse:
+        """system_prompt_override: skip the "AI employee replying to the
+        boss" persona framing build_system_prompt() normally adds, and send
+        this text as the system message verbatim instead. For utility calls
+        that need a specific, unpolluted instruction — e.g. "output strict
+        JSON, nothing else" — where the conversational-reply boilerplate
+        (tone rules, "don't claim to have sent an email", etc.) would only
+        make the model less likely to follow the actual instruction."""
         if not self.api_key:
             raise DeepSeekNotConfigured(
                 "DeepSeek API Key 未配置，请设置 AGENTPULSE_DEEPSEEK_API_KEY"
             )
 
+        system_prompt = (
+            system_prompt_override
+            if system_prompt_override is not None
+            else build_system_prompt(request)
+        )
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": build_system_prompt(request)},
+                {"role": "system", "content": system_prompt},
                 *[message_to_deepseek(message) for message in request.messages],
             ],
             "stream": False,

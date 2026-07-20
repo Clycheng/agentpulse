@@ -42,3 +42,5 @@
 - [0005](0005-hermes-poc-safety-findings.md) — Hermes 地基验证发现：workdir 隔离是硬需求，讨论对齐门不能只靠人格指令
 - [0006](0006-group-discussion-v1-first-slice.md) — 群讨论协议 v1 第一片：讨论态 + 共识 brief + Task 创建门（对齐用人工确认），含待敲定清单
 - [0007](0007-hermes-v0.18-interface-acp.md) — Hermes v0.18 集成接口：REST /v1/runs 已不存在 → 用 ACP(stdio) 驱动执行、CLI 做供给（`LocalHermesProvisioner` 已实现）；作废 DATA-MODEL/TD-03 §5.3 的 REST 假设
+- [0008](0008-human-in-the-loop-approval-model.md) — 统一的人类介入审批模型：技术危险动作全链路已实现（`approvals.mode: manual` + 多选项 + 挂起超时对齐）；业务受控工具门拆为独立 TD-10
+- [0009](0009-natural-language-team-compiler.md) — 自然语言团队编译器：一段话描述团队 → 可编辑草稿 → 一次性建成真实员工 + 自动拉一个团队群；`provision_new_agent` 统一四条招聘路径的供给入口

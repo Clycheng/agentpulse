@@ -81,6 +81,7 @@ const translations = {
     "title": "组织内联系人",
     "summary": "{{company}} · {{agentCount}} 名 AI 员工 · {{deptCount}} 个部门 · {{busyCount}} 人执行中",
     "createEmployee": "创建员工",
+    "compileTeam": "描述你的团队",
     "subLevel": "下级",
     "busyMembers": "{{count}} 人执行中",
     "waitingMembers": "{{count}} 个待确认",
@@ -392,6 +393,24 @@ const translations = {
     "skip": "跳过",
     "getStarted": "开始使用",
     "next": "下一步"
+  },
+  "teamCompiler": {
+    "title": "描述你的团队",
+    "description": "用一段话描述你需要的团队——角色、分工、业务背景，系统会拆解成可编辑的员工草稿，确认后一次性建好并拉进一个群。",
+    "describeLabel": "团队描述",
+    "describePlaceholder": "例如：我需要一个质检专员核查上门服务打卡照片，一个运营负责人统筹进度，一个文案负责抖音账号选题和脚本……",
+    "draftSubmit": "生成团队草稿",
+    "drafting": "生成中…",
+    "memberN": "员工 {{n}}",
+    "role": "岗位",
+    "responsibilities": "工作职责（每行一条）",
+    "responsibilitiesPlaceholder": "逐一核查上门打卡照片\n汇总异常情况上报",
+    "removeMember": "移除这位员工",
+    "removeCapability": "移除能力",
+    "addCapability": "+ 添加能力",
+    "backToDescribe": "返回重新描述",
+    "confirmSubmit": "确认，创建全部",
+    "creating": "创建中…"
   }
 } as const;
 

@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### 2026-07-20（自然语言团队编译器：一段话描述团队 → 一次性建成真实员工）
+
+- **feat(api)**：新增 [ADR 0009](docs/decisions/0009-natural-language-team-compiler.md)——「最后一公里」的第一版：老板用一段话描述需要的团队（角色、分工、业务背景），系统拆解成可编辑的员工草稿，确认后一次性建成真实 Hermes 员工并自动拉进一个团队群。四点产品边界（不自动规划多群、不编造业务技能内容、不加独立校验器、不做试运行）均来自项目所有者的直接否决，记在 ADR 里防止下一个 AI 重新加回去。
+- **refactor(services)**：`app/services/workspace.py` 新增 `provision_new_agent`（从原来模板专属的 `_provision_recruited_agent` 泛化而来）——统一的"角色规格 + 能力 key → 真实 Hermes 员工"入口，内部走 `split_by_credentials` 处理混合能力 bundle。人才市场招聘、默认秘书 bootstrap、小秘 `create_employee` 工具、团队编译器四条路径现在全部调用同一个函数，不再各写一份供给逻辑。
+- **feat(api)**：`app/orchestration/team_compiler.py`（`build_team_draft_prompt`/`parse_team_draft`）+ `app/api/routes/team_compiler.py`（`POST /agents/draft-team` 纯预览无副作用、`POST /agents/create-team` 真建人+自动建群）。复用了 TD-04-T3 早已实现但从未接生产入口的 `draft_role_spec`（单人职责/能力精修），编译器本身只负责"拆出几个人"这一层。
+- **feat(runtime)**：`DeepSeekChatClient.complete()` 新增 `system_prompt_override` 参数——严格 JSON 输出的工具调用不再被"AI 员工回复老板"的人设框架稀释指令。
+- **feat(api)**：小秘 `create_employee` 工具 schema 补齐 `responsibilities`/`capability_keys`，新增 `list_capabilities` 工具——小秘被要求招人时能先查目录再真建人，不再是挂名字的纸片员工。
+- **feat(desktop)**：新增 `TeamCompilerModal`（员工花名册页头"描述你的团队"按钮）——一段话 → 可编辑草稿卡片（姓名/岗位/部门/描述/职责逐行编辑、能力 key 以可移除 chip + 复用"+授予能力"已有的 `/api/capabilities` 选择器新增）→ 确认创建 → 自动跳进新团队群（单人则跳花名册）。中英文 i18n 均已补齐。
+- **test**：`tests/test_team_compiler.py`（9 例：`parse_team_draft` 正常/异常路径、两个 HTTP 端点、含"部分能力缺凭证"混合 bundle 场景）+ `tests/test_function_loop.py` 新增 2 例（小秘 `create_employee` 真供给 + `list_capabilities` 返回目录）。全套 288 passed / 8 skipped / 1 xpassed（3 个预存失败与本次改动无关，见下）。
+- **真机验证**：`AGENTPULSE_HERMES_PROVISIONING=true` + 真 DeepSeek key，浏览器走完整链路——用项目所有者本人给出的"民政局居家养老 + 个人抖音号"场景描述生成 3 人草稿（质检专员/运营负责人/文案，能力 key 逐人不同）、编辑能力 chip、确认创建 → 3 个真实员工 + 1 个"新团队"群自动建成，`hermes profile list` 可见真 profile；另用 `curl` 单独验证 `POST /agents/create-team`（单人）的 `agent_specs.status=ready`/`agent_capabilities` 落库，随即清理了测试产生的真实 Hermes profile。`npm run lint`（`tsc --noEmit` 两个 tsconfig）无错。
+- **known issue（非本次引入，仅记录）**：`test_workspace_flow.py` 里 2 个测试在本机 Python 3.14 venv 下失败（另一个 Python 3.12 worktree 通过），疑似 async mock 兼容性差异；`test_knowledge_source_is_injected_into_agent_context` 会绕过 mock 真的打到 DeepSeek——根因是 `function_loop.py::run_function_loop` 走原始 `httpx` 调用、不经过被 mock 的 `DeepSeekChatClient.complete()`。已用 `mcp__ccd_session__spawn_task` 登记为独立跟进项，未在本次改动范围内修复。
+
 ### 2026-07-19（人才市场招聘接上真供给，不再是纸片人）
 
 - **fix(api)**: 人才市场"招聘"（`recruit_from_template`）之前只 `create_agent`，从不建 `agent_specs`、从不 `provision()`——产品主推的招聘入口招来的员工永远卡在临时 DeepSeek 兜底层，只有"创建员工"表单手动勾能力芯片那条路才会真供给。现在 `hermes_provisioning` 打开时，招聘会按官方模板名查 `ROLE_BUNDLES` 拿能力清单，真建 profile。

@@ -6,7 +6,12 @@ import re
 from uuid import uuid4
 
 from app.core.database import Database, Row
-from app.orchestration.capability_catalog import get_role_bundle, split_by_credentials
+from app.orchestration.capability_catalog import (
+    CATALOG,
+    get_role_bundle,
+    split_by_credentials,
+    validate_capability_keys,
+)
 from app.services.templates import get_template, list_agent_templates, list_talent_categories
 
 
@@ -147,34 +152,21 @@ def _bootstrap_secretary_capabilities(
 ) -> None:
     """Give the default secretary a real, ready Hermes profile on day one.
 
-    Only runs when Hermes provisioning is actually configured
-    (settings.hermes_provisioning) — otherwise every dev/test environment
-    (which never sets that flag; see services/api/.env's own warning about
-    pytest silently spawning real `hermes profile create` calls) would get a
-    RecordOnlyProvisioner-fabricated 'ready' spec + fake hermes_profile,
-    which would then wrongly route every secretary chat in the test suite
-    through HermesBackend against a profile that was never really created.
-    Imports are local to avoid a circular import
-    (orchestration.supply imports app.services.workspace itself).
+    Thin wrapper around the shared provision_new_agent — see its docstring
+    for the settings.hermes_provisioning gate and the credential-split
+    behavior (moot here since every default capability is credential-free,
+    but going through the one shared function keeps this consistent with
+    every other hiring path instead of re-deriving the same dance).
     """
-    from app.core.config import settings
-
-    if not settings.hermes_provisioning:
-        return
-    from app.orchestration.supply import ProvisioningError, create_agent_spec, provision
-
-    try:
-        create_agent_spec(
-            conn,
-            agent_id=secretary_id,
-            workspace_id=workspace_id,
-            role_name="老板秘书",
-            source_request="系统默认配置：秘书上岗即具备基础助理能力",
-            capability_keys=SECRETARY_DEFAULT_CAPABILITIES,
-        )
-        provision(conn, secretary_id)
-    except ProvisioningError:
-        pass  # non-fatal — secretary still usable via the DeepSeek fallback
+    provision_new_agent(
+        conn,
+        agent_id=secretary_id,
+        workspace_id=workspace_id,
+        role_name="老板秘书",
+        source_request="系统默认配置：秘书上岗即具备基础助理能力",
+        responsibilities=[],
+        capability_keys=SECRETARY_DEFAULT_CAPABILITIES,
+    )
 
 
 def create_agent(
@@ -1357,25 +1349,48 @@ def recruit_from_template(
         source=f"template:{template['id']}",
     )
     create_dm_conversation(conn, workspace_id, agent_id)
-    _provision_recruited_agent(conn, agent_id=agent_id, workspace_id=workspace_id, template=template)
+    try:
+        capability_keys = get_role_bundle(template["name"])
+    except ValueError:
+        capability_keys = []  # custom/community template with no matching bundle
+    provision_new_agent(
+        conn,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+        role_name=template["name"],
+        source_request=f"通过人才市场招募官方模板「{template['name']}」",
+        responsibilities=[template["description"]] if template["description"] else [],
+        capability_keys=capability_keys,
+    )
     return conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
 
 
-def _provision_recruited_agent(
-    conn: Database, *, agent_id: str, workspace_id: str, template: Row
+def provision_new_agent(
+    conn: Database,
+    *,
+    agent_id: str,
+    workspace_id: str,
+    role_name: str,
+    source_request: str,
+    responsibilities: list[str],
+    capability_keys: list[str],
 ) -> None:
-    """Give a Talent Market hire a real Hermes profile, not just a name tag.
+    """Give a freshly-created agent a real Hermes profile, not just a name tag.
 
-    Without this, "hire from Talent Market" — the product's main advertised
-    hiring flow — produced an employee with no agent_specs row at all, stuck
-    on the temporary DeepSeek fallback forever (only the "create employee"
-    form's manual capability chips ever actually provisioned anyone). Only
-    runs when settings.hermes_provisioning is on (build_provisioner_from_settings
-    is a no-op RecordOnlyProvisioner otherwise) — same gate as the default
-    secretary's bootstrap, so the test suite's DeepSeek-fallback assumptions
-    for template-hired agents aren't disturbed.
+    The shared "compile a role description into a real, working employee"
+    step — every hiring path (Talent Market template, the natural-language
+    team compiler, the create_employee tool an agent calls on the owner's
+    behalf) funnels through this one function so there's exactly one place
+    that knows how to turn (role_name, responsibilities, capability_keys)
+    into an actual provisioned Hermes profile, instead of each caller
+    reimplementing the same dance.
 
-    Splits the role bundle into credential-free vs credential-needing keys
+    Only runs when settings.hermes_provisioning is on
+    (build_provisioner_from_settings is a no-op RecordOnlyProvisioner
+    otherwise) — so the test suite's DeepSeek-fallback assumptions for
+    agents created without this flag aren't disturbed.
+
+    Splits capability_keys into credential-free vs credential-needing
     (capability_catalog.split_by_credentials) because provision() is
     all-or-nothing: a bundle that mixes both (e.g. 运营负责人's
     credential-free data_analysis with its credential-needing ad_bidding)
@@ -1398,9 +1413,9 @@ def _provision_recruited_agent(
     from app.runtime.upgrade import UpgradeError, execute_upgrade
 
     try:
-        capability_keys = get_role_bundle(template["name"])
+        validate_capability_keys(capability_keys)
     except ValueError:
-        capability_keys = []  # custom/community template with no matching bundle
+        capability_keys = [k for k in capability_keys if k in CATALOG]
 
     ready_keys, pending_keys = split_by_credentials(capability_keys)
     provisioner = build_provisioner_from_settings()
@@ -1409,9 +1424,9 @@ def _provision_recruited_agent(
             conn,
             agent_id=agent_id,
             workspace_id=workspace_id,
-            role_name=template["name"],
-            source_request=f"通过人才市场招募官方模板「{template['name']}」",
-            responsibilities=[template["description"]] if template["description"] else [],
+            role_name=role_name,
+            source_request=source_request,
+            responsibilities=responsibilities,
             capability_keys=ready_keys,
         )
         provision(conn, agent_id, provisioner)

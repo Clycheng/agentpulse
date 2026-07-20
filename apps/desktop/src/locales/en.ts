@@ -81,6 +81,7 @@ const translations = {
     "title": "Org Directory",
     "summary": "{{company}} · {{agentCount}} AI employees · {{deptCount}} departments · {{busyCount}} active",
     "createEmployee": "Add employee",
+    "compileTeam": "Describe your team",
     "subLevel": "Open",
     "busyMembers": "{{count}} active",
     "waitingMembers": "{{count}} pending",
@@ -392,6 +393,24 @@ const translations = {
     "skip": "Skip",
     "getStarted": "Get started",
     "next": "Next"
+  },
+  "teamCompiler": {
+    "title": "Describe your team",
+    "description": "Describe the team you need in a paragraph — roles, division of labor, business context. The system will break it into editable employee drafts; confirm to create them all at once and drop them into one group chat.",
+    "describeLabel": "Team description",
+    "describePlaceholder": "e.g. I need a QA specialist to check in-home service check-in photos, an ops lead to track progress, and a copywriter for our Douyin account topics and scripts...",
+    "draftSubmit": "Generate team draft",
+    "drafting": "Generating…",
+    "memberN": "Employee {{n}}",
+    "role": "Role",
+    "responsibilities": "Responsibilities (one per line)",
+    "responsibilitiesPlaceholder": "Check every in-home check-in photo\nReport anomalies",
+    "removeMember": "Remove this employee",
+    "removeCapability": "Remove capability",
+    "addCapability": "+ Add capability",
+    "backToDescribe": "Back to description",
+    "confirmSubmit": "Confirm, create all",
+    "creating": "Creating…"
   }
 } as const;
 

@@ -13,6 +13,7 @@ from app.api.routes.channels import router as channels_router
 from app.api.routes.health import router as health_router
 from app.api.routes.ideas import router as ideas_router
 from app.api.routes.runs import router as runs_router
+from app.api.routes.team_compiler import router as team_compiler_router
 from app.api.routes.webhooks import router as webhooks_router
 from app.api.routes.workspace import router as workspace_router
 from app.core.database import connect, init_db, shutdown_db
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
     app.include_router(ideas_router, prefix="/api")
     app.include_router(channels_router, prefix="/api")
     app.include_router(catalog_router, prefix="/api")
+    app.include_router(team_compiler_router, prefix="/api")
     app.include_router(webhooks_router)
 
     return app
