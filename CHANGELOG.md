@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 2026-07-19（人才市场招聘接上真供给，不再是纸片人）
+
+- **fix(api)**: 人才市场"招聘"（`recruit_from_template`）之前只 `create_agent`，从不建 `agent_specs`、从不 `provision()`——产品主推的招聘入口招来的员工永远卡在临时 DeepSeek 兜底层，只有"创建员工"表单手动勾能力芯片那条路才会真供给。现在 `hermes_provisioning` 打开时，招聘会按官方模板名查 `ROLE_BUNDLES` 拿能力清单，真建 profile。
+- **fix(orchestration)**: 新增 `capability_catalog.split_by_credentials`——`provision()` 是全有或全无的：一个角色 bundle 只要混了一个缺凭证的能力（比如"运营负责人"的 `data_analysis`(免凭证) + `ad_bidding`(需要没人配过的 AD_API_KEY)），员工就会卡在 `blocked_on_credentials`、**一个能力都用不上**，包括本来能立刻工作的那些。现在先只用免凭证的能力建真 profile，缺凭证的能力事后走"profile 已存在"快速路径（复用 `runtime.upgrade.execute_upgrade`）补上，标成"待补凭证"，不拖累其余能力。补齐了 4 个官方模板（运营负责人/内容主笔/短视频策划/销售顾问）之前缺失的 `ROLE_BUNDLES` 映射。
+- **真机验证**（不是纸上谈兵）：真招募"内容主笔"→ 真 Hermes profile `ap596c1d3f80df44`，两个能力都 `enabled`；真招募"运营负责人"→ 真 profile `ap596c1d10a8d1ed`，`data_analysis`/`report_generation` 真 `enabled`，`ad_analysis`/`ad_bidding` 正确停在 `credential_missing` 而不是拖累整个员工。
+- **踩坑记录**：给这个改动写测试时，第一版直接让 `settings.hermes_provisioning=True` 走真代码路径，结果每次跑测试都在这台机器上真建了 Hermes profile（5 个孤儿 profile，`hermes profile list` 里能看到）——已清理，测试改成显式 mock `build_provisioner_from_settings` 返回 `RecordOnlyProvisioner()`，不再依赖"这台机器凑巧装了真 hermes"这个隐藏前提。
+- **test**: `test_recruit_from_template_provisions_credential_free_role`、`test_recruit_from_template_mixed_role_stays_ready`（显式断言"运营负责人不会被卡住"）、`test_recruit_from_template_noop_when_provisioning_disabled`。全套 280 passed / 8 skipped / 1 xpassed。
+
 ### 2026-07-19（service-claw-cloud 借鉴：启动冒烟检查 + waiting_on + 24h 异常聚合）
 
 - **docs**: 新增 [docs/research/service-claw-cloud.md](docs/research/service-claw-cloud.md)——只读调研 UnitPulse（零关联，未触碰其任何文件/进程）的 `service-claw-cloud`（物业播本调度器的云端镜像：本地 Mac 跑 Playwright + 登录态 Chrome，云端只管状态镜像/UI/命令队列）。核心借鉴：它今天就在过 AgentPulse 迟早要过的桥——国内平台没有官方发布 API，TD-10 的 `publish_social_content` 真落地也要靠登录态浏览器/`computer_use`，已写进 TD-10"未来扩展"；命令队列+轮询认领模式是 `approval_bridge`（现在是进程内 Future，docstring 自己写明单进程 only）未来跨进程/跨机器时的现成范本；心跳/机器注册表戳破了员工卡"在线待命"目前是写死字符串的事实。

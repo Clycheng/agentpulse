@@ -328,6 +328,14 @@ CATALOG: dict[str, CapabilityDef] = {
 # (guarded by tests). risk_gate is still resolved per-capability at provision
 # time — a bundle never relaxes a gate.
 ROLE_BUNDLES: dict[str, tuple[str, ...]] = {
+    # Role names below match the official Talent Market templates
+    # (app/services/templates.py AGENT_TEMPLATES) so recruit_from_template can
+    # look capability_keys up by role name — every official template needs a
+    # matching entry here or a Talent Market hire gets zero capabilities.
+    "运营负责人": ("ad_analysis", "ad_bidding", "data_analysis", "report_generation"),
+    "内容主笔": ("content_writing", "seo_content"),
+    "短视频策划": ("content_writing", "image_creation", "social_content"),
+    "销售顾问": ("customer_service", "customer_data_lookup", "report_generation"),
     "客服专员": ("customer_service", "ticket_management", "customer_data_lookup"),
     "售后专员": (
         "customer_service",
@@ -436,6 +444,28 @@ def resolve_bundle(keys: list[str]) -> dict:
         "required_credentials": sorted(creds),
         "risk_gate": _strictest_risk(risk_gates),
     }
+
+
+def split_by_credentials(keys: list[str]) -> tuple[list[str], list[str]]:
+    """Split capability keys into (immediately-usable, needs-credentials).
+
+    provision() is all-or-nothing: a single credential_missing capability
+    blocks the *whole* agent_spec at 'blocked_on_credentials' with no real
+    Hermes profile at all — a role bundle that mixes a credential-free
+    capability (e.g. content_writing) with a credential-needing one (e.g.
+    ad_bidding, which needs AD_API_KEY nobody has configured on a fresh
+    install) would otherwise leave the employee with *zero* working
+    capabilities instead of the ones that could have worked immediately.
+
+    Callers should provision only the first list, then register the second
+    list's capabilities afterward via the profile-already-exists fast path
+    (runtime.upgrade.execute_upgrade) so they show up as "待补凭证" instead
+    of silently blocking everything else.
+    """
+    validate_capability_keys(keys)
+    ready = [k for k in keys if not CATALOG[k].required_credentials]
+    pending = [k for k in keys if CATALOG[k].required_credentials]
+    return ready, pending
 
 
 def list_role_bundles() -> list[str]:

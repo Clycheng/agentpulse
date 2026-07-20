@@ -6,6 +6,7 @@ import re
 from uuid import uuid4
 
 from app.core.database import Database, Row
+from app.orchestration.capability_catalog import get_role_bundle, split_by_credentials
 from app.services.templates import get_template, list_agent_templates, list_talent_categories
 
 
@@ -1356,7 +1357,76 @@ def recruit_from_template(
         source=f"template:{template['id']}",
     )
     create_dm_conversation(conn, workspace_id, agent_id)
+    _provision_recruited_agent(conn, agent_id=agent_id, workspace_id=workspace_id, template=template)
     return conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+
+
+def _provision_recruited_agent(
+    conn: Database, *, agent_id: str, workspace_id: str, template: Row
+) -> None:
+    """Give a Talent Market hire a real Hermes profile, not just a name tag.
+
+    Without this, "hire from Talent Market" — the product's main advertised
+    hiring flow — produced an employee with no agent_specs row at all, stuck
+    on the temporary DeepSeek fallback forever (only the "create employee"
+    form's manual capability chips ever actually provisioned anyone). Only
+    runs when settings.hermes_provisioning is on (build_provisioner_from_settings
+    is a no-op RecordOnlyProvisioner otherwise) — same gate as the default
+    secretary's bootstrap, so the test suite's DeepSeek-fallback assumptions
+    for template-hired agents aren't disturbed.
+
+    Splits the role bundle into credential-free vs credential-needing keys
+    (capability_catalog.split_by_credentials) because provision() is
+    all-or-nothing: a bundle that mixes both (e.g. 运营负责人's
+    credential-free data_analysis with its credential-needing ad_bidding)
+    would otherwise leave the employee with zero working capabilities
+    instead of the ones that could have worked immediately. The
+    credential-needing keys are registered afterward via the
+    profile-already-exists fast path so they show up as "待补凭证" on an
+    otherwise-ready employee.
+    """
+    from app.core.config import settings
+
+    if not settings.hermes_provisioning:
+        return
+    from app.orchestration.supply import (
+        ProvisioningError,
+        build_provisioner_from_settings,
+        create_agent_spec,
+        provision,
+    )
+    from app.runtime.upgrade import UpgradeError, execute_upgrade
+
+    try:
+        capability_keys = get_role_bundle(template["name"])
+    except ValueError:
+        capability_keys = []  # custom/community template with no matching bundle
+
+    ready_keys, pending_keys = split_by_credentials(capability_keys)
+    provisioner = build_provisioner_from_settings()
+    try:
+        create_agent_spec(
+            conn,
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            role_name=template["name"],
+            source_request=f"通过人才市场招募官方模板「{template['name']}」",
+            responsibilities=[template["description"]] if template["description"] else [],
+            capability_keys=ready_keys,
+        )
+        provision(conn, agent_id, provisioner)
+        for key in pending_keys:
+            try:
+                execute_upgrade(
+                    conn,
+                    approval={"agent_id": agent_id, "workspace_id": workspace_id},
+                    approved_capability_key=key,
+                    provisioner=provisioner,
+                )
+            except UpgradeError:
+                pass  # non-fatal — the ready_keys capabilities still work
+    except ProvisioningError:
+        pass  # non-fatal — the employee is still usable via the DeepSeek fallback
 
 
 def create_dm_conversation(
