@@ -237,6 +237,7 @@ textarea:focus-visible,
 }
 
 .brand-mark {
+  position: relative;
   display: grid;
   place-items: center;
   width: 40px;
@@ -253,6 +254,25 @@ textarea:focus-visible,
 .brand-mark svg {
   width: 22px;
   height: 22px;
+}
+
+.brand-mark-anomaly {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 16px;
+  box-shadow: 0 0 0 2px var(--surface);
 }
 
 .nav-item {
@@ -1262,6 +1282,15 @@ textarea:focus-visible,
 .run-trace-error {
   margin: 8px 0 0;
   color: #dc2626;
+  font-size: 12px;
+}
+
+.run-trace-waiting-on {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  color: #b45309;
   font-size: 12px;
 }
 
@@ -3464,6 +3493,37 @@ textarea::placeholder {
 
 .cap-badge.cap-disabled em {
   background: var(--subtle);
+}
+
+.grant-capability-picker {
+  margin: 4px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface-muted);
+}
+
+.grant-capability-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.grant-capability-picker select {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.grant-capability-picker .drawer-actions {
+  margin-top: 10px;
 }
 
 .skill-card {

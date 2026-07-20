@@ -12,7 +12,8 @@ const translations = {
     "dark": "深色",
     "system": "跟随系统",
     "logout": "退出登录",
-    "language": "切换语言"
+    "language": "切换语言",
+    "anomalyTooltip": "过去 24 小时有 {{count}} 个异常（失败的执行 / 超时未处理的审批）"
   },
   "auth": {
     "heroTitle": "把一人公司，搭成一支 AI 团队。",
@@ -253,7 +254,14 @@ const translations = {
     "capEnabled": "已启用",
     "capCredentialMissing": "待补凭证",
     "capPending": "待生效",
-    "capDisabled": "已停用"
+    "capDisabled": "已停用",
+    "grantCapability": "+ 授予能力",
+    "grantCapabilityPick": "选择要授予的能力",
+    "grantCapabilityConfirm": "授予",
+    "grantCapabilityCancel": "取消",
+    "grantCapabilitySuccess": "已授予能力",
+    "grantCapabilityFailed": "授予失败",
+    "grantCapabilityNoneLeft": "该员工已拥有目录里的全部能力"
   },
   "taskDetail": {
     "aria": "任务详情",

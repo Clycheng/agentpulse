@@ -45,7 +45,11 @@ from app.schemas.workspace import (
     TaskOut,
     UpdateTaskRequest,
 )
-from app.schemas.agent_spec import AgentSpecOut, CredentialRequest
+from app.schemas.agent_spec import (
+    AgentSpecOut,
+    CredentialRequest,
+    GrantCapabilityRequest,
+)
 from app.services.workspace import (
     add_agent_experience,
     add_message,
@@ -258,6 +262,65 @@ def list_agent_skills(
     except Exception:
         skills = []
     return {"skills": skills}
+
+
+@router.post("/agents/{agent_id}/capabilities")
+def grant_agent_capability(
+    agent_id: str,
+    payload: GrantCapabilityRequest,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    """ADR 0008 §5: owner-initiated capability grant.
+
+    The boss picks a capability from the catalog (GET /api/capabilities) and
+    it's installed immediately — no suspended run/approval to resolve, because
+    the owner is deciding directly rather than approving something an agent
+    asked for (the agent-self-request path was a dead trigger to begin with;
+    see the dormant `category == "capability_upgrade"` branch in runner.py).
+    """
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    _verify_agent_in_workspace(conn, current_user, agent_id)
+
+    from app.runtime.upgrade import UpgradeError, execute_upgrade
+
+    try:
+        result = execute_upgrade(
+            conn,
+            approval={"agent_id": agent_id, "workspace_id": workspace["id"]},
+            approved_capability_key=payload.capability_key,
+            provisioner=build_provisioner_from_settings(),
+        )
+    except UpgradeError as exc:
+        raise HTTPException(status_code=400, detail=f"授予能力失败：{exc}")
+
+    # Audit trail only — already resolved, run_id=NULL (nothing was suspended).
+    conn.execute(
+        """
+        INSERT INTO approvals (
+          id, workspace_id, agent_id, title, description, status, risk_level,
+          type, payload_json, resolved_by, resolved_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, 'approved', 'medium', 'capability_upgrade', ?, ?, ?, ?)
+        """,
+        (
+            new_id("appr"),
+            workspace["id"],
+            agent_id,
+            f"老板授予能力：{payload.capability_key}",
+            f"老板从员工档案直接授予「{payload.capability_key}」能力。",
+            json.dumps(
+                {"capability_key": payload.capability_key, "owner_initiated": True},
+                ensure_ascii=False,
+            ),
+            current_user["id"],
+            now_iso(),
+            now_iso(),
+        ),
+    )
+    conn.commit()
+    return result
 
 
 @router.post("/agents/{agent_id}/reflect")
@@ -992,6 +1055,32 @@ async def send_message_stream(
     )
 
 
+_WAITING_ON_LABELS = {
+    "high_risk": "等老板批准",
+    "business_tool": "等老板批准",
+    "capability_upgrade": "等老板批准能力升级",
+    "clarification": "等老板回答",
+}
+
+
+def _waiting_on_text(conn: Database, run_id: str, run_status: str) -> str | None:
+    """"当前这条 run 在等谁/等什么"的一句话——service-claw-cloud 的
+    playbook_matter_state.waiting_on 同款：把审批卡片里已经有的信息，
+    也放进 run 列表本身，不用点进去才知道卡在哪。"""
+    if run_status not in (RunStatus.WAITING_USER, RunStatus.WAITING_CLARIFY):
+        return None
+    approval = conn.execute(
+        "SELECT type, title, description FROM approvals "
+        "WHERE run_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+        (run_id,),
+    ).fetchone()
+    if approval is None:
+        return "等老板拍板"
+    label = _WAITING_ON_LABELS.get(approval["type"], "等老板拍板")
+    detail = approval["description"] or approval["title"]
+    return f"{label}：{detail}" if detail else label
+
+
 @router.get("/conversations/{conversation_id}/runs", response_model=list[RunOut])
 def list_conversation_runs(
     conversation_id: str,
@@ -1041,6 +1130,7 @@ def list_conversation_runs(
                 error=run["error"],
                 created_at=run["created_at"],
                 completed_at=run["completed_at"],
+                waiting_on=_waiting_on_text(conn, run["id"], run["status"]),
                 steps=[
                     RunStepOut(
                         id=step["id"],
@@ -1077,6 +1167,8 @@ def resolve_approval(
     ).fetchone()
     if approval is None:
         raise HTTPException(status_code=404, detail="确认请求不存在")
+    if approval["status"] == "expired":
+        raise HTTPException(status_code=409, detail="该审批已超时自动拒绝，无法再操作")
     if approval["status"] != "pending":
         raise HTTPException(status_code=409, detail="确认请求已处理")
 
@@ -1220,6 +1312,8 @@ def answer_clarification(
     ).fetchone()
     if approval is None:
         raise HTTPException(status_code=404, detail="澄清请求不存在")
+    if approval["status"] == "expired":
+        raise HTTPException(status_code=409, detail="该请求已超时自动拒绝，无法再操作")
     if approval["status"] != "pending":
         raise HTTPException(status_code=409, detail="澄清请求已处理")
 
@@ -1360,7 +1454,7 @@ async def _stream_reply_events(
             ctx=ctx,
             backend=HermesBackend(hermes_bin=settings.hermes_bin),
             input_message_id=user_message["id"],
-            permission_resolver=make_bridge_resolver(),  # TD-03-T4: suspend/resume
+            permission_resolver=make_bridge_resolver(conn),  # TD-03-T4: suspend/resume
         ):
             yield event
         return
@@ -1543,7 +1637,7 @@ async def complete_agent_reply(
             ctx=ctx,
             backend=HermesBackend(hermes_bin=settings.hermes_bin),
             input_message_id=user_message["id"],
-            permission_resolver=make_bridge_resolver(),
+            permission_resolver=make_bridge_resolver(conn),
         ):
             if event.get("type") == "message" and event.get("message"):
                 final_message = event["message"]

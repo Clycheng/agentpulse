@@ -224,7 +224,7 @@ def test_login_secretary_chat_persists_deepseek_metadata(tmp_path, monkeypatch):
         return LlmChatResponse(
             reply="先做三件事：确认目标、拆任务、安排负责人。",
             provider="deepseek",
-            model="deepseek-v4-flash",
+            model=settings.deepseek_model,
             usage={"total_tokens": 88},
         )
 
@@ -1191,3 +1191,119 @@ def test_conversation_runs_endpoint_returns_step_by_step_trace(tmp_path, monkeyp
     step_types = [s["type"] for s in runs[0]["steps"]]
     assert step_types == ["tool_call", "approval_required"]
     assert runs[0]["steps"][0]["payload"]["command"] == "rm -rf test.txt"
+    assert runs[0]["waiting_on"] is None  # completed run — nothing pending
+
+
+def test_conversation_runs_endpoint_surfaces_waiting_on(tmp_path, monkeypatch):
+    """service-claw-cloud borrow: a suspended run's card should say what/who
+    it's blocked on without a click-through into the step-by-step trace."""
+    from app.runtime.runs import create_run, transition_run
+    from app.services.workspace import new_id, now_iso
+
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]
+
+    conn = connect()
+    try:
+        run_id = create_run(
+            conn,
+            workspace_id=auth["workspace"]["id"],
+            conversation_id=secretary_chat["id"],
+            agent_id=secretary_agent["id"],
+            input_message_id="msg_seed2",
+            provider="hermes",
+        )
+        transition_run(conn, run_id, "running")
+        transition_run(conn, run_id, "waiting_user")
+        conn.execute(
+            "INSERT INTO approvals (id, workspace_id, conversation_id, agent_id, "
+            "title, description, status, risk_level, type, run_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'pending', 'high', 'high_risk', ?, ?)",
+            (
+                new_id("appr"), auth["workspace"]["id"], secretary_chat["id"],
+                secretary_agent["id"], "高风险动作需确认：rm -rf",
+                "删除 scratch 目录", run_id, now_iso(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get(
+        f"/api/conversations/{secretary_chat['id']}/runs",
+        headers=auth_header(token),
+    )
+    assert resp.status_code == 200
+    run = resp.json()[0]
+    assert run["status"] == "waiting_user"
+    assert run["waiting_on"] == "等老板批准：删除 scratch 目录"
+
+
+def test_bootstrap_anomaly_count_24h(tmp_path, monkeypatch):
+    """service-claw-cloud borrow: a boss-facing 'did anything go wrong in the
+    last 24h' count — failed runs + expired (timed-out) approvals. A
+    rejected approval is the owner's own call, not an anomaly, and must not
+    be counted."""
+    from app.runtime.runs import create_run, transition_run
+    from app.services.workspace import new_id, now_iso
+
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+    ws_id = auth["workspace"]["id"]
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary_chat = bootstrap["conversations"][0]
+    secretary_agent = bootstrap["agents"][0]
+    assert bootstrap["anomaly_count_24h"] == 0
+
+    conn = connect()
+    try:
+        failed_run = create_run(
+            conn, workspace_id=ws_id, conversation_id=secretary_chat["id"],
+            agent_id=secretary_agent["id"], input_message_id="msg_f",
+        )
+        transition_run(conn, failed_run, "running")
+        transition_run(conn, failed_run, "failed", error="boom")
+
+        rejected_run = create_run(
+            conn, workspace_id=ws_id, conversation_id=secretary_chat["id"],
+            agent_id=secretary_agent["id"], input_message_id="msg_r",
+        )
+        transition_run(conn, rejected_run, "running")
+        transition_run(conn, rejected_run, "waiting_user")
+        conn.execute(
+            "INSERT INTO approvals (id, workspace_id, conversation_id, agent_id, "
+            "title, status, risk_level, type, run_id, resolved_at, created_at) "
+            "VALUES (?, ?, ?, ?, 'x', 'rejected', 'high', 'high_risk', ?, ?, ?)",
+            (new_id("appr"), ws_id, secretary_chat["id"], secretary_agent["id"],
+             rejected_run, now_iso(), now_iso()),
+        )
+        transition_run(conn, rejected_run, "completed")
+
+        expired_run = create_run(
+            conn, workspace_id=ws_id, conversation_id=secretary_chat["id"],
+            agent_id=secretary_agent["id"], input_message_id="msg_e",
+        )
+        transition_run(conn, expired_run, "running")
+        transition_run(conn, expired_run, "waiting_user")
+        conn.execute(
+            "INSERT INTO approvals (id, workspace_id, conversation_id, agent_id, "
+            "title, status, risk_level, type, run_id, resolved_at, created_at) "
+            "VALUES (?, ?, ?, ?, 'y', 'expired', 'high', 'high_risk', ?, ?, ?)",
+            (new_id("appr"), ws_id, secretary_chat["id"], secretary_agent["id"],
+             expired_run, now_iso(), now_iso()),
+        )
+        transition_run(conn, expired_run, "failed", error="approval timed out")
+        conn.commit()
+    finally:
+        conn.close()
+
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    # 1 failed run (the plain failed_run) + 1 expired approval, but expired_run
+    # is *also* a failed run — counted once each by its own query, so total is
+    # 2 failed runs (failed_run, expired_run) + 1 expired approval = 3.
+    assert bootstrap["anomaly_count_24h"] == 3

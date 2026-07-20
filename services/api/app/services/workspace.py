@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 import re
 from uuid import uuid4
 
 from app.core.database import Database, Row
+from app.orchestration.capability_catalog import get_role_bundle, split_by_credentials
 from app.services.templates import get_template, list_agent_templates, list_talent_categories
 
 
@@ -121,7 +122,59 @@ def create_workspace_for_user(
         sender_id=secretary_id,
         content="欢迎老板。我是小秘。你可以直接把想法丢给我，我会帮你拆任务、建议招募谁、或者拉群推进。",
     )
+    _bootstrap_secretary_capabilities(conn, secretary_id, workspace_id)
     return get_workspace_by_id(conn, workspace_id)
+
+
+# Default capabilities every new secretary gets — deliberately restricted to
+# risk_gate='auto' entries with zero required_credentials (see
+# capability_catalog.CATALOG). provision() is all-or-nothing: a single
+# credential-missing capability blocks the whole spec at
+# 'blocked_on_credentials' with no real Hermes profile at all (see ADR 0008 /
+# supply.provision docstring), so anything needing a token the owner hasn't
+# configured would leave the secretary worse off than having no spec at all.
+SECRETARY_DEFAULT_CAPABILITIES = [
+    "write_code",
+    "run_tests",
+    "task_delegation",
+    "content_writing",
+    "data_analysis",
+]
+
+
+def _bootstrap_secretary_capabilities(
+    conn: Database, secretary_id: str, workspace_id: str
+) -> None:
+    """Give the default secretary a real, ready Hermes profile on day one.
+
+    Only runs when Hermes provisioning is actually configured
+    (settings.hermes_provisioning) — otherwise every dev/test environment
+    (which never sets that flag; see services/api/.env's own warning about
+    pytest silently spawning real `hermes profile create` calls) would get a
+    RecordOnlyProvisioner-fabricated 'ready' spec + fake hermes_profile,
+    which would then wrongly route every secretary chat in the test suite
+    through HermesBackend against a profile that was never really created.
+    Imports are local to avoid a circular import
+    (orchestration.supply imports app.services.workspace itself).
+    """
+    from app.core.config import settings
+
+    if not settings.hermes_provisioning:
+        return
+    from app.orchestration.supply import ProvisioningError, create_agent_spec, provision
+
+    try:
+        create_agent_spec(
+            conn,
+            agent_id=secretary_id,
+            workspace_id=workspace_id,
+            role_name="老板秘书",
+            source_request="系统默认配置：秘书上岗即具备基础助理能力",
+            capability_keys=SECRETARY_DEFAULT_CAPABILITIES,
+        )
+        provision(conn, secretary_id)
+    except ProvisioningError:
+        pass  # non-fatal — secretary still usable via the DeepSeek fallback
 
 
 def create_agent(
@@ -1250,7 +1303,31 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "agent_experiences_by_agent": agent_experiences_by_agent,
         "agent_template_categories": list_talent_categories(conn),
         "agent_templates": list_agent_templates(conn),
+        "anomaly_count_24h": count_anomalies_24h(conn, workspace_id),
     }
+
+
+def count_anomalies_24h(conn: Database, workspace_id: str) -> int:
+    """Failed runs + expired (timed-out, unanswered) approvals in the last
+    24h — a boss-facing "did anything actually go wrong" signal.
+
+    Borrowed from service-claw-cloud's playbook_runs.anomaly_count_24h: our
+    equivalent of its `anomaly_fired` activity-log events. Deliberately
+    excludes rejected approvals — a rejection is the owner's own considered
+    call, not something that went wrong.
+    """
+    cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+    failed_runs = conn.execute(
+        "SELECT COUNT(*) AS c FROM runs "
+        "WHERE workspace_id = ? AND status = 'failed' AND completed_at >= ?",
+        (workspace_id, cutoff),
+    ).fetchone()["c"]
+    expired_approvals = conn.execute(
+        "SELECT COUNT(*) AS c FROM approvals "
+        "WHERE workspace_id = ? AND status = 'expired' AND resolved_at >= ?",
+        (workspace_id, cutoff),
+    ).fetchone()["c"]
+    return failed_runs + expired_approvals
 
 
 def recruit_from_template(
@@ -1280,7 +1357,76 @@ def recruit_from_template(
         source=f"template:{template['id']}",
     )
     create_dm_conversation(conn, workspace_id, agent_id)
+    _provision_recruited_agent(conn, agent_id=agent_id, workspace_id=workspace_id, template=template)
     return conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+
+
+def _provision_recruited_agent(
+    conn: Database, *, agent_id: str, workspace_id: str, template: Row
+) -> None:
+    """Give a Talent Market hire a real Hermes profile, not just a name tag.
+
+    Without this, "hire from Talent Market" — the product's main advertised
+    hiring flow — produced an employee with no agent_specs row at all, stuck
+    on the temporary DeepSeek fallback forever (only the "create employee"
+    form's manual capability chips ever actually provisioned anyone). Only
+    runs when settings.hermes_provisioning is on (build_provisioner_from_settings
+    is a no-op RecordOnlyProvisioner otherwise) — same gate as the default
+    secretary's bootstrap, so the test suite's DeepSeek-fallback assumptions
+    for template-hired agents aren't disturbed.
+
+    Splits the role bundle into credential-free vs credential-needing keys
+    (capability_catalog.split_by_credentials) because provision() is
+    all-or-nothing: a bundle that mixes both (e.g. 运营负责人's
+    credential-free data_analysis with its credential-needing ad_bidding)
+    would otherwise leave the employee with zero working capabilities
+    instead of the ones that could have worked immediately. The
+    credential-needing keys are registered afterward via the
+    profile-already-exists fast path so they show up as "待补凭证" on an
+    otherwise-ready employee.
+    """
+    from app.core.config import settings
+
+    if not settings.hermes_provisioning:
+        return
+    from app.orchestration.supply import (
+        ProvisioningError,
+        build_provisioner_from_settings,
+        create_agent_spec,
+        provision,
+    )
+    from app.runtime.upgrade import UpgradeError, execute_upgrade
+
+    try:
+        capability_keys = get_role_bundle(template["name"])
+    except ValueError:
+        capability_keys = []  # custom/community template with no matching bundle
+
+    ready_keys, pending_keys = split_by_credentials(capability_keys)
+    provisioner = build_provisioner_from_settings()
+    try:
+        create_agent_spec(
+            conn,
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            role_name=template["name"],
+            source_request=f"通过人才市场招募官方模板「{template['name']}」",
+            responsibilities=[template["description"]] if template["description"] else [],
+            capability_keys=ready_keys,
+        )
+        provision(conn, agent_id, provisioner)
+        for key in pending_keys:
+            try:
+                execute_upgrade(
+                    conn,
+                    approval={"agent_id": agent_id, "workspace_id": workspace_id},
+                    approved_capability_key=key,
+                    provisioner=provisioner,
+                )
+            except UpgradeError:
+                pass  # non-fatal — the ready_keys capabilities still work
+    except ProvisioningError:
+        pass  # non-fatal — the employee is still usable via the DeepSeek fallback
 
 
 def create_dm_conversation(

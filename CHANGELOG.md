@@ -5,6 +5,40 @@
 
 ## [Unreleased]
 
+### 2026-07-19（人才市场招聘接上真供给，不再是纸片人）
+
+- **fix(api)**: 人才市场"招聘"（`recruit_from_template`）之前只 `create_agent`，从不建 `agent_specs`、从不 `provision()`——产品主推的招聘入口招来的员工永远卡在临时 DeepSeek 兜底层，只有"创建员工"表单手动勾能力芯片那条路才会真供给。现在 `hermes_provisioning` 打开时，招聘会按官方模板名查 `ROLE_BUNDLES` 拿能力清单，真建 profile。
+- **fix(orchestration)**: 新增 `capability_catalog.split_by_credentials`——`provision()` 是全有或全无的：一个角色 bundle 只要混了一个缺凭证的能力（比如"运营负责人"的 `data_analysis`(免凭证) + `ad_bidding`(需要没人配过的 AD_API_KEY)），员工就会卡在 `blocked_on_credentials`、**一个能力都用不上**，包括本来能立刻工作的那些。现在先只用免凭证的能力建真 profile，缺凭证的能力事后走"profile 已存在"快速路径（复用 `runtime.upgrade.execute_upgrade`）补上，标成"待补凭证"，不拖累其余能力。补齐了 4 个官方模板（运营负责人/内容主笔/短视频策划/销售顾问）之前缺失的 `ROLE_BUNDLES` 映射。
+- **真机验证**（不是纸上谈兵）：真招募"内容主笔"→ 真 Hermes profile `ap596c1d3f80df44`，两个能力都 `enabled`；真招募"运营负责人"→ 真 profile `ap596c1d10a8d1ed`，`data_analysis`/`report_generation` 真 `enabled`，`ad_analysis`/`ad_bidding` 正确停在 `credential_missing` 而不是拖累整个员工。
+- **踩坑记录**：给这个改动写测试时，第一版直接让 `settings.hermes_provisioning=True` 走真代码路径，结果每次跑测试都在这台机器上真建了 Hermes profile（5 个孤儿 profile，`hermes profile list` 里能看到）——已清理，测试改成显式 mock `build_provisioner_from_settings` 返回 `RecordOnlyProvisioner()`，不再依赖"这台机器凑巧装了真 hermes"这个隐藏前提。
+- **test**: `test_recruit_from_template_provisions_credential_free_role`、`test_recruit_from_template_mixed_role_stays_ready`（显式断言"运营负责人不会被卡住"）、`test_recruit_from_template_noop_when_provisioning_disabled`。全套 280 passed / 8 skipped / 1 xpassed。
+
+### 2026-07-19（service-claw-cloud 借鉴：启动冒烟检查 + waiting_on + 24h 异常聚合）
+
+- **docs**: 新增 [docs/research/service-claw-cloud.md](docs/research/service-claw-cloud.md)——只读调研 UnitPulse（零关联，未触碰其任何文件/进程）的 `service-claw-cloud`（物业播本调度器的云端镜像：本地 Mac 跑 Playwright + 登录态 Chrome，云端只管状态镜像/UI/命令队列）。核心借鉴：它今天就在过 AgentPulse 迟早要过的桥——国内平台没有官方发布 API，TD-10 的 `publish_social_content` 真落地也要靠登录态浏览器/`computer_use`，已写进 TD-10"未来扩展"；命令队列+轮询认领模式是 `approval_bridge`（现在是进程内 Future，docstring 自己写明单进程 only）未来跨进程/跨机器时的现成范本；心跳/机器注册表戳破了员工卡"在线待命"目前是写死字符串的事实。
+- **feat(api)**: 启动冒烟检查——`AGENTPULSE_HERMES_PROVISIONING=true` 但 `hermes` 二进制不在 PATH 上时，`app/main.py` 的 lifespan 直接拒绝启动并打印清楚的错误，而不是等第一次有人发消息触发供给才在运行时才发现（借鉴 service-claw-cloud 的 lifespan `SELECT count(*)` 冒烟测试）。
+- **feat(api)**: `RunOut.waiting_on`——run 处于 `waiting_user`/`waiting_clarify` 时，查同一 run 上 pending 的审批行，拼一句"等老板批准：{描述}"/"等老板回答：{描述}"，运行轨迹卡片直接显示（借鉴 `playbook_matter_state.waiting_on`）。桌面端 `RunTraceModal` 同步渲染。
+- **feat(api)**: `count_anomalies_24h` + `/me/bootstrap` 新增 `anomaly_count_24h`——过去 24 小时 `status='failed'` 的 run + `status='expired'` 的审批计数，刻意不算 `rejected`（老板自己的决定，不是异常）。借鉴 `playbook_runs.anomaly_count_24h` 的"封面页缓存汇总数字"模式。桌面端 logo 上一个红色小徽章 + hover 提示（中英文案都加了）。
+- **test**: 新增 `test_main_startup.py`(3 例：关闭/找到/找不到二进制)、`test_conversation_runs_endpoint_surfaces_waiting_on`、`test_bootstrap_anomaly_count_24h`(含"rejected 不计入"的显式断言)。全套 277 passed / 8 skipped / 1 xpassed；`tsc --noEmit` 无错。
+
+### 2026-07-17（能力授予补一个 bootstrap 缺口 + 秘书默认能力 + TD-10 设计文档）
+
+- **fix(runtime)**: `execute_upgrade` 之前对**完全没有 `agent_specs` 行**的员工（默认秘书、以及当时 Talent Market 招募流程还没走供给的员工）一律拒绝——"+ 授予能力"按钮对这类员工形同虚设。现在会走跟"创建员工时勾能力芯片"完全一样的 `create_agent_spec`+`provision` 路径，从零 bootstrap 一个真 spec + 真 Hermes profile，再装上被授予的能力；已经是真 Hermes 员工的走原有快速路径不受影响。真机验证：给一个全新的、`hermes_profile=None` 的秘书授予 `write_code`，`hermes profile list` 里真的多出一条对应 profile。
+- **feat(services)**: `create_workspace_for_user` 现在会在 `settings.hermes_provisioning` 打开时，给每个新公司的默认秘书自动配好一套免凭证、`risk_gate=auto` 的默认能力（`write_code`/`run_tests`/`task_delegation`/`content_writing`/`data_analysis`），秘书上岗即是真 Hermes 员工，不用老板手动点"+授予能力"才能用。刻意只挂全部无需凭证的能力——`provision()` 是全有或全无的供给（一个能力缺凭证就整体卡在 `blocked_on_credentials`，见"阿测"这个真实反例），塞进任何需要凭证的能力都会让秘书比现在还糟。刻意用 `hermes_provisioning` 这个已有的 flag 做门控（而不是"是否走了 HTTP 注册路由"），因为整个测试套件从不设这个 flag，如果无条件生效会让几十个假设"秘书走 DeepSeek 兜底"的既有测试全部悄悄改变行为。
+- **docs**: 新增 [TD-10-business-tool-gate.md](docs/tech-design/TD-10-business-tool-gate.md)——ADR 0008 分片⑥（业务受控工具门）的设计文档：整体架构（自建 MCP 服务 + 复用现有 `approval_bridge`/`approvals` 表挂起机制，而不是等 Hermes 自己识别业务危险——它压根不认识"发布/花钱/对外发送"这类语义）、`capability_catalog.CapabilityDef` 新增 `business_tool` 字段、run_id 定位的已知技术限制、v1 范围（`send_email` 试点 + 明确排除动态风险分级）、两个 Tech-Task。更新 `EXECUTION-BOARD.md`（分片④⑤⑦+秘书默认能力移入已完成，TD-10 列为"设计已完成待实现"）。
+- **test**: 新增 `test_upgrade_bootstraps_profile_for_agent_with_no_spec`（含幂等性断言）+ `test_secretary_gets_default_capabilities_when_provisioning_enabled` / `test_secretary_has_no_spec_when_provisioning_disabled`。顺手修了一个预先就存在、与本次改动无关的失败（`git stash` 验证过）：`test_login_secretary_chat_persists_deepseek_metadata` 的 mock 返回硬编码了旧的 model 字符串，改成读 `settings.deepseek_model`。全套 272 passed / 8 skipped / 1 xpassed。
+
+### 2026-07-16（审批门分片④⑥补齐 + 真机全链路验证 + 截图拍摄清单）
+
+- **fix(runtime)**: 补齐 ADR 0008 分片④——挂起超时对齐 Hermes ACP 的 fail-close。实测确认 `acp_adapter/permissions.py::make_approval_callback` 硬编码 60s 超时、且从不读 `approvals.timeout` 配置（该 key 只喂 CLI 交互式审批路径），所以没有去写这个死配置，而是给 `approval_bridge.await_decision` 加 `asyncio.wait_for`（新配置 `settings.approval_bridge_timeout_seconds`，默认 50s，明显小于 Hermes 的 60s 以确保我们先收敛），超时返回 `"expired"` 哨兵值并把对应 `approvals` 行标记 `status='expired'`（不再永远卡在 `pending`）。`/resolve`、`/answer` 端点对已过期的审批返回明确的"已超时自动拒绝"提示。
+- **fix(orchestration)**: 补齐分片⑥——去掉 clarification/capability_upgrade 的 agent 自触发伪装。SOUL.md 不再指示员工调用 ACP 会话里根本不存在的 `clarify` 工具，改为"直接在对话里正常提问"；`runner.py` 里对应的建审批分支保留但标注为兼容历史行/未来⑤。新增**老板发起**的能力授予真路径：`GET /api/capabilities`（目录）+ `POST /api/agents/{id}/capabilities`（直接调 `execute_upgrade`，不经过挂起审批）+ 员工详情页"+ 授予能力"选择器；顺手插入 `capability_upgrade` 类型的已批准审批行供审计追溯。
+- **docs**: 更新 [ADR 0008](docs/decisions/0008-human-in-the-loop-approval-model.md)（勾掉分片5/7，分片6拆成独立 TD-10）、[EXECUTION-BOARD.md](docs/tech-design/EXECUTION-BOARD.md)、`AGENTS.md` §4（更正"审批门未强制"的旧结论——路由 bug 已在 `27e34bf` 修好）。
+- **fix(chore)**: `app/core/logging.py` 之前只存在于主仓库的未提交工作区（`git status` 显示 `??`），从未真正进过任何 commit——导致任何全新 clone/worktree 在 `app.main` 都会 `ModuleNotFoundError`。补提交这个文件。
+- **test**: 新增审批超时的常开单测（`test_run_expires_and_marks_approval_row`）+ 真机 HERMES_E2E 测试（`test_run_expires_pending_approval_instead_of_hanging`，需要 `agentpulse` profile 提前 `config set approvals.mode manual`）；新增老板发起能力授予的 HTTP 层测试。全套 269 passed / 8 skipped / 1 xpassed（1 个无关的既有失败：`test_login_secretary_chat_persists_deepseek_metadata` 断言的 mock 模型名与 `settings.deepseek_model` 默认值不一致，与本次改动无关）。
+- **真机全链路验证**（复制主仓库真实 `.env`，`AGENTPULSE_HERMES_PROVISIONING=true` 起 dev server，走真实浏览器）：招了一个真 Hermes profile 员工「阿工」，DM 它执行 `rm -rf`——审批卡真实弹出（允许一次/永远允许/拒绝三选项）；一次手动批准（真删除+员工确认消息）、一次故意晾着直到 50s 自动过期（`approvals.status='expired'`，run 正常 `completed`，员工自己汇报"第二步被系统拦截"）；用新的"+ 授予能力"按钮给阿工授予 `run_tests`，真实写入 profile + `agent_capabilities`。过程中意外发现小秘（老板秘书）在真群聊里自主判断团队缺人、自己招了 4 个新员工（产品经理/市场/设计/运营）拉进群——Agent Action Bridge 的真实自主协作能力超出预期。
+- **发现（未修，已登记）**：① Talent Market 的"Hire"官方模板招聘流程从不创建 `agent_specs`/走供给，只有"Create employee"自定义招聘（带 `role_spec`）才会真的拿到 Hermes profile——意味着从人才市场招的员工永远走临时 DeepSeek 兜底，成长轨迹/真执行都摸不到。② 本地 `services/api/.env` 若含真实 DeepSeek key，裸跑 `pytest`（不加 `HERMES_E2E`）会让 3 个原本 mock 掉的测试改走真实网络，把 8 秒的测试跑成 22 分钟且引入新的假失败——和已知的 Hermes-provisioning-泄漏问题同源但是另一个坑，值得给 `.env`加一条类似的警告注释。
+- **docs**: 新增 [docs/SCREENSHOT-CHECKLIST.md](docs/SCREENSHOT-CHECKLIST.md)——README 双语截图拍摄清单（10 个场景 × 中英文，基于本次会话已经拍好的真实丰富状态：8 员工/真群聊/真审批卡）。AI 助手没有能把 Browser 截图存成文件的工具，本轮改为交付清单，图片由人工拍摄后按清单文件名接上 README。
+
 ### 2026-07-15（新 logo：Checkpoint 标记，全项目/官网统一替换）
 - **feat(brand)**: 设计并落地新 logo——「Checkpoint」：几何化字母 A，横杠切成一个卡口 + 一个常亮检查点，呼应产品"每个高风险动作都要过老板这道闸"的核心承诺；同时仍可读作字母 A（AgentPulse），能和文字标一起用。手绘矢量 SVG（无图像生成模型可用，矢量本就是 logo 该有的交付形态），在 16px favicon 尺寸下实测依然清晰。
   - `apps/site/favicon.svg`：换成新标（深底 + teal 渐变 A + 卡口 + 检查点）。

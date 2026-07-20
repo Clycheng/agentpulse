@@ -161,6 +161,14 @@ class BootstrapResponse(BaseModel):
     agent_experiences_by_agent: dict[str, list[AgentExperienceOut]]
     agent_template_categories: list[AgentTemplateCategoryOut]
     agent_templates: list[AgentTemplateOut]
+    anomaly_count_24h: int = Field(
+        default=0,
+        description="Failed runs + expired approvals in the last 24h — "
+        "borrowed from service-claw-cloud's playbook_runs.anomaly_count_24h "
+        "cached-cover-number pattern. A boss-facing 'did anything actually "
+        "go wrong' signal, distinct from a rejected approval (that's the "
+        "owner's own deliberate call, not an anomaly).",
+    )
 
 
 class SendMessageRequest(BaseModel):

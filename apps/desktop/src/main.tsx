@@ -321,6 +321,7 @@ type ApiBootstrap = {
     description: string;
     sort_order: number;
   }>;
+  anomaly_count_24h?: number;
 };
 
 const themeOptions: Array<{
@@ -794,6 +795,7 @@ function App() {
     }
   });
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [anomalyCount24h, setAnomalyCount24h] = useState(0);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [chats, setChats] = useState<Chat[]>([]);
@@ -867,6 +869,7 @@ function App() {
   const applyBootstrap = (data: ApiBootstrap) => {
     const mapped = mapBootstrap(data);
     setWorkspace(mapped.workspace);
+    setAnomalyCount24h(data.anomaly_count_24h ?? 0);
     setDepartments(mapped.departments);
     setAgents(mapped.agents);
     setChats(mapped.chats);
@@ -1772,6 +1775,7 @@ function App() {
         view={view}
         unreadTotal={unreadTotal}
         taskAlerts={confirmTasks.length + stuckCount}
+        anomalyCount24h={anomalyCount24h}
         themeMode={themeMode}
         onThemeModeChange={setThemeMode}
         onLogout={logout}
@@ -2333,6 +2337,7 @@ function Sidebar({
   view,
   unreadTotal,
   taskAlerts,
+  anomalyCount24h,
   themeMode,
   onThemeModeChange,
   onLogout,
@@ -2341,6 +2346,7 @@ function Sidebar({
   view: View;
   unreadTotal: number;
   taskAlerts: number;
+  anomalyCount24h: number;
   themeMode: ThemeMode;
   onThemeModeChange: (themeMode: ThemeMode) => void;
   onLogout: () => void;
@@ -2372,12 +2378,22 @@ function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+      <div
+        className="brand-mark"
+        title={
+          anomalyCount24h > 0
+            ? t('nav.anomalyTooltip', { count: anomalyCount24h })
+            : undefined
+        }
+      >
+        <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <path d="M16 4 L27 26 H21.5 L16 14 L10.5 26 H5 Z" fill="#06090c" fillOpacity=".92" />
           <rect x="10.5" y="18" width="11" height="4.5" rx="2.25" fill="#0d9488" />
           <circle cx="16" cy="20.25" r="2.25" fill="#eef4f2" />
         </svg>
+        {anomalyCount24h > 0 && (
+          <em className="brand-mark-anomaly">{anomalyCount24h}</em>
+        )}
       </div>
       {items.map((item) => (
         <button
@@ -4507,6 +4523,13 @@ function AgentDetail({
   >(null);
   const [reflecting, setReflecting] = useState(false);
   const [reflectMsg, setReflectMsg] = useState('');
+  const [catalog, setCatalog] = useState<
+    { key: string; description: string }[] | null
+  >(null);
+  const [showGrantPicker, setShowGrantPicker] = useState(false);
+  const [grantKey, setGrantKey] = useState('');
+  const [granting, setGranting] = useState(false);
+  const [grantMsg, setGrantMsg] = useState('');
 
   const loadGrowth = () => {
     apiRequest<{ skills: { name: string; content: string }[] }>(
@@ -4548,6 +4571,43 @@ function AgentDetail({
       setReflecting(false);
     }
   };
+
+  const openGrantPicker = () => {
+    setGrantMsg('');
+    setShowGrantPicker(true);
+    if (!catalog) {
+      apiRequest<{ key: string; description: string }[]>('/capabilities', { token })
+        .then(setCatalog)
+        .catch(() => setCatalog([]));
+    }
+  };
+
+  const grantCapability = async () => {
+    if (!grantKey) return;
+    setGranting(true);
+    setGrantMsg('');
+    try {
+      await apiRequest(`/agents/${agent.id}/capabilities`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ capability_key: grantKey }),
+      });
+      setGrantMsg(t('agentDetail.grantCapabilitySuccess'));
+      setShowGrantPicker(false);
+      setGrantKey('');
+      loadGrowth();
+    } catch (err) {
+      setGrantMsg(
+        err instanceof Error ? err.message : t('agentDetail.grantCapabilityFailed'),
+      );
+    } finally {
+      setGranting(false);
+    }
+  };
+
+  const grantableCapabilities = (catalog ?? []).filter(
+    (entry) => !(caps ?? []).some((cap) => cap.capability_key === entry.key),
+  );
 
   const skillTitle = (content: string, fallback: string) => {
     const first = content.split('\n').find((l) => l.trim());
@@ -4630,7 +4690,60 @@ function AgentDetail({
             </div>
             {reflectMsg && <p className="growth-msg">{reflectMsg}</p>}
 
-            <h4 className="growth-sub">{t('agentDetail.capabilitiesGained')}</h4>
+            <div className="growth-head">
+              <h4 className="growth-sub">{t('agentDetail.capabilitiesGained')}</h4>
+              <button
+                type="button"
+                className="button small"
+                onClick={openGrantPicker}
+              >
+                {t('agentDetail.grantCapability')}
+              </button>
+            </div>
+            {grantMsg && <p className="growth-msg">{grantMsg}</p>}
+            {showGrantPicker && (
+              <div className="grant-capability-picker">
+                {catalog === null ? null : grantableCapabilities.length === 0 ? (
+                  <EmptyState>{t('agentDetail.grantCapabilityNoneLeft')}</EmptyState>
+                ) : (
+                  <>
+                    <label>
+                      {t('agentDetail.grantCapabilityPick')}
+                      <select
+                        value={grantKey}
+                        onChange={(e) => setGrantKey(e.target.value)}
+                      >
+                        <option value="" disabled>
+                          —
+                        </option>
+                        {grantableCapabilities.map((entry) => (
+                          <option key={entry.key} value={entry.key}>
+                            {entry.key} — {entry.description}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="drawer-actions">
+                      <button
+                        type="button"
+                        className="button primary small"
+                        disabled={!grantKey || granting}
+                        onClick={grantCapability}
+                      >
+                        {t('agentDetail.grantCapabilityConfirm')}
+                      </button>
+                      <button
+                        type="button"
+                        className="button small"
+                        onClick={() => setShowGrantPicker(false)}
+                      >
+                        {t('agentDetail.grantCapabilityCancel')}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             {caps && caps.length === 0 && (
               <EmptyState>{t('agentDetail.noCapabilities')}</EmptyState>
             )}
@@ -5818,6 +5931,7 @@ type RunTrace = {
   error: string;
   created_at: string;
   completed_at: string | null;
+  waiting_on: string | null;
   steps: RunStepTrace[];
 };
 
@@ -5902,6 +6016,12 @@ function RunTraceModal({
                     {t(`runTrace.status.${run.status}`, { defaultValue: run.status })}
                   </span>
                 </header>
+                {run.waiting_on && (
+                  <p className="run-trace-waiting-on">
+                    {materialIcon('hourglass_empty')}
+                    {run.waiting_on}
+                  </p>
+                )}
                 {run.error && <p className="run-trace-error">{run.error}</p>}
                 <ol className="run-trace-steps">
                   {run.steps.map((step) => (

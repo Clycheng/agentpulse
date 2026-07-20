@@ -49,6 +49,18 @@ def test_bridge_resolve_unknown_returns_false():
     assert approval_bridge.resolve_pending("nope", "allow_once") is False
 
 
+def test_bridge_await_decision_expires_when_unanswered():
+    """ADR 0008 item 4: bounded wait — resolves to 'expired', not a hang."""
+
+    async def scenario():
+        aid = "appr_timeout"
+        result = await approval_bridge.await_decision(aid, timeout=0.05)
+        assert result == "expired"
+        assert not approval_bridge.has_pending(aid)  # discarded, not left dangling
+
+    asyncio.run(scenario())
+
+
 # ------------------------------------------------------------------ db helpers
 
 
@@ -168,6 +180,36 @@ def test_run_suspends_and_resumes_on_approve(tmp_path, monkeypatch):
     ).fetchall()
     assert any("已上线完成" in m["content"] for m in msgs)
     assert any(e["type"] == "approval_required" for e in events)
+
+
+def test_run_expires_and_marks_approval_row(tmp_path, monkeypatch):
+    """ADR 0008 item 4: an unanswered approval resolves on its own — the
+    approvals row ends up 'expired' (not stuck at 'pending' forever) and the
+    run still finishes, exactly like a manual deny."""
+    monkeypatch.setattr(settings, "approval_bridge_timeout_seconds", 0.05)
+    conn, ws_id, agent_id, conv_id, msg_id = _setup_db(tmp_path, monkeypatch)
+    aid = "appr_expire"
+
+    async def scenario():
+        async for _ in stream_agent_run(
+            conn,
+            ctx=_ctx(ws_id, agent_id, conv_id, tmp_path),
+            backend=_ApprovalBackend(aid),
+            input_message_id=msg_id,
+            permission_resolver=make_bridge_resolver(conn),
+        ):
+            pass
+
+    asyncio.run(scenario())
+
+    appr = conn.execute("SELECT * FROM approvals WHERE id = ?", (aid,)).fetchone()
+    assert appr["status"] == "expired"
+    run = get_run(conn, appr["run_id"])
+    assert run["status"] == RunStatus.COMPLETED
+    msgs = conn.execute(
+        "SELECT content FROM messages WHERE sender_type = 'agent'"
+    ).fetchall()
+    assert any("已取消" in m["content"] for m in msgs)
 
 
 def test_run_resumes_on_deny_with_alternative(tmp_path, monkeypatch):

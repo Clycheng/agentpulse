@@ -13,7 +13,12 @@ from app.orchestration import (
     list_role_bundles,
     resolve_bundle,
 )
-from app.schemas.agent_spec import ResolvedBundleOut, RoleBundleOut
+from app.orchestration.capability_catalog import CATALOG
+from app.schemas.agent_spec import (
+    CapabilityCatalogEntryOut,
+    ResolvedBundleOut,
+    RoleBundleOut,
+)
 
 router = APIRouter(tags=["catalog"])
 
@@ -33,3 +38,21 @@ def list_role_bundles_route(
             )
         )
     return bundles
+
+
+@router.get("/capabilities", response_model=list[CapabilityCatalogEntryOut])
+def list_capabilities_route(
+    _: str = Depends(get_workspace_id),  # require an authenticated workspace
+) -> list[CapabilityCatalogEntryOut]:
+    """Full capability catalog — powers the owner-initiated '+ grant
+    capability' picker on an employee's growth-trajectory panel (ADR 0008 §5).
+    """
+    return [
+        CapabilityCatalogEntryOut(
+            key=cap.key,
+            description=cap.description,
+            risk_gate=cap.risk_gate,
+            required_credentials=list(cap.required_credentials),
+        )
+        for cap in CATALOG.values()
+    ]

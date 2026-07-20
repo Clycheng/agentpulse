@@ -46,17 +46,34 @@ class RunBackend(Protocol):
     def run(self, ctx: RunContext, *, permission_resolver: Any = None): ...
 
 
-def make_bridge_resolver():
+def make_bridge_resolver(conn: Database | None = None):
     """Permission resolver that suspends the run until the owner resolves it.
 
     Registers a Future on the in-process approval bridge keyed by the request's
     approval_id and awaits it, so the ACP session (and the run) stays paused in
     place. Returns the owner's decision string ("allow_once" | "deny").
+
+    ADR 0008 item 4: if the owner never answers, ``await_decision`` resolves to
+    the "expired" sentinel once our own timeout elapses (comfortably before
+    Hermes's own hardcoded 60s ACP fail-close). When that happens — and only
+    if a ``conn`` was supplied — mark the pending approvals row 'expired'
+    instead of leaving it stuck at 'pending' forever with no record of what
+    happened; ACP still gets a plain "deny" either way.
     """
     from app.runtime.approval_bridge import await_decision
 
     async def resolver(info: dict) -> str:
-        return await await_decision(info["approval_id"])
+        decision = await await_decision(info["approval_id"])
+        if decision == "expired":
+            if conn is not None:
+                conn.execute(
+                    "UPDATE approvals SET status = 'expired', resolved_at = ? "
+                    "WHERE id = ? AND status = 'pending'",
+                    (_now_iso(), info["approval_id"]),
+                )
+                conn.commit()
+            return "deny"
+        return decision
 
     return resolver
 
@@ -72,11 +89,22 @@ def _persist_run_approval(
     tool_name = str(tool.get("title") or tool.get("name") or "高风险动作")
     approval_payload: dict = {}
     if category == "clarification":
+        # ADR 0008 §4/item 7: no real trigger source — the `clarify` toolset
+        # was never exposed to the model over ACP, and the SOUL no longer
+        # instructs agents to look for it (they just ask in normal chat
+        # instead). Kept only so historical/seeded rows of this type still
+        # render; a future business-tool gate (⑤, independent TD) could
+        # reintroduce a real trigger here.
         title = "员工请求澄清"
         description = str(tool.get("question") or tool.get("text") or tool_name)
         approval_type, risk = "clarification", "low"
     elif category == "capability_upgrade":
         # TD-06-T2: agent hit a capability gap and asked to be upgraded.
+        # ADR 0008 §5/item 7: same as above — SOUL no longer tells agents to
+        # self-request this (no real `clarify` trigger existed anyway). The
+        # real path is owner-initiated: see POST /api/agents/{id}/capabilities
+        # in workspace.py, which calls execute_upgrade() directly without a
+        # pending approval row. This branch stays for historical/seeded rows.
         title = "员工申请能力升级"
         description = str(tool.get("capability_description") or tool.get("text") or tool_name)
         approval_type, risk = "capability_upgrade", "medium"
@@ -167,7 +195,7 @@ async def stream_agent_run(
     # approval row + run transition are handled by _persist_run_approval
     # inside stream_agent_run's approval_required event handler.
     if permission_resolver is None and ctx.workspace_id and ctx.conversation_id:
-        permission_resolver = make_bridge_resolver()
+        permission_resolver = make_bridge_resolver(conn)
 
     message_parts: list[str] = []
     thought_parts: list[str] = []

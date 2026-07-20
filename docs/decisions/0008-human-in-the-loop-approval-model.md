@@ -1,6 +1,6 @@
 # ADR 0008：统一的人类介入审批模型（技术危险 + 业务危险）
 
-- 状态：**已接受（机制已实测证明）· 全量落地待分片实现**
+- 状态：**已接受（机制已实测证明）· 技术危险动作全链路（分片1-5、7）已实现；分片6（业务受控工具门）拆为独立 TD-10，待领**
 - 日期：2026-07-14
 - 关联：[ADR 0002](0002-...)（讨论对齐门须结构性强制）、[ADR 0005](0005-hermes-poc-safety-findings.md)（SOUL 铁律不保证被遵守，门要靠结构强制）、[ADR 0007](0007-hermes-v0.18-interface-acp.md)（ACP 传输）、[TD-03-T4](../tech-design/TD-03-hermes-execution.md)
 
@@ -54,13 +54,13 @@ Hermes 的审批由 `approvals.mode` 决定,三档（`tools/approval.py::_normal
 
 ## 待实现（分片）
 
-1. `LocalHermesProvisioner.configure` 设 `approvals.mode: manual`（+ timeout）;供给时对已存在 profile 也补写。
-2. `hermes_client` 审批返回值核对:approve 要返回 Hermes 认得的 outcome 类型（`AllowedOutcome` vs 我们现在给的 `SelectedPermissionOutcome`）并按 **option_id**（allow_once/allow_always/deny）选择,而非仅按 kind；否则"批准"可能被 Hermes 读成 deny。**接线前必须对真 Hermes 复测 approve 真放行。**
-3. `approval_bridge`/resolver:决定字符串扩成 `allow_once|allow_always|deny`,贯通到 ACP option_id。
-4. 前端审批卡:加"永远允许"按钮（现只有批准/驳回）。
-5. 挂起超时:Hermes 侧默认 60s fail-closed;我们 await-in-place 需与之对齐（要么加长、要么承接超时）。
-6. 业务受控工具（发布/花钱/对外发送）设计与门接入（独立 TD）。
-7. 删除/降级 clarification 求援卡 + capability_upgrade「agent 主动申请」的伪装,改为上述真路径。
+1. ✅ `LocalHermesProvisioner.configure` 设 `approvals.mode: manual`;供给时对已存在 profile 也补写。（不再补 `timeout`——见分片 5 的更正）
+2. ✅ `hermes_client` 审批返回值核对:approve 要返回 Hermes 认得的 outcome 类型（`AllowedOutcome` vs 我们现在给的 `SelectedPermissionOutcome`）并按 **option_id**（allow_once/allow_always/deny）选择,而非仅按 kind；否则"批准"可能被 Hermes 读成 deny。已对真 Hermes 复测 approve 真放行。
+3. ✅ `approval_bridge`/resolver:决定字符串扩成 `allow_once|allow_always|deny`,贯通到 ACP option_id。
+4. ✅ 前端审批卡:加"永远允许"按钮（现只有批准/驳回）。
+5. ✅ 挂起超时（2026-07-16 更正实现方式）：实测 Hermes ACP 路径的 `request_permission` 超时是**硬编码 60s**（`acp_adapter/permissions.py::make_approval_callback` 的 `timeout: float = 60.0` 默认值，调用点 `acp_adapter/server.py:1421` 从不传 `timeout=`），**不读** `approvals.timeout` 配置——那个 key 只喂 CLI 交互式 `prompt_dangerous_approval()`。所以没有写 `approvals.timeout`（写了也没用），而是让我们自己的 `approval_bridge.await_decision` 用 `asyncio.wait_for` 绑定一个明显小于 60s 的超时（`settings.approval_bridge_timeout_seconds`，默认 50s），超时时返回 `"expired"` 哨兵值，把对应 `approvals` 行标记 `status='expired'`（而不是永远卡在 `pending`），并保证我们的超时总是先于 Hermes 自己的硬编码超时触发，避免两边超时机制赛跑出不确定行为。
+6. 业务受控工具（发布/花钱/对外发送）设计与门接入——**独立成 TD-10，本 ADR 范围内不实现**，见 [EXECUTION-BOARD.md](../tech-design/EXECUTION-BOARD.md) 的独立待领项。
+7. ✅ 删除/降级 clarification 求援卡 + capability_upgrade「agent 主动申请」的伪装（2026-07-16）：SOUL.md 不再指示 agent 调用不存在的 `clarify` 工具，改为直接在对话里正常提问/说明缺口；`runner.py` 里对应的建审批分支保留但标注为"当前无真实触发源，仅为兼容历史行/未来⑤"；新增**老板发起**的能力授予真路径——`GET /api/capabilities`（目录）+ `POST /api/agents/{id}/capabilities`（直接调用 `execute_upgrade`，不经过挂起的 approval，因为老板本来就是在直接做决定）+ 前端员工详情页"+ 授予能力"选择器。
 
 ## 影响 / 风险
 

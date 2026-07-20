@@ -95,6 +95,219 @@ def test_default_provisioner_is_record_only_when_flag_off(monkeypatch):
     assert isinstance(build_provisioner_from_settings(), RecordOnlyProvisioner)
 
 
+# --------------------------------------------------- secretary bootstrap default
+
+
+def test_secretary_gets_default_capabilities_when_provisioning_enabled(tmp_path, monkeypatch):
+    from app.core.database import connect, init_db
+    from app.services.workspace import (
+        SECRETARY_DEFAULT_CAPABILITIES,
+        create_workspace_for_user,
+        new_id,
+        now_iso,
+    )
+
+    monkeypatch.setattr(
+        settings, "database_url", f"sqlite:///{tmp_path / 'secretary_on.sqlite3'}"
+    )
+    monkeypatch.setattr(settings, "hermes_provisioning", True)
+    # Exercise the settings.hermes_provisioning=True *code path* without
+    # actually shelling out to a real `hermes` CLI — this machine happens to
+    # have one installed, so without this the test would silently create a
+    # real orphaned profile under ~/.hermes/profiles on every run (found the
+    # hard way: 5 orphans accumulated before this fix).
+    import app.orchestration.supply as supply_module
+
+    monkeypatch.setattr(
+        supply_module, "build_provisioner_from_settings", lambda: RecordOnlyProvisioner()
+    )
+    init_db()
+    conn = connect()
+    user_id = new_id("user")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, "boss3@ex.com", "x", "老板", now_iso()),
+    )
+    ws = create_workspace_for_user(conn, user_id, "公司3")
+    conn.commit()
+
+    secretary = conn.execute(
+        "SELECT id FROM agents WHERE workspace_id = ? AND name = '小秘'", (ws["id"],)
+    ).fetchone()
+    spec = conn.execute(
+        "SELECT status, hermes_profile FROM agent_specs WHERE agent_id = ?",
+        (secretary["id"],),
+    ).fetchone()
+    assert spec is not None
+    assert spec["status"] == "ready" and spec["hermes_profile"]
+
+    caps = {
+        row["capability_key"]
+        for row in conn.execute(
+            "SELECT capability_key FROM agent_capabilities WHERE agent_id = ? AND status = 'enabled'",
+            (secretary["id"],),
+        ).fetchall()
+    }
+    assert caps == set(SECRETARY_DEFAULT_CAPABILITIES)
+
+
+def test_secretary_has_no_spec_when_provisioning_disabled(tmp_path, monkeypatch):
+    """Default (no Hermes configured): the secretary stays exactly as before —
+    no spec row at all — so the whole test suite's DeepSeek-fallback
+    assumptions for the bootstrap secretary aren't disturbed."""
+    from app.core.database import connect, init_db
+    from app.services.workspace import create_workspace_for_user, new_id, now_iso
+
+    monkeypatch.setattr(
+        settings, "database_url", f"sqlite:///{tmp_path / 'secretary_off.sqlite3'}"
+    )
+    monkeypatch.setattr(settings, "hermes_provisioning", False)
+    init_db()
+    conn = connect()
+    user_id = new_id("user")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, "boss4@ex.com", "x", "老板", now_iso()),
+    )
+    ws = create_workspace_for_user(conn, user_id, "公司4")
+    conn.commit()
+
+    secretary = conn.execute(
+        "SELECT id FROM agents WHERE workspace_id = ? AND name = '小秘'", (ws["id"],)
+    ).fetchone()
+    spec = conn.execute(
+        "SELECT id FROM agent_specs WHERE agent_id = ?", (secretary["id"],)
+    ).fetchone()
+    assert spec is None
+
+
+# ------------------------------------------- Talent Market hire provisioning
+
+
+def _recruit_setup(tmp_path, monkeypatch, *, db_name):
+    """Same real-code-path-without-real-Hermes pattern as the secretary tests."""
+    from app.core.database import connect, init_db
+    from app.services.workspace import create_workspace_for_user, new_id, now_iso
+
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / db_name}")
+    monkeypatch.setattr(settings, "hermes_provisioning", True)
+    import app.orchestration.supply as supply_module
+
+    monkeypatch.setattr(
+        supply_module, "build_provisioner_from_settings", lambda: RecordOnlyProvisioner()
+    )
+    init_db()
+    conn = connect()
+    user_id = new_id("user")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, "boss5@ex.com", "x", "老板", now_iso()),
+    )
+    ws = create_workspace_for_user(conn, user_id, "公司5")
+    conn.commit()
+    return conn, ws["id"]
+
+
+def test_recruit_from_template_provisions_credential_free_role(tmp_path, monkeypatch):
+    """内容主笔 (content-writer): every capability in its bundle is
+    credential-free, so the hire should come out fully ready — this is
+    the product's main advertised hiring flow (Talent Market), which
+    previously produced an employee with no agent_specs row at all."""
+    from app.services.workspace import recruit_from_template
+
+    conn, ws_id = _recruit_setup(tmp_path, monkeypatch, db_name="recruit_clean.sqlite3")
+    agent = recruit_from_template(
+        conn, workspace_id=ws_id, template_id="content-writer", department_name=None
+    )
+
+    spec = conn.execute(
+        "SELECT status, hermes_profile FROM agent_specs WHERE agent_id = ?",
+        (agent["id"],),
+    ).fetchone()
+    assert spec is not None
+    assert spec["status"] == "ready" and spec["hermes_profile"]
+
+    caps = {
+        row["capability_key"]: row["status"]
+        for row in conn.execute(
+            "SELECT capability_key, status FROM agent_capabilities WHERE agent_id = ?",
+            (agent["id"],),
+        ).fetchall()
+    }
+    assert caps == {"content_writing": "enabled", "seo_content": "enabled"}
+
+
+def test_recruit_from_template_mixed_role_stays_ready(tmp_path, monkeypatch):
+    """运营负责人 (ops-lead) mixes credential-free (data_analysis,
+    report_generation) with credential-needing (ad_analysis, ad_bidding —
+    need AD_API_KEY nobody has configured) capabilities. provision() is
+    all-or-nothing, so without the credential split this bundle would leave
+    the employee stuck at blocked_on_credentials with *no* real profile at
+    all — worse than useless for the two capabilities that could have
+    worked immediately."""
+    from app.services.workspace import recruit_from_template
+
+    conn, ws_id = _recruit_setup(tmp_path, monkeypatch, db_name="recruit_mixed.sqlite3")
+    agent = recruit_from_template(
+        conn, workspace_id=ws_id, template_id="ops-lead", department_name=None
+    )
+
+    spec = conn.execute(
+        "SELECT status, hermes_profile FROM agent_specs WHERE agent_id = ?",
+        (agent["id"],),
+    ).fetchone()
+    assert spec is not None
+    assert spec["status"] == "ready" and spec["hermes_profile"]
+
+    caps = {
+        row["capability_key"]: row["status"]
+        for row in conn.execute(
+            "SELECT capability_key, status FROM agent_capabilities WHERE agent_id = ?",
+            (agent["id"],),
+        ).fetchall()
+    }
+    assert caps["data_analysis"] == "enabled"
+    assert caps["report_generation"] == "enabled"
+    assert caps["ad_analysis"] == "credential_missing"
+    assert caps["ad_bidding"] == "credential_missing"
+
+
+def test_recruit_from_template_noop_when_provisioning_disabled(tmp_path, monkeypatch):
+    from app.core.database import connect, init_db
+    from app.services.workspace import (
+        create_workspace_for_user,
+        new_id,
+        now_iso,
+        recruit_from_template,
+    )
+
+    monkeypatch.setattr(
+        settings, "database_url", f"sqlite:///{tmp_path / 'recruit_off.sqlite3'}"
+    )
+    monkeypatch.setattr(settings, "hermes_provisioning", False)
+    init_db()
+    conn = connect()
+    user_id = new_id("user")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, "boss6@ex.com", "x", "老板", now_iso()),
+    )
+    ws = create_workspace_for_user(conn, user_id, "公司6")
+    conn.commit()
+
+    agent = recruit_from_template(
+        conn, workspace_id=ws["id"], template_id="content-writer", department_name=None
+    )
+    spec = conn.execute(
+        "SELECT id FROM agent_specs WHERE agent_id = ?", (agent["id"],)
+    ).fetchone()
+    assert spec is None
+
+
 _E2E = os.environ.get("HERMES_E2E") == "1" and shutil.which("hermes") is not None
 
 

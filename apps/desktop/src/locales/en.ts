@@ -12,7 +12,8 @@ const translations = {
     "dark": "Dark",
     "system": "System",
     "logout": "Log out",
-    "language": "Switch language"
+    "language": "Switch language",
+    "anomalyTooltip": "{{count}} anomalies in the last 24h (failed runs / approvals that timed out unanswered)"
   },
   "auth": {
     "heroTitle": "Turn your one-person company into an AI team.",
@@ -253,7 +254,14 @@ const translations = {
     "capEnabled": "Enabled",
     "capCredentialMissing": "Needs credentials",
     "capPending": "Pending",
-    "capDisabled": "Disabled"
+    "capDisabled": "Disabled",
+    "grantCapability": "+ Grant capability",
+    "grantCapabilityPick": "Pick a capability to grant",
+    "grantCapabilityConfirm": "Grant",
+    "grantCapabilityCancel": "Cancel",
+    "grantCapabilitySuccess": "Capability granted",
+    "grantCapabilityFailed": "Grant failed",
+    "grantCapabilityNoneLeft": "This employee already has every catalog capability"
   },
   "taskDetail": {
     "aria": "Task details",
