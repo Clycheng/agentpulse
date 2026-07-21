@@ -693,6 +693,393 @@ def test_stream_group_discussion_routes_through_orchestration(tmp_path, monkeypa
     assert callable(calls[0]["llm_complete"])
 
 
+def _give_agent_ready_hermes_profile(agent_id: str, workspace_id: str) -> None:
+    """Simulate a completed real Hermes provisioning (same as
+    test_employee_with_ready_hermes_profile_routes_to_hermes_not_function_loop)."""
+    conn = connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO agent_specs (
+              id, agent_id, workspace_id, role_name, source_request,
+              responsibilities_json, hermes_profile, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?)
+            """,
+            (
+                new_id("spec"), agent_id, workspace_id, "测试角色",
+                "test", "[]", "ap_test_profile", now_iso(), now_iso(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_group_discussion_auto_creates_brief_when_converged(tmp_path, monkeypatch):
+    """讨论轮收敛 → 路由层消费 brief_draft 事件，自动落 draft 共识 brief 并发
+    BRIEF_CARD 系统消息；同一会话已有 draft brief 时去重不重复发卡。"""
+    speaker_calls = {"n": 0}
+
+    async def noop_function_loop(**_kwargs):
+        return
+        yield  # pragma: no cover — makes this an async generator
+
+    async def fake_complete(self, payload):
+        if payload.agent.name == "主持人":
+            prompt = payload.agent.prompt or ""
+            if "判断讨论是否已经充分" in prompt:
+                return LlmChatResponse(
+                    reply='{"converged": true, "missing": []}',
+                    provider="deepseek", model="deepseek-v4-flash", usage={},
+                )
+            if "提炼共识纪要" in prompt:
+                return LlmChatResponse(
+                    reply=(
+                        '{"goal": "自动产出的共识目标", "scope": "范围A",'
+                        ' "constraints": "约束B", "success_criteria": "标准C"}'
+                    ),
+                    provider="deepseek", model="deepseek-v4-flash", usage={},
+                )
+            # 选人：返回非 JSON → 编排层 round-robin 兜底，轮流发言跑满 4 轮
+            speaker_calls["n"] += 1
+            return LlmChatResponse(
+                reply="我选不出来",
+                provider="deepseek", model="deepseek-v4-flash", usage={},
+            )
+        return LlmChatResponse(
+            reply=f"{payload.agent.name}：好的，我补充一点。",
+            provider="deepseek", model="deepseek-v4-flash", usage={},
+        )
+
+    monkeypatch.setattr(workspace_routes, "run_function_loop", noop_function_loop)
+    monkeypatch.setattr(workspace_routes.DeepSeekChatClient, "complete", fake_complete)
+
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    analyst = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "增长分析师",
+            "description": "负责增长数据分析",
+            "department_name": "增长与客户",
+            "prompt": "你负责分析渠道数据。",
+        },
+    ).json()
+    writer = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "内容策划",
+            "description": "负责内容方案",
+            "department_name": "内容部",
+            "prompt": "你负责把需求转成内容选题。",
+        },
+    ).json()
+    group = client.post(
+        "/api/conversations/group",
+        headers=auth_header(token),
+        json={"name": "增长作战室", "member_ids": [analyst["id"], writer["id"]]},
+    ).json()
+    group_id = group["id"]
+
+    send = client.post(
+        f"/api/conversations/{group_id}/messages",
+        headers=auth_header(token),
+        json={"content": "我们一起讨论下本周增长打法"},
+    )
+    assert send.status_code == 200
+    payload = send.json()
+    # BRIEF_CARD 系统消息并入响应（在 agent_messages 末尾）
+    card_messages = [
+        m for m in payload["agent_messages"] if m["sender_type"] == "system"
+    ]
+    assert len(card_messages) == 1
+    assert card_messages[0]["content"].startswith("BRIEF_CARD:")
+    assert "自动产出的共识目标" in card_messages[0]["content"]
+
+    conn = connect()
+    try:
+        briefs = conn.execute(
+            "SELECT * FROM consensus_briefs WHERE discussion_conversation_id = ?",
+            (group_id,),
+        ).fetchall()
+        assert len(briefs) == 1
+        assert briefs[0]["status"] == "draft"
+        assert briefs[0]["goal"] == "自动产出的共识目标"
+        assert briefs[0]["scope"] == "范围A"
+
+        # 再发一条：讨论再次收敛，但已有 draft brief → 去重不重复建
+        send2 = client.post(
+            f"/api/conversations/{group_id}/messages",
+            headers=auth_header(token),
+            json={"content": "那就按这个方向细化一下"},
+        )
+        assert send2.status_code == 200
+        briefs_after = conn.execute(
+            "SELECT * FROM consensus_briefs WHERE discussion_conversation_id = ?",
+            (group_id,),
+        ).fetchall()
+        assert len(briefs_after) == 1
+        cards = conn.execute(
+            """SELECT id FROM messages
+            WHERE conversation_id = ? AND sender_type = 'system'
+              AND content LIKE 'BRIEF_CARD:%'""",
+            (group_id,),
+        ).fetchall()
+        assert len(cards) == 1
+    finally:
+        conn.close()
+
+
+def test_stream_group_discussion_emits_brief_card_system_event(tmp_path, monkeypatch):
+    """流式端点消费 brief_draft 事件：落库 draft brief 并把 BRIEF_CARD 系统消息
+    作为 event: system 推给前端（前端实时渲染卡片，不用刷新）。"""
+
+    async def fake_run_discussion_round(conn, **kwargs):
+        yield {
+            "type": "brief_draft",
+            "draft": {
+                "goal": "流式产出的共识目标",
+                "scope": "",
+                "constraints": "",
+                "success_criteria": "",
+            },
+        }
+        yield {"type": "end", "converged": True, "turns_used": 2}
+
+    monkeypatch.setattr(
+        workspace_routes, "run_discussion_round", fake_run_discussion_round
+    )
+
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    analyst = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "增长分析师",
+            "description": "负责增长数据分析",
+            "department_name": "增长与客户",
+            "prompt": "你负责分析渠道数据。",
+        },
+    ).json()
+    writer = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "内容策划",
+            "description": "负责内容方案",
+            "department_name": "内容部",
+            "prompt": "你负责把需求转成内容选题。",
+        },
+    ).json()
+    group = client.post(
+        "/api/conversations/group",
+        headers=auth_header(token),
+        json={"name": "增长作战室", "member_ids": [analyst["id"], writer["id"]]},
+    ).json()
+    group_id = group["id"]
+
+    resp = client.post(
+        f"/api/conversations/{group_id}/messages/stream",
+        headers=auth_header(token),
+        json={"content": "我们一起讨论下本周增长打法"},
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "event: system" in body
+    assert "BRIEF_CARD:" in body
+    assert "流式产出的共识目标" in body
+
+    conn = connect()
+    try:
+        brief = conn.execute(
+            "SELECT * FROM consensus_briefs WHERE discussion_conversation_id = ?",
+            (group_id,),
+        ).fetchone()
+        assert brief is not None
+        assert brief["status"] == "draft"
+        assert brief["goal"] == "流式产出的共识目标"
+    finally:
+        conn.close()
+
+
+def test_group_reply_agents_not_limited_to_three(tmp_path, monkeypatch):
+    """群成员 LIMIT 3 已去掉：4 人群里第 4 个成员也要能参与回复（建群上限
+    12 即天然上限）。"""
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    member_ids = []
+    for index in range(4):
+        agent = client.post(
+            "/api/agents",
+            headers=auth_header(token),
+            json={
+                "name": f"员工{index + 1}号",
+                "description": "负责讨论",
+                "department_name": "综合部",
+                "prompt": "你负责参与讨论。",
+            },
+        ).json()
+        member_ids.append(agent["id"])
+
+    group = client.post(
+        "/api/conversations/group",
+        headers=auth_header(token),
+        json={"name": "四人群", "member_ids": member_ids},
+    ).json()
+
+    conn = connect()
+    try:
+        conversation = conn.execute(
+            "SELECT * FROM conversations WHERE id = ?", (group["id"],)
+        ).fetchone()
+        agents = workspace_routes.resolve_reply_agents(
+            conn,
+            auth["workspace"]["id"],
+            conversation,
+            workspace_routes.SendMessageRequest(content="大家好"),
+        )
+        assert len(agents) == 4
+        assert {a["id"] for a in agents} == set(member_ids)
+    finally:
+        conn.close()
+
+
+def test_secretary_with_hermes_profile_uses_function_loop_first(tmp_path, monkeypatch):
+    """小秘（system_secretary）即使有 ready Hermes profile 也必须先走 Agent
+    Action Bridge——招人/建群/建任务等系统工具只挂在 function_loop 上，先走
+    Hermes 她永远拿不到工具（只会嘴上答应）。Bridge 成功时 Hermes 不该被调用。"""
+    calls = {"function_loop": 0}
+
+    async def fake_function_loop(**_kwargs):
+        calls["function_loop"] += 1
+        yield {"type": "chunk", "content": "已通过系统工具处理好"}
+
+    async def fail_stream_agent_run(*_a, **_kw):
+        raise AssertionError(
+            "小秘在 function_loop 成功时不该走 Hermes（stream_agent_run 被调用）"
+        )
+        yield  # pragma: no cover — makes this an async generator
+
+    monkeypatch.setattr(workspace_routes, "run_function_loop", fake_function_loop)
+    monkeypatch.setattr(workspace_routes, "stream_agent_run", fail_stream_agent_run)
+
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary = bootstrap["agents"][0]
+    assert secretary["source"] == "system_secretary"
+    secretary_dm = bootstrap["conversations"][0]
+    _give_agent_ready_hermes_profile(secretary["id"], auth["workspace"]["id"])
+
+    # 非流式路径（complete_agent_reply）
+    send = client.post(
+        f"/api/conversations/{secretary_dm['id']}/messages",
+        headers=auth_header(token),
+        json={"content": "今天有什么安排？"},
+    )
+    assert send.status_code == 200
+    assert send.json()["agent_message"]["content"] == "已通过系统工具处理好"
+    assert calls["function_loop"] == 1
+
+    # 流式路径（_stream_reply_events）
+    with client.stream(
+        "POST",
+        f"/api/conversations/{secretary_dm['id']}/messages/stream",
+        headers=auth_header(token),
+        json={"content": "今天有什么安排？"},
+    ) as resp:
+        body = "".join(resp.iter_text())
+    assert "已通过系统工具处理好" in body
+    assert calls["function_loop"] == 2
+
+
+def test_recruit_intent_not_triggered_outside_secretary_dm(tmp_path, monkeypatch):
+    """招聘意图正则只在小秘私聊生效：群聊/普通员工 DM 里说"招个分析师"是在
+    讨论需求，不该被截胡建一个无能力的纸片员工（chat_factory）。"""
+
+    async def noop_function_loop(**_kwargs):
+        return
+        yield  # pragma: no cover — makes this an async generator
+
+    async def fake_complete(self, payload):
+        return LlmChatResponse(
+            reply=f"{payload.agent.name}：收到，我们先讨论。",
+            provider="deepseek", model="deepseek-v4-flash", usage={},
+        )
+
+    monkeypatch.setattr(workspace_routes, "run_function_loop", noop_function_loop)
+    monkeypatch.setattr(workspace_routes.DeepSeekChatClient, "complete", fake_complete)
+
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+
+    analyst = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "增长分析师",
+            "description": "负责增长数据分析",
+            "department_name": "增长与客户",
+            "prompt": "你负责分析渠道数据。",
+        },
+    ).json()
+    writer = client.post(
+        "/api/agents",
+        headers=auth_header(token),
+        json={
+            "name": "内容策划",
+            "description": "负责内容方案",
+            "department_name": "内容部",
+            "prompt": "你负责把需求转成内容选题。",
+        },
+    ).json()
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    agent_count_before = len(bootstrap["agents"])  # 小秘 + 2 名员工
+
+    # ① 群聊里说"帮我招一个市场分析师" → 不建员工
+    group = client.post(
+        "/api/conversations/group",
+        headers=auth_header(token),
+        json={"name": "讨论群", "member_ids": [analyst["id"], writer["id"]]},
+    ).json()
+    send = client.post(
+        f"/api/conversations/{group['id']}/messages",
+        headers=auth_header(token),
+        json={"content": "帮我招一个市场分析师"},
+    )
+    assert send.status_code == 200
+    assert send.json()["created_agent"] is None
+
+    # ② 普通员工 DM 里说同样的话 → 也不建员工
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    analyst_dm = next(
+        c for c in bootstrap["conversations"]
+        if c["kind"] == "dm" and c.get("agent_id") == analyst["id"]
+    )
+    send2 = client.post(
+        f"/api/conversations/{analyst_dm['id']}/messages",
+        headers=auth_header(token),
+        json={"content": "帮我招一个市场分析师"},
+    )
+    assert send2.status_code == 200
+    assert send2.json()["created_agent"] is None
+
+    reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    assert len(reloaded["agents"]) == agent_count_before
+    assert not any(a["source"] == "chat_factory" for a in reloaded["agents"])
+
+
 def test_task_api_updates_and_injects_related_context(tmp_path, monkeypatch):
     captured_payloads = []
 

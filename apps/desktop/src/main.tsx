@@ -1326,6 +1326,14 @@ function App() {
                     },
                   ],
                 }));
+              } else if (currentEvent === 'system') {
+                // 讨论收敛后服务端落库的 BRIEF_CARD 系统消息——实时上屏，
+                // 不用等流结束后的 bootstrap 刷新才看到共识卡片
+                const systemMessage = mapApiMessage(data);
+                setMessagesByChat((current) => ({
+                  ...current,
+                  [targetChat.id]: [...(current[targetChat.id] ?? []), systemMessage],
+                }));
               } else if (currentEvent === 'error') {
                 setMessagesByChat((current) => ({
                   ...current,

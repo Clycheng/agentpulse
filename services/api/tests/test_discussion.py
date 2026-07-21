@@ -581,3 +581,165 @@ class TestFormatTranscript:
         long_content = "x" * 600
         result = _format_transcript([{"sender_type": "user", "content": long_content}])
         assert len(result) < 600
+
+
+# --- Convergence → brief_draft event tests (TD-02-T3 wired into production) ---
+
+class TestDiscussionRoundConvergence:
+    """讨论轮正常结束后（主持人 NONE 或达到轮数上限）且实际发言 ≥2 轮时，
+    编排层用注入的主持人 LLM 回调做收敛检查：已对齐 → 产出 brief_draft 事件。
+    编排层只产事件不写库（落库在路由层）。"""
+
+    def _members(self):
+        return [
+            {"id": "agent_abc", "name": "分析师", "role": "分析", "description": ""},
+            {"id": "agent_def", "name": "策划", "role": "策划", "description": ""},
+        ]
+
+    def _make_executor(self, state):
+        async def reply(conn, agent_id):
+            state["n"] += 1
+            _insert_message(
+                conn, "conv_1", "agent", agent_id,
+                f"回复{state['n']}", f"msg_r{state['n']}",
+            )
+            yield {"type": "message", "message": {"id": f"msg_r{state['n']}"}}
+        return reply
+
+    def _make_llm(self, state, *, converged=True):
+        """按 prompt 内容分发：选人 / 收敛判断 / 提炼 brief 各回各的。"""
+        async def llm(prompt):
+            if "选择下一个该发言的人" in prompt:
+                state["speaker_calls"] += 1
+                if state["speaker_calls"] <= 2:
+                    nxt = self._members()[(state["speaker_calls"] - 1) % 2]["id"]
+                    return f'{{"next_speaker": "{nxt}", "reason": "轮流"}}'
+                return '{"next_speaker": "NONE", "reason": "讨论充分"}'
+            if "判断讨论是否已经充分" in prompt:
+                state["convergence_checks"] = state.get("convergence_checks", 0) + 1
+                if converged:
+                    return '{"converged": true, "missing": []}'
+                return '{"converged": false, "missing": ["缺背景"]}'
+            if "提炼共识纪要" in prompt:
+                return (
+                    '{"goal": "产出三篇选题", "scope": "小红书",'
+                    ' "constraints": "周三前", "success_criteria": "定稿"}'
+                )
+            return "{}"
+        return llm
+
+    def test_brief_draft_emitted_when_converged(self):
+        db = _make_db()
+        _insert_conversation(db)
+        _insert_message(db, "conv_1", "user", "user_1", "讨论下季度选题")
+        state = {"n": 0, "speaker_calls": 0}
+
+        events = _run(
+            run_discussion_round(
+                db,
+                workspace_id="ws_1",
+                conversation_id="conv_1",
+                member_agents=self._members(),
+                turn_executor=self._make_executor(state),
+                llm_complete=self._make_llm(state, converged=True),
+                debounce_seconds=0,
+            )
+        )
+        brief_events = [e for e in events if e["type"] == "brief_draft"]
+        assert len(brief_events) == 1
+        draft = brief_events[0]["draft"]
+        assert draft["goal"] == "产出三篇选题"
+        assert draft["scope"] == "小红书"
+        assert draft["constraints"] == "周三前"
+        assert draft["success_criteria"] == "定稿"
+        # brief_draft 必须在 end 之前，end 永远最后
+        assert events[-1]["type"] == "end"
+        assert events[-1]["turns_used"] == 2
+
+    def test_no_brief_draft_when_not_converged(self):
+        db = _make_db()
+        _insert_conversation(db)
+        _insert_message(db, "conv_1", "user", "user_1", "讨论下季度选题")
+        state = {"n": 0, "speaker_calls": 0}
+
+        events = _run(
+            run_discussion_round(
+                db,
+                workspace_id="ws_1",
+                conversation_id="conv_1",
+                member_agents=self._members(),
+                turn_executor=self._make_executor(state),
+                llm_complete=self._make_llm(state, converged=False),
+                debounce_seconds=0,
+            )
+        )
+        assert not [e for e in events if e["type"] == "brief_draft"]
+        # 收敛检查确实跑过（发言 ≥2 轮）
+        assert state["convergence_checks"] == 1
+        assert events[-1]["type"] == "end"
+
+    def test_no_convergence_check_when_fewer_than_two_turns(self):
+        """发言不足 2 轮的琐碎轮次不做收敛检查（省 LLM 调用）。"""
+        db = _make_db()
+        _insert_conversation(db)
+        _insert_message(db, "conv_1", "user", "user_1", "随便聊一句")
+
+        async def llm(prompt):
+            if "选择下一个该发言的人" in prompt:
+                # 只让一个人发言一次，随后主持人喊停
+                if not hasattr(llm, "called"):
+                    llm.called = True
+                    return '{"next_speaker": "agent_abc", "reason": "他先说"}'
+                return '{"next_speaker": "NONE", "reason": "够了"}'
+            if "判断讨论是否已经充分" in prompt:
+                raise AssertionError("发言不足 2 轮不应触发收敛检查")
+            return "{}"
+
+        state = {"n": 0}
+        events = _run(
+            run_discussion_round(
+                db,
+                workspace_id="ws_1",
+                conversation_id="conv_1",
+                member_agents=self._members(),
+                turn_executor=self._make_executor(state),
+                llm_complete=llm,
+                debounce_seconds=0,
+            )
+        )
+        assert events[-1]["type"] == "end"
+        assert events[-1]["turns_used"] == 1
+        assert not [e for e in events if e["type"] == "brief_draft"]
+
+    def test_llm_failure_silently_yields_no_brief(self):
+        """收敛检查 LLM 异常 / 返回垃圾 JSON → 静默不出 brief，讨论轮正常收尾。"""
+        db = _make_db()
+        _insert_conversation(db)
+        _insert_message(db, "conv_1", "user", "user_1", "讨论下季度选题")
+        state = {"n": 0, "speaker_calls": 0}
+
+        async def llm(prompt):
+            if "选择下一个该发言的人" in prompt:
+                state["speaker_calls"] += 1
+                if state["speaker_calls"] <= 2:
+                    nxt = self._members()[(state["speaker_calls"] - 1) % 2]["id"]
+                    return f'{{"next_speaker": "{nxt}", "reason": "轮流"}}'
+                return '{"next_speaker": "NONE", "reason": "讨论充分"}'
+            if "判断讨论是否已经充分" in prompt:
+                raise RuntimeError("LLM 超时")
+            return "{}"
+
+        events = _run(
+            run_discussion_round(
+                db,
+                workspace_id="ws_1",
+                conversation_id="conv_1",
+                member_agents=self._members(),
+                turn_executor=self._make_executor(state),
+                llm_complete=llm,
+                debounce_seconds=0,
+            )
+        )
+        assert not [e for e in events if e["type"] == "brief_draft"]
+        assert events[-1]["type"] == "end"
+        assert events[-1]["turns_used"] == 2

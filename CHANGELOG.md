@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 2026-07-21（讨论闭环核心修复：共识 brief 自动产出 + 小秘真招人 + 群成员全员可发言）
+
+- **feat(orchestration)**：讨论轮结束自动产出共识 brief——`run_discussion_round` 的讨论循环正常结束后，本轮实际发言 ≥2 轮就用注入的主持人 LLM 回调跑收敛检查（`build_convergence_prompt` → `check_convergence` → `build_brief_draft_prompt`，这三个函数 TD-02-T3 起就是只有测试引用的死码，本次接入生产），判定已对齐则 yield `brief_draft` 事件。编排层不写库；LLM 异常/JSON 垃圾/缺 goal 一律静默兜底为"不出 brief"，绝不影响发消息。
+- **feat(api)**：路由层消费 `brief_draft` 事件调 `create_brief` 落库（同会话已有 draft 状态 brief 则去重跳过），BRIEF_CARD 系统消息并入非流式响应；流式端点补上了 docstring 里早已声明但从未实现的 `event: system` SSE 帧。桌面端 SSE 消费循环加 `system` 分支，共识卡片实时上屏（渲染逻辑零改动，`mapApiMessage` 天然命中已有的 `BRIEF_CARD:` 卡片）。**这是"讨论→拍板→建任务"闭环第一次在生产路径上真正能跑出来**——此前 `POST /briefs` 全仓库只有测试调用，老板在 UI 里永远看不到共识卡片。
+- **fix(api)**：小秘（`source == "system_secretary"`）优先走 Agent Action Bridge——她 bootstrap 后有 ready Hermes profile，旧路由顺序（Hermes 优先）让她永远拿不到只挂在 function_loop 上的系统工具，`create_employee`/`create_group`/`create_task` 只会嘴上答应。现在先走 function_loop，异常或空产出才回落她的 Hermes profile → DeepSeek；其他 agent 顺序不变（有 ready profile 仍直走 Hermes，审批门可达）。顺手把多处 `except Exception: pass` 静默吞掉改成 `logger.warning("function_loop_failed")`。
+- **fix(api)**：`resolve_reply_agents` 删除群成员 `LIMIT 3`——建群允许 12 人，但第 4 人起永远不会被选为发言人。
+- **fix(api)**：`extract_recruit_intent` 招聘意图识别只在小秘私聊生效——此前任何会话（含群讨论）里说"招个分析师"都会被正则截胡，直接建一个无能力、不供给的纸片员工（`source="chat_factory"`）。
+- **test**：新增 9 例——编排层收敛检查 4 例（converged 出事件/未 converged 不出/<2 轮不检查/LLM 异常静默）、路由层 5 例（自动落 brief+卡片入响应+二次去重、SSE `event: system`、4 人群全量可回复、小秘有 ready profile 时流式/非流式都先走 function_loop、群聊与普通 DM 不触发招聘意图）。全套 **298 passed / 8 skipped / 1 xpassed**；2 个预存失败（`test_group_chat_returns_multiple_agent_replies_when_not_mentioned`、`test_task_api_updates_and_injects_related_context`）已用 stash 在改动前代码上复现确认与本次无关（本机 `.env` 真 key 导致 function_loop 泄漏真实网络调用）。三条架构层界 grep 全干净。Verified: `run_discussion_round` called via production path `POST /conversations/{id}/messages(.stream)`。
+- **已知边界（非本次范围）**：aligned 状态后老路径仍逐成员各回一条（12 人群会有 12 条回复）；brief 确认后只建一条任务记录，自动拆分/派发编排与 TD-10 业务工具门留后续。
+
 ### 2026-07-20（自然语言团队编译器：一段话描述团队 → 一次性建成真实员工）
 
 - **feat(api)**：新增 [ADR 0009](docs/decisions/0009-natural-language-team-compiler.md)——「最后一公里」的第一版：老板用一段话描述需要的团队（角色、分工、业务背景），系统拆解成可编辑的员工草稿，确认后一次性建成真实 Hermes 员工并自动拉进一个团队群。四点产品边界（不自动规划多群、不编造业务技能内容、不加独立校验器、不做试运行）均来自项目所有者的直接否决，记在 ADR 里防止下一个 AI 重新加回去。

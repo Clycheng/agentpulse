@@ -39,6 +39,9 @@ MODERATOR_IS_DEFAULT_SECRETARY = True
 # How long to wait, after a boss message arrives, before letting the group
 # jump in — gives a quick burst of follow-up messages a chance to land first.
 DISCUSSION_DEBOUNCE_SECONDS = 2.5
+# 本轮实际发言轮数低于该值时不做收敛检查——一两句话的琐碎轮次不值得
+# 花 LLM 调用判断"是否该产出共识 brief"。
+MIN_TURNS_FOR_CONVERGENCE_CHECK = 2
 
 
 class DiscussionStatus:
@@ -305,11 +308,20 @@ async def run_discussion_round(
     out silently; that follow-up message's own request will run the round
     (and sees the full transcript, so nothing is lost).
 
+    After the turn loop ends (moderator returned NONE or max turns reached),
+    if at least ``MIN_TURNS_FOR_CONVERGENCE_CHECK`` agent turns actually
+    happened, a convergence check runs via the same injected ``llm_complete``:
+    converged → a brief draft is produced and yielded as a ``brief_draft``
+    event. The orchestration layer never writes the brief itself — the route
+    layer consumes the event and persists it. Any failure in the check (LLM
+    error, unparseable JSON) silently means "no brief this round".
+
     Yields event dicts:
       - {"type": "speaker", "agent_id": str}
       - {"type": "chunk", "content": str}          (re-emitted from turn_executor)
       - {"type": "message", "message": <row>}      (re-emitted from turn_executor)
       - {"type": "error", "detail": str, "exc": Exception}
+      - {"type": "brief_draft", "draft": {goal, scope, constraints, success_criteria}}
       - {"type": "end", "converged": bool, "turns_used": int}   (always last)
     """
     turns_used = 0
@@ -355,7 +367,59 @@ async def run_discussion_round(
             converged = True
             break
 
+    # --- 收敛检查（TD-02-T3 接入生产）：讨论轮正常结束后判断是否已对齐 ---
+    # 只对实际发言 ≥ MIN_TURNS_FOR_CONVERGENCE_CHECK 的轮次检查；判定已对齐就
+    # 产出 brief 草稿事件，由路由层落库。任何失败静默兜底为"不出 brief"。
+    if turns_used >= MIN_TURNS_FOR_CONVERGENCE_CHECK and llm_complete is not None:
+        draft = await _maybe_draft_brief(conn, conversation_id, llm_complete)
+        if draft is not None:
+            yield {"type": "brief_draft", "draft": draft}
+
     yield {"type": "end", "converged": converged, "turns_used": turns_used}
+
+
+async def _maybe_draft_brief(
+    conn: Database,
+    conversation_id: str,
+    llm_complete: LlmComplete,
+) -> dict | None:
+    """收敛检查 + brief 草稿生成（主持人 LLM 回调由路由层注入）。
+
+    返回 {goal, scope, constraints, success_criteria} 草稿；未对齐或任何
+    环节失败（LLM 异常 / JSON 解析失败 / 缺 goal）都返回 None——绝不抛出，
+    出不了 brief 不能影响正常发消息。
+    """
+    try:
+        transcript = _load_transcript(conn, conversation_id)
+        verdict_text = await llm_complete(build_convergence_prompt(transcript))
+        verdict = check_convergence(
+            conn, conversation_id, llm_output=_parse_speaker_json(verdict_text)
+        )
+        if not verdict["converged"]:
+            return None
+
+        row = conn.execute(
+            "SELECT name FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+        conversation_name = (row["name"] if row else "") or ""
+        draft_text = await llm_complete(
+            build_brief_draft_prompt(transcript, conversation_name)
+        )
+        draft = _parse_speaker_json(draft_text)
+        if not draft:
+            return None
+        goal = draft.get("goal")
+        if not isinstance(goal, str) or not goal.strip():
+            return None
+        # create_brief 对各字段有 500 字上限，超长截断而不是让落库失败
+        return {
+            "goal": goal.strip()[:500],
+            "scope": str(draft.get("scope") or "")[:500],
+            "constraints": str(draft.get("constraints") or "")[:500],
+            "success_criteria": str(draft.get("success_criteria") or "")[:500],
+        }
+    except Exception:
+        return None
 
 
 # --- Convergence check (TD-02-T3) ---

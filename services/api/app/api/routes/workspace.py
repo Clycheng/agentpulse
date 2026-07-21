@@ -77,6 +77,7 @@ from app.services.workspace import (
 )
 from app.orchestration.supply import create_agent_spec, provision, ProvisioningError
 from app.tools.function_loop import run_function_loop
+from app.orchestration.brief import create_brief
 from app.orchestration.discussion import (
     run_discussion_round,
     build_discussion_context,
@@ -769,7 +770,9 @@ async def send_message(
     )
     created_task = None
     created_agent = None
-    recruit_intent = extract_recruit_intent(payload.content)
+    recruit_intent = _recruit_intent_for_conversation(
+        conversation, reply_agents, payload.content
+    )
     if recruit_intent is not None:
         department = ensure_department(
             conn, workspace["id"], recruit_intent["department_name"]
@@ -841,6 +844,7 @@ async def send_message(
                 yield {"type": "message", "message": msg}
 
         error_exc: Exception | None = None
+        brief_draft: dict | None = None
         async for event in run_discussion_round(
             conn,
             workspace_id=workspace["id"],
@@ -851,6 +855,8 @@ async def send_message(
         ):
             if event["type"] == "message":
                 agent_messages.append(event["message"])
+            elif event["type"] == "brief_draft":
+                brief_draft = event.get("draft")
             elif event["type"] == "error":
                 error_exc = event.get("exc")
 
@@ -858,6 +864,18 @@ async def send_message(
             raise HTTPException(status_code=503, detail=str(error_exc))
         if isinstance(error_exc, DeepSeekAPIError):
             raise HTTPException(status_code=502, detail=str(error_exc))
+
+        # 讨论收敛 → 自动落 draft 共识 brief（BRIEF_CARD 系统消息并入响应）
+        if brief_draft:
+            card_message = _create_brief_from_draft(
+                conn,
+                workspace_id=workspace["id"],
+                conversation_id=conversation_id,
+                draft=brief_draft,
+                reply_agents=reply_agents,
+            )
+            if card_message is not None:
+                agent_messages.append(card_message)
     else:
         # DM or single-agent group: original behavior
         for agent in reply_agents:
@@ -930,8 +948,10 @@ async def send_message_stream(
     )
     conn.commit()
 
-    # Handle recruit intent (same as non-streaming)
-    recruit_intent = extract_recruit_intent(payload.content)
+    # Handle recruit intent (same as non-streaming; 只在小秘私聊生效)
+    recruit_intent = _recruit_intent_for_conversation(
+        conversation, reply_agents, payload.content
+    )
     if recruit_intent is not None:
         department = ensure_department(
             conn, workspace["id"], recruit_intent["department_name"]
@@ -1015,6 +1035,18 @@ async def send_message_stream(
                     yield f"event: chunk\ndata: {json.dumps({'content': event['content']}, ensure_ascii=False)}\n\n"
                 elif etype == "message" and event.get("message"):
                     yield f"event: done\ndata: {json.dumps(serialize_message(event['message']), ensure_ascii=False)}\n\n"
+                elif etype == "brief_draft":
+                    # 讨论收敛 → 落 draft 共识 brief，把 BRIEF_CARD 系统消息
+                    # 实时推给前端（event: system，前端直接渲染卡片不用刷新）
+                    card_message = _create_brief_from_draft(
+                        conn,
+                        workspace_id=workspace["id"],
+                        conversation_id=conversation_id,
+                        draft=event.get("draft") or {},
+                        reply_agents=reply_agents,
+                    )
+                    if card_message is not None:
+                        yield f"event: system\ndata: {json.dumps(serialize_message(card_message), ensure_ascii=False)}\n\n"
                 elif etype == "approval_required":
                     yield f"event: approval\ndata: {json.dumps(event.get('payload', {}), ensure_ascii=False)}\n\n"
                 elif etype == "error":
@@ -1410,6 +1442,89 @@ def _build_hermes_prompt(user_message: Row, discussion_context: str) -> str:
     return latest
 
 
+async def _stream_hermes_reply(
+    conn: Database,
+    *,
+    workspace: Row,
+    conversation: Row,
+    agent: Row,
+    user_message: Row,
+    discussion_context: str,
+    profile: str,
+) -> AsyncGenerator:
+    """真 Hermes 执行路径（流式）——唯一能触发 ADR 0008 审批门的路径。"""
+    logger.info("agent_reply_via_hermes", agent_id=agent["id"], profile=profile)
+    work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
+    ctx = RunContext(
+        run_id="",
+        prompt=_build_hermes_prompt(user_message, discussion_context),
+        workdir=os.path.join(work_root, profile, "work", "runs", new_id("run")),
+        profile=profile,
+        agent_id=agent["id"],
+        workspace_id=workspace["id"],
+        conversation_id=conversation["id"],
+    )
+    async for event in stream_agent_run(
+        conn,
+        ctx=ctx,
+        backend=HermesBackend(hermes_bin=settings.hermes_bin),
+        input_message_id=user_message["id"],
+        permission_resolver=make_bridge_resolver(conn),  # TD-03-T4: suspend/resume
+    ):
+        yield event
+
+
+async def _run_action_bridge_stream(
+    conn: Database,
+    *,
+    workspace: Row,
+    conversation: Row,
+    agent: Row,
+    user_message: Row,
+) -> AsyncGenerator:
+    """Agent Action Bridge（流式）：function-calling loop。
+
+    逐段产出 chunk 事件，结尾把完整回复落库并产出 message 事件；
+    空产出则没有 message 事件（由调用方决定是否兜底）。
+    """
+    deepseek = DeepSeekChatClient()
+    history = load_llm_history(conn, conversation["id"])
+    related_tasks, knowledge_sources, agent_experiences = load_agent_llm_context(
+        conn,
+        workspace_id=workspace["id"],
+        conversation_id=conversation["id"],
+        agent_id=agent["id"],
+        query=user_message["content"],
+    )
+    tool_chunks: list[str] = []
+    async for ev in run_function_loop(
+        conn=conn,
+        workspace_id=workspace["id"],
+        workspace_name=workspace["name"],
+        agent=agent,
+        history=history,
+        user_message_content=user_message["content"],
+        deepseek_client=deepseek,
+        related_tasks=related_tasks,
+        knowledge_sources=knowledge_sources,
+        agent_experiences=agent_experiences,
+    ):
+        yield ev
+        if ev["type"] == "chunk":
+            tool_chunks.append(ev["content"])
+    # Persist the final message
+    reply_text = "".join(tool_chunks).strip()
+    if reply_text and conversation["id"]:
+        msg = add_message(
+            conn, conversation_id=conversation["id"],
+            sender_type="agent", sender_id=agent["id"],
+            content=reply_text,
+            provider="deepseek", model=deepseek.model,
+        )
+        conn.commit()
+        yield {"type": "message", "message": msg}
+
+
 async def _stream_reply_events(
     conn: Database,
     *,
@@ -1435,71 +1550,64 @@ async def _stream_reply_events(
 
     Employees without a Hermes profile keep using the Agent Action Bridge
     (create_employee/create_task/etc.), then the temporary DeepSeek path.
+
+    Exception: the secretary (source == "system_secretary") tries the Agent
+    Action Bridge FIRST even when she has a ready Hermes profile — her core
+    job (create_employee/create_group/create_task) lives in the system tools
+    that only function_loop has; sending her straight to Hermes means she can
+    only ever *talk about* hiring instead of actually doing it. Only a
+    function_loop exception (or empty output) falls through to her Hermes.
     """
     profile = resolve_hermes_profile(conn, agent["id"])
-    if profile:
-        logger.info("agent_reply_via_hermes", agent_id=agent["id"], profile=profile)
-        work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
-        ctx = RunContext(
-            run_id="",
-            prompt=_build_hermes_prompt(user_message, discussion_context),
-            workdir=os.path.join(work_root, profile, "work", "runs", new_id("run")),
-            profile=profile,
-            agent_id=agent["id"],
-            workspace_id=workspace["id"],
-            conversation_id=conversation["id"],
-        )
-        async for event in stream_agent_run(
+    is_secretary = agent.get("source") == "system_secretary"
+    if profile and not is_secretary:
+        async for event in _stream_hermes_reply(
             conn,
-            ctx=ctx,
-            backend=HermesBackend(hermes_bin=settings.hermes_bin),
-            input_message_id=user_message["id"],
-            permission_resolver=make_bridge_resolver(conn),  # TD-03-T4: suspend/resume
+            workspace=workspace,
+            conversation=conversation,
+            agent=agent,
+            user_message=user_message,
+            discussion_context=discussion_context,
+            profile=profile,
         ):
             yield event
         return
 
-    # ── Agent Action Bridge (streaming): no Hermes profile, try function loop ──
-    deepseek = DeepSeekChatClient()
-    history = load_llm_history(conn, conversation["id"])
-    related_tasks, knowledge_sources, agent_experiences = load_agent_llm_context(
-        conn,
-        workspace_id=workspace["id"],
-        conversation_id=conversation["id"],
-        agent_id=agent["id"],
-        query=user_message["content"],
-    )
+    # ── Agent Action Bridge (streaming): try function loop ──
+    bridge_produced = False
+    bridge_failed = False
     try:
-        tool_chunks: list[str] = []
-        async for ev in run_function_loop(
-            conn=conn,
-            workspace_id=workspace["id"],
-            workspace_name=workspace["name"],
+        async for ev in _run_action_bridge_stream(
+            conn,
+            workspace=workspace,
+            conversation=conversation,
             agent=agent,
-            history=history,
-            user_message_content=user_message["content"],
-            deepseek_client=deepseek,
-            related_tasks=related_tasks,
-            knowledge_sources=knowledge_sources,
-            agent_experiences=agent_experiences,
+            user_message=user_message,
         ):
+            if ev["type"] == "message":
+                bridge_produced = True
             yield ev
-            if ev["type"] == "chunk":
-                tool_chunks.append(ev["content"])
-        # Persist the final message
-        reply_text = "".join(tool_chunks).strip()
-        if reply_text and conversation["id"]:
-            msg = add_message(
-                conn, conversation_id=conversation["id"],
-                sender_type="agent", sender_id=agent["id"],
-                content=reply_text,
-                provider="deepseek", model=deepseek.model,
-            )
-            conn.commit()
-            yield {"type": "message", "message": msg}
+    except Exception as exc:
+        logger.warning("function_loop_failed", agent_id=agent["id"], error=str(exc))
+        bridge_failed = True
+    if not bridge_failed and (bridge_produced or not is_secretary):
+        # 产出了就结束；普通员工保持原行为——function_loop 走完（哪怕空产出）
+        # 也不回落；小秘空产出则继续走她的 Hermes / DeepSeek 兜底。
         return
-    except Exception:
-        pass
+
+    # 小秘兜底：Bridge 异常/空产出才轮到她的 Hermes profile
+    if profile:
+        async for event in _stream_hermes_reply(
+            conn,
+            workspace=workspace,
+            conversation=conversation,
+            agent=agent,
+            user_message=user_message,
+            discussion_context=discussion_context,
+            profile=profile,
+        ):
+            yield event
+        return
 
     # Temporary DeepSeek execution layer (employees without a Hermes profile).
     logger.info("agent_reply_via_deepseek", agent_id=agent["id"])
@@ -1604,6 +1712,91 @@ def make_speaker_selector():
     return _complete
 
 
+def _create_brief_from_draft(
+    conn: Database,
+    *,
+    workspace_id: str,
+    conversation_id: str,
+    draft: dict,
+    reply_agents: list[Row],
+) -> Row | None:
+    """讨论收敛后自动落一条 draft 共识 brief，返回刚插入的 BRIEF_CARD 系统消息。
+
+    去重：该会话已有 status='draft' 的 brief 就跳过（防止多轮讨论重复发卡）。
+    任何失败静默兜底返回 None——出不了卡片绝不能让发消息接口报错。
+    """
+    try:
+        goal = (draft.get("goal") or "").strip()
+        if not goal or not reply_agents:
+            return None
+        existing = conn.execute(
+            """SELECT id FROM consensus_briefs
+            WHERE discussion_conversation_id = ? AND status = 'draft' LIMIT 1""",
+            (conversation_id,),
+        ).fetchone()
+        if existing is not None:
+            return None
+        create_brief(
+            conn,
+            workspace_id=workspace_id,
+            discussion_conversation_id=conversation_id,
+            goal=goal,
+            scope=draft.get("scope") or "",
+            constraints=draft.get("constraints") or "",
+            success_criteria=draft.get("success_criteria") or "",
+            participant_agent_ids=[a["id"] for a in reply_agents],
+            created_by_agent_id=reply_agents[0]["id"],
+        )
+        conn.commit()
+        return conn.execute(
+            """SELECT * FROM messages
+            WHERE conversation_id = ? AND sender_type = 'system'
+            ORDER BY created_at DESC LIMIT 1""",
+            (conversation_id,),
+        ).fetchone()
+    except Exception as exc:
+        logger.warning(
+            "auto_brief_draft_failed", conversation_id=conversation_id, error=str(exc)
+        )
+        return None
+
+
+async def _complete_hermes_reply(
+    conn: Database,
+    *,
+    workspace: Row,
+    conversation_id: str,
+    agent: Row,
+    user_message: Row,
+    discussion_context: str,
+    profile: str,
+) -> Row | None:
+    """真 Hermes 执行路径（非流式）——与 _stream_hermes_reply 同一条路径，
+    只收集最终 message。"""
+    logger.info("agent_reply_via_hermes", agent_id=agent["id"], profile=profile)
+    work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
+    ctx = RunContext(
+        run_id="",
+        prompt=_build_hermes_prompt(user_message, discussion_context),
+        workdir=os.path.join(work_root, profile, "work", "runs", new_id("run")),
+        profile=profile,
+        agent_id=agent["id"],
+        workspace_id=workspace["id"],
+        conversation_id=conversation_id,
+    )
+    final_message = None
+    async for event in stream_agent_run(
+        conn,
+        ctx=ctx,
+        backend=HermesBackend(hermes_bin=settings.hermes_bin),
+        input_message_id=user_message["id"],
+        permission_resolver=make_bridge_resolver(conn),
+    ):
+        if event.get("type") == "message" and event.get("message"):
+            final_message = event["message"]
+    return final_message
+
+
 async def complete_agent_reply(
     conn: Database,
     *,
@@ -1618,30 +1811,21 @@ async def complete_agent_reply(
     # Same routing-order fix as _stream_reply_events: an employee with a real
     # ready Hermes profile must go straight to Hermes, or the approval gate
     # (ADR 0008) is unreachable for this (non-streaming) path too.
+    # Exception (also same as _stream_reply_events): the secretary tries the
+    # Agent Action Bridge FIRST even with a ready profile — her core job lives
+    # in the system tools only function_loop has.
     profile = resolve_hermes_profile(conn, agent["id"])
-    if profile:
-        logger.info("agent_reply_via_hermes", agent_id=agent["id"], profile=profile)
-        work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
-        ctx = RunContext(
-            run_id="",
-            prompt=_build_hermes_prompt(user_message, discussion_context),
-            workdir=os.path.join(work_root, profile, "work", "runs", new_id("run")),
-            profile=profile,
-            agent_id=agent["id"],
-            workspace_id=workspace["id"],
-            conversation_id=conversation_id,
-        )
-        final_message = None
-        async for event in stream_agent_run(
+    is_secretary = agent.get("source") == "system_secretary"
+    if profile and not is_secretary:
+        return await _complete_hermes_reply(
             conn,
-            ctx=ctx,
-            backend=HermesBackend(hermes_bin=settings.hermes_bin),
-            input_message_id=user_message["id"],
-            permission_resolver=make_bridge_resolver(conn),
-        ):
-            if event.get("type") == "message" and event.get("message"):
-                final_message = event["message"]
-        return final_message
+            workspace=workspace,
+            conversation_id=conversation_id,
+            agent=agent,
+            user_message=user_message,
+            discussion_context=discussion_context,
+            profile=profile,
+        )
 
     # ── Agent Action Bridge: function-calling loop ──
     # When use_tools is True (default for DM), the agent can call tools to
@@ -1683,8 +1867,21 @@ async def complete_agent_reply(
                 )
                 conn.commit()
                 return agent_message
-        except Exception:
-            pass  # Fall through to normal completion
+        except Exception as exc:
+            logger.warning("function_loop_failed", agent_id=agent["id"], error=str(exc))
+            # Fall through to Hermes (secretary) or normal completion
+
+    # 小秘兜底：Bridge 异常/空产出才轮到她的 Hermes profile
+    if profile and is_secretary:
+        return await _complete_hermes_reply(
+            conn,
+            workspace=workspace,
+            conversation_id=conversation_id,
+            agent=agent,
+            user_message=user_message,
+            discussion_context=discussion_context,
+            profile=profile,
+        )
     latest_user_content = next(
         (message.content for message in reversed(history) if message.role == "user"),
         "",
@@ -1781,6 +1978,24 @@ async def complete_agent_reply(
     return agent_message
 
 
+def _recruit_intent_for_conversation(
+    conversation: Row,
+    reply_agents: list[Row],
+    content: str,
+) -> dict | None:
+    """招聘意图正则只在小秘的一对一私聊里生效。
+
+    群聊（或其他员工的 DM）里说"招个分析师"是在和团队讨论需求，不该被
+    正则截胡直接建一个无能力的纸片员工（source="chat_factory"）——真正的
+    招聘走小秘 DM 或团队编译器（ADR 0009）。
+    """
+    if conversation["kind"] != "dm":
+        return None
+    if not reply_agents or reply_agents[0].get("source") != "system_secretary":
+        return None
+    return extract_recruit_intent(content)
+
+
 def resolve_reply_agents(
     conn: Database,
     workspace_id: str,
@@ -1815,7 +2030,6 @@ def resolve_reply_agents(
         WHERE conversation_members.conversation_id = ?
           AND agents.workspace_id = ?
         ORDER BY conversation_members.id
-        LIMIT 3
         """,
         (conversation["id"], workspace_id),
     ).fetchall()
