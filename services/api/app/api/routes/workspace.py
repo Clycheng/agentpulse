@@ -1051,6 +1051,21 @@ async def send_message_stream(
                     yield f"event: approval\ndata: {json.dumps(event.get('payload', {}), ensure_ascii=False)}\n\n"
                 elif etype == "error":
                     yield f"event: error\ndata: {json.dumps({'detail': event['detail']}, ensure_ascii=False)}\n\n"
+                elif etype == "end" and event.get("turns_used") == 0:
+                    # Moderator picked nobody (NONE) on the very first turn —
+                    # without this, the boss sees the group go dead silent with
+                    # no visible signal that it was a deliberate pause rather
+                    # than a bug. Surface it as a real system message so it
+                    # persists in the transcript too, not just this one stream.
+                    silence_message = add_message(
+                        conn,
+                        conversation_id=conversation_id,
+                        sender_type="system",
+                        sender_id="",
+                        content="目前没有员工需要接话——可以 @ 具体同事继续，或换个说法。",
+                    )
+                    conn.commit()
+                    yield f"event: system\ndata: {json.dumps(serialize_message(silence_message), ensure_ascii=False)}\n\n"
         else:
             # DM or single-agent: stream the reply (Hermes or DeepSeek fallback).
             for agent in reply_agents:
@@ -1555,8 +1570,14 @@ async def _stream_reply_events(
     Action Bridge FIRST even when she has a ready Hermes profile — her core
     job (create_employee/create_group/create_task) lives in the system tools
     that only function_loop has; sending her straight to Hermes means she can
-    only ever *talk about* hiring instead of actually doing it. Only a
-    function_loop exception (or empty output) falls through to her Hermes.
+    only ever *talk about* hiring instead of actually doing it. But a bridge
+    round that produced text WITHOUT calling any of those system tools isn't
+    evidence her job got done — it's just conversational filler (function_loop
+    always has a no-tool-needed fallback), and the request may well have been
+    a real task she now has real capabilities for. So only a bridge round
+    that actually invoked a tool short-circuits here; a tool-less bridge reply
+    (like a function_loop exception or empty output) still falls through to
+    her Hermes profile below, so granting her a capability isn't a no-op.
     """
     profile = resolve_hermes_profile(conn, agent["id"])
     is_secretary = agent.get("source") == "system_secretary"
@@ -1574,7 +1595,7 @@ async def _stream_reply_events(
         return
 
     # ── Agent Action Bridge (streaming): try function loop ──
-    bridge_produced = False
+    bridge_used_tool = False
     bridge_failed = False
     try:
         async for ev in _run_action_bridge_stream(
@@ -1584,18 +1605,20 @@ async def _stream_reply_events(
             agent=agent,
             user_message=user_message,
         ):
-            if ev["type"] == "message":
-                bridge_produced = True
+            if ev["type"] == "tool_call":
+                bridge_used_tool = True
             yield ev
     except Exception as exc:
         logger.warning("function_loop_failed", agent_id=agent["id"], error=str(exc))
         bridge_failed = True
-    if not bridge_failed and (bridge_produced or not is_secretary):
-        # 产出了就结束；普通员工保持原行为——function_loop 走完（哪怕空产出）
-        # 也不回落；小秘空产出则继续走她的 Hermes / DeepSeek 兜底。
+    if not bridge_failed and not is_secretary:
+        # 普通员工保持原行为——function_loop 走完（哪怕空产出）也不回落。
+        return
+    if not bridge_failed and is_secretary and bridge_used_tool:
+        # 她的本职工作（招人/建任务等系统工具）真的被调用了，到此为止。
         return
 
-    # 小秘兜底：Bridge 异常/空产出才轮到她的 Hermes profile
+    # 小秘兜底：Bridge 异常/空产出/没调用系统工具（纯聊天）都轮到她的 Hermes profile。
     if profile:
         async for event in _stream_hermes_reply(
             conn,
