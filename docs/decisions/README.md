@@ -46,3 +46,4 @@
 - [0009](0009-natural-language-team-compiler.md) — 自然语言团队编译器：一段话描述团队 → 可编辑草稿 → 一次性建成真实员工 + 自动拉一个团队群；`provision_new_agent` 统一四条招聘路径的供给入口
 - [0010](0010-durable-task-dispatch-and-company-tools.md) — 数据库持久任务调度 + 每 Run 动态 Hermes MCP 公司工具：一次确认后自动接力、重启恢复，Hermes 不直写业务库
 - [0011](0011-controlled-business-actions.md) — 受控业务动作：业务密钥由 AgentPulse 托管，独立动态 MCP + 持久动作队列在审批后执行真实外部调用
+- [0012](0012-cloud-hosted-desktop-distribution.md) — 云端托管薄桌面客户端 + workspace BYOK + 零固定成本安装包分发
