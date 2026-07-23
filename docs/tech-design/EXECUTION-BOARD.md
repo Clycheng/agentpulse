@@ -11,10 +11,9 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | TD-11 **自媒体 AI 公司自动执行闭环**（[TD-11-autonomous-content-execution.md](TD-11-autonomous-content-execution.md)） | 共识 brief 完整分工 → 一次确认 → 持久任务依赖自动接力 → 结构化待发布内容包 | **agentpulse** | 🔵 进行中（Codex，2026-07-23） |
-| 2 | TD-10 **实现**（[TD-10-business-tool-gate.md](TD-10-business-tool-gate.md)，设计已完成） | T1：MCP 服务地基 + `send_email` 试点工具全链路真机跑通；T2：推广到其余业务能力 + 前端卡片渲染 | **agentpulse** | ⚪ 待领（TD-11 完成后实施） |
+| 1 | TD-10 **实现**（[TD-10-business-tool-gate.md](TD-10-business-tool-gate.md)，设计已完成） | T1：MCP 服务地基 + `send_email` 试点工具全链路真机跑通；T2：推广到其余业务能力 + 前端卡片渲染 | **agentpulse** | ⚪ 待领 |
+| 2 | TD-09-T3 剩余(渠道出站回复 + 微信/widget 适配器) | 渠道入站已通，出站未接 | 否（微信/widget 需真账号） | ⚪ |
 | 3 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
-| 4 | TD-09-T3 剩余(渠道出站回复 + 微信/widget 适配器) | 渠道入站已通，出站未接 | 否（微信/widget 需真账号） | ⚪ |
 
 ## 有依赖，等前置完成后做
 
@@ -27,6 +26,7 @@
 
 | 任务 | commit | 备注 |
 |---|---|---|
+| **TD-11 自媒体 AI 公司自动执行闭环**：3-6 项严格分工 brief + 一次 launch + 数据库持久依赖调度/租约恢复 + 每 Run 动态 MCP 公司工具 + Markdown 接力 + `content_package_v1` 最终交付；默认四人内容团队和内容经营群；桌面端计划/Run/审批/内容包视图。**真机验证**：四人讨论小红书周计划，API 执行中重启后恢复，三项自动接力并全部完成；desktop/mobile 截图归档。325 passed / 8 skipped，desktop build、pip check、三条架构 grep 全过 | `129bf99` | [ADR 0010](../decisions/0010-durable-task-dispatch-and-company-tools.md) / [TD-11](TD-11-autonomous-content-execution.md)；下一步严格按 TD-10 → TD-09 → TD-08 |
 | **讨论闭环核心修复（4 项断点）**：①**讨论→共识 brief 自动产出**——`run_discussion_round` 讨论轮结束（≥2 发言）自动跑收敛检查（TD-02-T3 起就是死码的 `check_convergence`/`build_convergence_prompt`/`build_brief_draft_prompt` 接入生产），已对齐则路由层 `create_brief` 落库（draft 去重）+ 流式补实现 `event: system` SSE，前端 BRIEF_CARD 实时上屏——此前 `POST /briefs` 只有测试调用，老板在 UI 里永远看不到共识卡片，"讨论→拍板→建任务"闭环第一次在生产真能跑；②**小秘优先 function_loop**——她有 ready Hermes profile 时旧路由直送 Hermes，拿不到只在 Bridge 上的系统工具，招人/建群/建任务只会嘴上答应，现在先走 Bridge、异常才回落 Hermes，顺手把静默 `except: pass` 改成 `logger.warning`；③`resolve_reply_agents` 删 `LIMIT 3`，12 人群全员可发言；④`extract_recruit_intent` 只在小秘私聊生效，群聊不再被正则截胡建纸片员工。**测试**：+9 例全过，全套 298 passed / 8 skipped / 1 xpassed；2 个预存失败已 stash 复现确认是 `.env` 真 key 网络泄漏，与本次无关。三条层界 grep 干净 | `ea53359` | 已知边界：aligned 后老路径逐成员各回一条（12 人群 12 条回复）；brief 确认后自动拆任务/派发编排留后续 |
 | **自然语言团队编译器**（[ADR 0009](../decisions/0009-natural-language-team-compiler.md)）：产品北极星③"自然语言捏 agent"第一版——老板一段话描述团队 → `POST /agents/draft-team` 生成可编辑草稿（复用 TD-04-T3 一直未接生产入口的 `draft_role_spec`）→ 老板编辑姓名/部门/职责/能力 key → `POST /agents/create-team` 一次性真建员工 + 自动拉一个团队群。`app/services/workspace.py::provision_new_agent` 从模板招聘专属逻辑泛化成统一供给入口，人才市场招聘/秘书 bootstrap/小秘 `create_employee` 工具/团队编译器四条路径现在共用一个函数。小秘工具新增 `list_capabilities` + `create_employee` 的 `responsibilities`/`capability_keys` 参数，招人不再是纸片员工。桌面端新增 `TeamCompilerModal`（复用"+授予能力"的能力选择器模式），中英 i18n 齐。四点产品边界（不规划多群/不编业务技能/不加校验器/不做试运行）由项目所有者拍板否决记入 ADR。**真机验证**：真实场景描述（居家养老+抖音号）生成 3 人草稿→真建 3 员工+1 群，`hermes profile list` 可见真 profile；`curl` 单独验证单人创建的 spec/capability 落库。288 通过、tsc 无错 | 2026-07-20(见 CHANGELOG) | 3 个预存失败与本次无关（Python 3.14 async mock 兼容性 + function_loop 真调用泄漏，已登记独立跟进） |
 | **人才市场招聘接真供给**：`recruit_from_template` 之前只 `create_agent`，从不建 `agent_specs`/供给——产品主推的招聘入口招来的全是纸片人，只有"创建员工"手动勾能力芯片才真供给。新增 `capability_catalog.split_by_credentials` 解决 `provision()` 全有或全无的坑（一个 bundle 混了缺凭证的能力会让整个员工卡住，即使其他能力本可以立刻工作）；补齐 4 个官方模板缺失的 `ROLE_BUNDLES` 映射。**真机验证**：真招"内容主笔"/"运营负责人"，profile 真建出来，混合 bundle 正确保留可用能力、只把缺凭证的那部分标记待补。280 通过 | 2026-07-19(见 CHANGELOG) | 测试踩过真建 5 个孤儿 Hermes profile 的坑，已清理+改成显式 mock provisioner |
