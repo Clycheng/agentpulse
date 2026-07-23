@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 2026-07-23（TD-10：受控业务工具门与真实邮件闭环）
+
+- **feat(runtime)**：新增与公司内部工具隔离的 `/mcp/business-tools`，RunService 在数据库 Run 建立后按员工已启用能力动态注入短期签名 token；token 绑定 workspace/conversation/run/agent/可选 task，服务端再次校验 Run 归属、工具映射和员工能力。聊天 Run 只获得业务工具，任务 Run 可同时获得 company/business tools。
+- **feat(security)**：新增 AgentPulse 托管的加密 `agent_credentials`，使用 `auth_secret_key` 派生版本化 Fernet key；API、数据库审计和 Hermes profile 均不暴露明文。凭证录入会启用全部依赖能力，撤销会统一降级为 `credential_missing`，启动迁移会修复历史上“已启用但无凭证”的假状态。
+- **feat(execution)**：新增持久化 `business_actions` 队列与 `business_tool_policies`；独立 worker 使用 30 秒租约、稳定幂等指纹和最多两次 provider 尝试，支持重启恢复、网络失败安全重试、成功动作复用和拒绝/过期后重新申请。业务审批改为数据库轮询，50 秒未处理 fail-close；长期放行严格限定员工 + 具体工具，付款类禁止长期放行。
+- **feat(email)**：首个真实动作 `send_email` 接入 Resend `/emails`，支持 1-50 个收件人、纯文本主题/正文和可选 reply-to；只会选择绑定当前员工的唯一活跃邮件渠道，并使用永久动作 ID 生成稳定 `Idempotency-Key`。社媒发布、退款、广告出价、薪酬和付款仅提供诚实的未配置骨架，不产生假成功。
+- **feat(product)**：员工档案新增掩码凭证录入/撤销、最近对外动作和长期放行管理；渠道页新增 Resend 发件地址、名称和员工绑定；聊天每秒恢复待审批项，任务快照展示关联业务动作。审批卡自然语言展示发件人、收件人、主题与正文摘要，并提供允许一次、永远允许、拒绝；消息与渠道页完成桌面/移动端响应式走查。
+- **test/e2e**：新增 13 个常开业务工具测试和 1 个守护式真实 Resend E2E，覆盖密文/错密钥/撤销、legacy 状态修复、token 越权、审批/策略/超时、租约/重试/幂等、未实现工具诚实失败、聊天/任务 MCP 隔离、SQLite CHECK 升级及公开 API；全套 **338 passed / 9 skipped**，desktop lint/build、三条架构边界 grep 和真实 UI 拒绝路径均通过。未提供真实 Resend key 时守护式 E2E 明确跳过，本轮没有发出真实邮件。
+- **architecture**：新增 [ADR 0011](docs/decisions/0011-controlled-business-actions.md)，确定“业务密钥由 AgentPulse 托管、业务动作持久执行、内部公司工具与外部业务工具隔离”；修订 [TD-10](docs/tech-design/TD-10-business-tool-gate.md)，复用 TD-11 的动态 MCP 和数据库审批，不再依赖进程内 `approval_bridge`。
+
 ### 2026-07-23（TD-11：自媒体 AI 公司自动执行闭环）
 
 - **feat(orchestration)**：共识 brief 增加 3-6 项严格分工合同（负责人/交付/依赖/最终项），生成时携带群成员 ID、岗位和职责；非法负责人、重复 key、未知依赖、依赖环或缺少唯一 `content_package_v1` 最终项时修复一次，仍失败则继续讨论。群讨论中的小秘禁用执行型 Action Bridge，主持人选择 NONE 时仍能用历史 transcript 收敛，避免讨论门被绕过或永不收口。

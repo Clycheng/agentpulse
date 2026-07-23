@@ -184,6 +184,9 @@ def init_db() -> None:
             init_postgres(conn)
         else:
             init_sqlite(conn)
+        from app.services.credentials import reconcile_all_capability_credentials
+
+        reconcile_all_capability_credentials(conn)
         seed_official_talent_market(conn)
         conn.commit()
     except Exception:
@@ -418,7 +421,7 @@ def init_postgres(conn: Database) -> None:
           status TEXT NOT NULL DEFAULT 'pending',
           risk_level TEXT NOT NULL DEFAULT 'medium',
           type TEXT NOT NULL DEFAULT 'high_risk'
-            CHECK(type IN ('high_risk','clarification','capability_upgrade')),
+            CHECK(type IN ('high_risk','clarification','capability_upgrade','business_tool')),
           payload_json TEXT NOT NULL DEFAULT '{}',
           resolved_by TEXT NOT NULL DEFAULT '',
           resolved_at TEXT,
@@ -526,8 +529,64 @@ def init_postgres(conn: Database) -> None:
           updated_at TEXT NOT NULL,
           UNIQUE(agent_id, capability_key)
         );
+
+        CREATE TABLE IF NOT EXISTS agent_credentials (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          credential_name TEXT NOT NULL,
+          encrypted_value TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(agent_id, credential_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS business_tool_policies (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          tool_name TEXT NOT NULL,
+          active INTEGER NOT NULL DEFAULT 1,
+          created_by TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          revoked_at TEXT,
+          UNIQUE(workspace_id, agent_id, tool_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS business_actions (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+          task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          capability_key TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          arguments_json TEXT NOT NULL DEFAULT '{}',
+          arguments_hash TEXT NOT NULL,
+          dedupe_key TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN (
+            'pending_approval','approved','executing','succeeded',
+            'rejected','expired','failed'
+          )),
+          approval_id TEXT UNIQUE REFERENCES approvals(id) ON DELETE SET NULL,
+          provider TEXT NOT NULL DEFAULT '',
+          external_id TEXT NOT NULL DEFAULT '',
+          result_json TEXT NOT NULL DEFAULT '{}',
+          error TEXT NOT NULL DEFAULT '',
+          attempt_no INTEGER NOT NULL DEFAULT 0,
+          lease_owner TEXT,
+          lease_expires_at TEXT,
+          expires_at TEXT,
+          approved_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
         """
     )
+    _upgrade_approval_type_check(conn)
     ensure_column(conn, "messages", "provider", "TEXT")
     ensure_column(conn, "messages", "model", "TEXT")
     ensure_column(conn, "tasks", "description", "TEXT NOT NULL DEFAULT ''")
@@ -557,7 +616,7 @@ def init_postgres(conn: Database) -> None:
         "approvals",
         "type",
         "TEXT NOT NULL DEFAULT 'high_risk' "
-        "CHECK(type IN ('high_risk','clarification','capability_upgrade'))",
+        "CHECK(type IN ('high_risk','clarification','capability_upgrade','business_tool'))",
     )
     ensure_column(
         conn, "approvals", "payload_json", "TEXT NOT NULL DEFAULT '{}'"
@@ -606,9 +665,15 @@ def init_postgres(conn: Database) -> None:
         "ON tasks(task_plan_id, plan_item_key) WHERE task_plan_id IS NOT NULL "
         "AND plan_item_key IS NOT NULL"
     )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_business_actions_active_dedupe "
+        "ON business_actions(dedupe_key) WHERE status IN "
+        "('pending_approval','approved','executing','succeeded')"
+    )
 
 
 def init_sqlite(conn: Database) -> None:
+    _upgrade_approval_type_check(conn)
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -778,7 +843,7 @@ def init_sqlite(conn: Database) -> None:
           status TEXT NOT NULL DEFAULT 'pending',
           risk_level TEXT NOT NULL DEFAULT 'medium',
           type TEXT NOT NULL DEFAULT 'high_risk'
-            CHECK(type IN ('high_risk','clarification','capability_upgrade')),
+            CHECK(type IN ('high_risk','clarification','capability_upgrade','business_tool')),
           payload_json TEXT NOT NULL DEFAULT '{}',
           resolved_by TEXT NOT NULL DEFAULT '',
           resolved_at TEXT,
@@ -941,6 +1006,61 @@ def init_sqlite(conn: Database) -> None:
           updated_at TEXT NOT NULL,
           UNIQUE(agent_id, capability_key)
         );
+
+        CREATE TABLE IF NOT EXISTS agent_credentials (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          credential_name TEXT NOT NULL,
+          encrypted_value TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(agent_id, credential_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS business_tool_policies (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          tool_name TEXT NOT NULL,
+          active INTEGER NOT NULL DEFAULT 1,
+          created_by TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          revoked_at TEXT,
+          UNIQUE(workspace_id, agent_id, tool_name)
+        );
+
+        CREATE TABLE IF NOT EXISTS business_actions (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+          task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          capability_key TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          arguments_json TEXT NOT NULL DEFAULT '{}',
+          arguments_hash TEXT NOT NULL,
+          dedupe_key TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN (
+            'pending_approval','approved','executing','succeeded',
+            'rejected','expired','failed'
+          )),
+          approval_id TEXT UNIQUE REFERENCES approvals(id) ON DELETE SET NULL,
+          provider TEXT NOT NULL DEFAULT '',
+          external_id TEXT NOT NULL DEFAULT '',
+          result_json TEXT NOT NULL DEFAULT '{}',
+          error TEXT NOT NULL DEFAULT '',
+          attempt_no INTEGER NOT NULL DEFAULT 0,
+          lease_owner TEXT,
+          lease_expires_at TEXT,
+          expires_at TEXT,
+          approved_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
         """
     )
     ensure_column(conn, "messages", "provider", "TEXT")
@@ -972,7 +1092,7 @@ def init_sqlite(conn: Database) -> None:
         "approvals",
         "type",
         "TEXT NOT NULL DEFAULT 'high_risk' "
-        "CHECK(type IN ('high_risk','clarification','capability_upgrade'))",
+        "CHECK(type IN ('high_risk','clarification','capability_upgrade','business_tool'))",
     )
     ensure_column(
         conn, "approvals", "payload_json", "TEXT NOT NULL DEFAULT '{}'"
@@ -1019,6 +1139,11 @@ def init_sqlite(conn: Database) -> None:
         "ON tasks(task_plan_id, plan_item_key) WHERE task_plan_id IS NOT NULL "
         "AND plan_item_key IS NOT NULL"
     )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_business_actions_active_dedupe "
+        "ON business_actions(dedupe_key) WHERE status IN "
+        "('pending_approval','approved','executing','succeeded')"
+    )
 
 
 def ensure_column(
@@ -1044,12 +1169,83 @@ def ensure_column(
     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
+def _upgrade_approval_type_check(conn: Database) -> None:
+    """Allow business-tool approvals on databases created before TD-10."""
+    if conn.dialect == "postgres":
+        exists = conn.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_name = 'approvals'"
+        ).fetchone()
+        if exists is None:
+            return
+        conn.execute("ALTER TABLE approvals DROP CONSTRAINT IF EXISTS approvals_type_check")
+        conn.execute(
+            "ALTER TABLE approvals ADD CONSTRAINT approvals_type_check "
+            "CHECK(type IN ('high_risk','clarification','capability_upgrade','business_tool'))"
+        )
+        return
+
+    schema = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'approvals'"
+    ).fetchone()
+    if schema is None or "business_tool" in (schema["sql"] or ""):
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(approvals)").fetchall()}
+    required = {
+        "id", "workspace_id", "run_id", "task_id", "conversation_id", "agent_id",
+        "title", "description", "status", "risk_level", "type", "payload_json",
+        "resolved_by", "resolved_at", "created_at",
+    }
+    if not required.issubset(columns):
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        CREATE TABLE approvals_td10 (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+          task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'pending',
+          risk_level TEXT NOT NULL DEFAULT 'medium',
+          type TEXT NOT NULL DEFAULT 'high_risk'
+            CHECK(type IN ('high_risk','clarification','capability_upgrade','business_tool')),
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          resolved_by TEXT NOT NULL DEFAULT '',
+          resolved_at TEXT,
+          created_at TEXT NOT NULL
+        );
+        INSERT INTO approvals_td10 (
+          id, workspace_id, run_id, task_id, conversation_id, agent_id,
+          title, description, status, risk_level, type, payload_json,
+          resolved_by, resolved_at, created_at
+        ) SELECT
+          id, workspace_id, run_id, task_id, conversation_id, agent_id,
+          title, description, status, risk_level, type, payload_json,
+          resolved_by, resolved_at, created_at
+        FROM approvals;
+        DROP TABLE approvals;
+        ALTER TABLE approvals_td10 RENAME TO approvals;
+        """
+    )
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
 def reset_database_for_tests() -> None:
     conn = connect()
     try:
         if conn.dialect == "postgres":
             conn.executescript(
                 """
+                DROP TABLE IF EXISTS business_actions CASCADE;
+                DROP TABLE IF EXISTS business_tool_policies CASCADE;
+                DROP TABLE IF EXISTS agent_credentials CASCADE;
+                DROP TABLE IF EXISTS task_dependencies CASCADE;
+                DROP TABLE IF EXISTS task_plans CASCADE;
+                DROP TABLE IF EXISTS run_steps CASCADE;
                 DROP TABLE IF EXISTS runs CASCADE;
                 DROP TABLE IF EXISTS agent_experiences CASCADE;
                 DROP TABLE IF EXISTS approvals CASCADE;
@@ -1071,6 +1267,12 @@ def reset_database_for_tests() -> None:
         else:
             conn.executescript(
                 """
+                DROP TABLE IF EXISTS business_actions;
+                DROP TABLE IF EXISTS business_tool_policies;
+                DROP TABLE IF EXISTS agent_credentials;
+                DROP TABLE IF EXISTS task_dependencies;
+                DROP TABLE IF EXISTS task_plans;
+                DROP TABLE IF EXISTS run_steps;
                 DROP TABLE IF EXISTS runs;
                 DROP TABLE IF EXISTS agent_experiences;
                 DROP TABLE IF EXISTS approvals;

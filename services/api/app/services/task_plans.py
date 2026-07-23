@@ -16,6 +16,7 @@ from app.services.workspace import (
     now_iso,
     serialize_approval,
 )
+from app.services.business_actions import list_actions
 
 
 class TaskPlanError(ValueError):
@@ -327,6 +328,9 @@ def get_task_plan(conn: Database, plan_id: str, *, workspace_id: str) -> dict:
                 "outputs": [_serialize_output(row) for row in outputs],
                 "approvals": [serialize_approval(row) for row in approvals],
                 "runs": [dict(row) for row in runs],
+                "business_actions": list_actions(
+                    conn, workspace_id=plan["workspace_id"], task_id=task["id"]
+                ),
             }
         )
     dependencies = conn.execute(
@@ -374,6 +378,9 @@ def list_task_runs(conn: Database, *, workspace_id: str, task_id: str) -> list[d
             "created_at": row["created_at"],
             "completed_at": row["completed_at"],
             "steps": list_run_steps(conn, row["id"]),
+            "business_actions": list_actions(
+                conn, workspace_id=workspace_id, run_id=row["id"]
+            ),
         }
         for row in runs
     ]

@@ -20,6 +20,7 @@ class TaskPlanTaskOut(BaseModel):
     outputs: list[dict[str, Any]] = Field(default_factory=list)
     approvals: list[dict[str, Any]] = Field(default_factory=list)
     runs: list[dict[str, Any]] = Field(default_factory=list)
+    business_actions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TaskDependencyOut(BaseModel):
@@ -54,6 +55,7 @@ class TaskRunOut(BaseModel):
     created_at: str
     completed_at: str | None
     steps: list[dict[str, Any]] = Field(default_factory=list)
+    business_actions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ResumeTaskRequest(BaseModel):

@@ -104,6 +104,8 @@ class ApprovalOut(BaseModel):
     description: str
     status: str
     risk_level: str
+    type: str = "high_risk"
+    payload: dict = Field(default_factory=dict)
     resolved_by: str
     resolved_at: str | None = None
     created_at: str

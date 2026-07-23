@@ -27,6 +27,8 @@ from typing import Any, Protocol
 
 from app.core.database import Database
 from app.runtime.hermes_client import RunContext
+from app.runtime.business_tools_auth import create_business_tool_token
+from app.services.business_actions import enabled_business_tools
 from app.runtime.runs import (
     RunStatus,
     RunStepType,
@@ -200,6 +202,30 @@ async def stream_agent_run(
             status=RunStatus.QUEUED,
         )
     ctx.run_id = run_id
+    business_tools = enabled_business_tools(conn, ctx.agent_id) if ctx.agent_id else []
+    if business_tools and ctx.workspace_id and ctx.conversation_id:
+        from app.core.config import settings
+
+        token = create_business_tool_token(
+            workspace_id=ctx.workspace_id,
+            conversation_id=ctx.conversation_id,
+            run_id=run_id,
+            agent_id=ctx.agent_id,
+            task_id=ctx.task_id or None,
+        )
+        if not any(server.get("name") == "agentpulse-business" for server in ctx.mcp_servers):
+            ctx.mcp_servers.append(
+                {
+                    "name": "agentpulse-business",
+                    "url": settings.business_tools_url,
+                    "headers": {"Authorization": f"Bearer {token}"},
+                }
+            )
+        ctx.prompt += (
+            "\n\n本次可用的受控业务工具："
+            + "、".join(business_tools)
+            + "。外部动作必须调用这些工具，不能用终端或网页绕过审批。"
+        )
     transition_run(conn, run_id, RunStatus.RUNNING)
     conn.execute(
         "UPDATE runs SET started_at = COALESCE(started_at, ?) WHERE id = ?",

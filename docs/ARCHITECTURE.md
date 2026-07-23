@@ -65,12 +65,16 @@ Hermes Agent = Nous Research 2026-02 开源(MIT)的自治 agent，标语「the a
 完成复杂任务(5+ 工具调用)→自动沉淀技能；每轮对话后后台复盘悄悄存记忆/改技能；用户纠正→变持久记忆/技能；全文检索(FTS5)按需取技能。**无微调**——好处是成长可查、可编辑、可迁移(技能就是文件)。
 
 ### 3.4 编程驱动（后端如何调 Hermes）
-- **HTTP(`hermes gateway`, :8642, OpenAI 兼容)**：
-  - **Runs API(首选长任务)**：`POST /v1/runs` → SSE `GET /v1/runs/{id}/events`(流式思考/工具调用/产出) → `POST /v1/runs/{id}/approval`(解审批门) → `/stop`。
-  - `POST /v1/chat/completions`(简单/无状态)、Responses API(有状态)、Jobs API(定时)、Sessions API。
-- **Python 库(进程内)**：`from run_agent import AIAgent`；`batch_runner.py` 跑多实例。
-- **ACP(`hermes acp`, stdio JSON-RPC)**：给编辑器/工具集成用。
-- **TUI Gateway(`hermes serve`, :9119, JSON-RPC/WS)**：Hermes 自己的桌面端用。
+
+本机 Hermes v0.18 实测不存在旧的 REST `/v1/runs` 执行接口（见 [ADR 0007](decisions/0007-hermes-v0.18-interface-acp.md)）。当前生产路径由 `HermesBackend` 启动 `hermes --profile <profile> acp`，通过 stdio JSON-RPC 驱动会话；`new_session` 必须携带绝对 workdir。
+
+每次 Run 可动态传 `HttpMcpServer`，不修改 profile 静态配置：
+
+- 任务 Run 获得 `/mcp/company-tools`，短期 token 绑定 workspace/plan/task/run/agent，只能访问当前计划和公司资料。
+- 有受控业务能力的聊天/任务 Run 获得独立 `/mcp/business-tools`，token 绑定 workspace/conversation/run/agent/可选 task。
+- 业务 provider 密钥只在 AgentPulse 的加密凭证库中；Hermes 只表达调用意图，无法拿到密钥或绕过审批直接调用 provider（[ADR 0011](decisions/0011-controlled-business-actions.md)）。
+
+技术危险动作仍由 Hermes ACP `request_permission` 进入数据库审批轮询；发邮件、发布、退款、付款等业务风险由 AgentPulse 业务工具门判断。
 
 ### 3.5 多实例 & 编排
 - **profiles**：`hermes -p <name>`，每 profile 独立 HERMES_HOME(人格/记忆/技能/密钥/模型/gateway)。→ 一员工一实例。
@@ -100,12 +104,12 @@ Hermes 能力感知**自动路由**：主模型能看图就原生看；主模型
 - 单实例footprint：约 1 vCPU/1GB 起(无浏览器)，推荐 2 vCPU/2–4GB。LLM 是远程调用。多实例受 RAM/CPU + 速率限制约束。
 
 ### 3.10 地基验证结论（实测于 2026-07-05，见 [ADR 0005](decisions/0005-hermes-poc-safety-findings.md)）
-本机跑通了 pip 装 Hermes → 建多个 profile → HTTP Runs API(`POST /v1/runs` → SSE `/events` → `run.completed`)驱动的完整链路，DeepSeek 作主模型正常工作，不同 profile 的 SOUL.md 人格互相隔离生效。同时发现两条必须遵守的硬性要求：
+2026-07-05 曾在当时版本上验证 HTTP Runs API；该接口结论已被 2026-07-10 的 Hermes v0.18 ACP 实测和 ADR 0007 取代，当前实现以 §3.4 为准。那次验证发现的以下两条安全结论仍然有效：
 
 - **⚠️ `terminal.working_dir` 默认是相对路径 `.`，绝不能信任默认值。** 编程化/后台驱动 Hermes 时，必须显式把它设成绝对路径的隔离目录(如 `<server_data_root>/runs/<run_id>/`)，否则 agent 的文件操作可能落到调用方进程当时的任意 cwd 上——实测中曾因此把生成内容写进了一个完全无关的真实项目仓库。启动任何 Run 前，创建并绑定绝对路径 workdir 是不可跳过的前置步骤。
 - **⚠️ SOUL.md 里的硬性规则不保证被遵守。** 实测中"背景不清楚必须先反问"这条规则被完全无视，agent 编造背景直接开工。这不是 bug，是"人格指令是引导不是强制"的固有性质(与 CLAUDE.md/AGENTS.md 对 Claude 的效力一样)。**结论：§4 群讨论协议的"讨论对齐后才能建 Task/Run"必须是编排层的结构性强制(如 Task/Run 创建 API 要求携带已确认的共识 brief，缺失即拒绝)，不能只在 SOUL.md 里写一条规则指望 agent 自觉。**
 
-审批门(`approval_required` / `/v1/runs/{id}/approval`)本轮未触发验证——本地文件写入默认未被 Hermes 归为高风险，需要接一个明确高风险的工具才能验证这条链路，留作后续。
+技术危险动作审批门后来已用真实 Hermes ACP 的删除操作验证批准、拒绝和超时三条路径；业务风险不依赖 Hermes 识别，统一走 ADR 0011 的持久业务动作门。
 
 ## 4. 群讨论协议（自研 · 照 AutoGen 骨架）
 

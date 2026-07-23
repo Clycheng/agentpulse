@@ -74,6 +74,7 @@ from app.services.workspace import (
     serialize_task,
     update_task,
 )
+from app.services.credentials import delete_credential, put_credential
 from app.orchestration.supply import create_agent_spec, provision, ProvisioningError
 from app.tools.function_loop import run_function_loop
 from app.orchestration.brief import create_brief
@@ -370,35 +371,30 @@ def provide_credential(
     if spec is None:
         raise HTTPException(status_code=404, detail="该员工尚未配置角色规格")
 
-    # Find capability that requires this credential
+    # A credential may unlock more than one capability.
     caps = conn.execute(
         "SELECT * FROM agent_capabilities WHERE agent_id = ?",
         (agent_id,),
     ).fetchall()
-    matching_cap = None
+    matching_caps = []
     for cap in caps:
         import json as _json
         required = _json.loads(cap["required_credentials_json"] or "[]")
         if payload.credential_name in required:
-            matching_cap = cap
-            break
-    if matching_cap is None:
+            matching_caps.append(cap)
+    if not matching_caps:
         raise HTTPException(
             status_code=400,
             detail=f"该员工不需要凭证 {payload.credential_name}",
         )
 
-    # Security: credential value is NOT stored in DB.
-    # It would go to ProfileProvisioner.write_credentials in production.
-    # For v1 (RecordOnlyProvisioner), we just mark the capability as enabled.
-    now = now_iso()
-
-    # If this capability was credential_missing, mark as enabled
-    if matching_cap["status"] == "credential_missing":
-        conn.execute(
-            "UPDATE agent_capabilities SET status = 'enabled', updated_at = ? WHERE id = ?",
-            (now, matching_cap["id"]),
-        )
+    put_credential(
+        conn,
+        workspace_id=workspace["id"],
+        agent_id=agent_id,
+        credential_name=payload.credential_name,
+        value=payload.value,
+    )
 
     # Check if all capabilities are now enabled → update spec status
     _refresh_spec_status(conn, spec["id"])
@@ -407,6 +403,34 @@ def provide_credential(
         "SELECT * FROM agent_specs WHERE id = ?", (spec["id"],)
     ).fetchone()
     return _serialize_spec_from_row(conn, updated_spec)
+
+
+@router.delete(
+    "/agents/{agent_id}/credentials/{credential_name}", response_model=AgentSpecOut
+)
+def revoke_credential(
+    agent_id: str,
+    credential_name: str,
+    current_user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    workspace = get_workspace_for_user(conn, current_user["id"])
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="工作区不存在")
+    spec = conn.execute(
+        "SELECT * FROM agent_specs WHERE agent_id = ? AND workspace_id = ?",
+        (agent_id, workspace["id"]),
+    ).fetchone()
+    if spec is None:
+        raise HTTPException(status_code=404, detail="员工不存在或尚未配置角色规格")
+    if not delete_credential(
+        conn,
+        workspace_id=workspace["id"],
+        agent_id=agent_id,
+        credential_name=credential_name,
+    ):
+        raise HTTPException(status_code=404, detail="凭证尚未配置")
+    return _serialize_spec_from_row(conn, spec)
 
 
 @router.post("/agents/{agent_id}/provision", response_model=AgentSpecOut)
@@ -438,6 +462,13 @@ def _serialize_spec_from_row(conn: Database, spec: Row) -> dict:
         "SELECT * FROM agent_capabilities WHERE agent_id = ? ORDER BY created_at",
         (spec["agent_id"],),
     ).fetchall()
+    configured = {
+        row["credential_name"]
+        for row in conn.execute(
+            "SELECT credential_name FROM agent_credentials WHERE agent_id = ?",
+            (spec["agent_id"],),
+        ).fetchall()
+    }
     return {
         "id": spec["id"],
         "agent_id": spec["agent_id"],
@@ -456,6 +487,10 @@ def _serialize_spec_from_row(conn: Database, spec: Row) -> dict:
                 "toolset_refs": _json.loads(cap["toolset_refs_json"] or "[]"),
                 "mcp_refs": _json.loads(cap["mcp_refs_json"] or "[]"),
                 "required_credentials": _json.loads(cap["required_credentials_json"] or "[]"),
+                "credential_status": {
+                    name: name in configured
+                    for name in _json.loads(cap["required_credentials_json"] or "[]")
+                },
                 "risk_gate": cap["risk_gate"],
                 "status": cap["status"],
                 "created_at": cap["created_at"],
@@ -1235,6 +1270,22 @@ def resolve_approval(
     except (ValueError, TypeError):
         decision_payload = {}
     decision_payload["scope"] = payload.scope
+    if approval["type"] == "business_tool":
+        from app.services.business_actions import (
+            BusinessToolError,
+            resolve_business_approval,
+        )
+
+        try:
+            resolve_business_approval(
+                conn,
+                approval=dict(approval),
+                decision=decision,
+                scope=payload.scope,
+                resolved_by=current_user["id"],
+            )
+        except BusinessToolError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     conn.execute(
         """
         UPDATE approvals
@@ -1254,7 +1305,11 @@ def resolve_approval(
     # TD-11: this endpoint records the durable decision only. The suspended
     # RunService polls this row and owns all run-state transitions.
     run_id = approval["run_id"]
-    if run_id and approval["type"] in ("high_risk", "capability_upgrade"):
+    if run_id and approval["type"] in (
+        "high_risk",
+        "capability_upgrade",
+        "business_tool",
+    ):
         # TD-06-T2: approving a capability upgrade installs the capability onto
         # the employee's profile (+ agent_capabilities row) before resuming.
         if approval["type"] == "capability_upgrade" and decision == "approved":

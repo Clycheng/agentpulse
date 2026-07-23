@@ -17,6 +17,8 @@ from app.api.routes.team_compiler import router as team_compiler_router
 from app.api.routes.task_plans import router as task_plans_router
 from app.api.routes.webhooks import router as webhooks_router
 from app.api.company_tools_mcp import company_tools_app, company_tools_lifespan
+from app.api.business_tools_mcp import business_tools_app, business_tools_lifespan
+from app.api.routes.business_tools import router as business_tools_router
 from app.api.routes.workspace import router as workspace_router
 from app.core.database import connect, init_db, shutdown_db
 from app.core.config import settings
@@ -35,6 +37,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     cron_task = None
     scheduler_task = None
+    business_worker_task = None
     if settings.idle_thinking_cron:
         import asyncio
 
@@ -47,13 +50,23 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         scheduler_task = asyncio.create_task(_task_worker_loop())
         logger.info("task_worker_started", interval_s=settings.task_worker_poll_seconds)
 
-    async with company_tools_lifespan():
+    if settings.business_worker_enabled:
+        import asyncio
+
+        business_worker_task = asyncio.create_task(_business_worker_loop())
+        logger.info(
+            "business_worker_started", interval_s=settings.business_worker_poll_seconds
+        )
+
+    async with company_tools_lifespan(), business_tools_lifespan():
         yield
 
     if cron_task is not None:
         cron_task.cancel()
     if scheduler_task is not None:
         scheduler_task.cancel()
+    if business_worker_task is not None:
+        business_worker_task.cancel()
     shutdown_db()
     logger.info("server_stopped")
 
@@ -84,8 +97,10 @@ def create_app() -> FastAPI:
     app.include_router(catalog_router, prefix="/api")
     app.include_router(team_compiler_router, prefix="/api")
     app.include_router(task_plans_router, prefix="/api")
+    app.include_router(business_tools_router, prefix="/api")
     app.include_router(webhooks_router)
     app.mount("/mcp/company-tools", company_tools_app)
+    app.mount("/mcp/business-tools", business_tools_app)
 
     return app
 
@@ -177,6 +192,20 @@ async def _task_worker_loop() -> None:
             await asyncio.sleep(settings.task_worker_poll_seconds)
     finally:
         await scheduler.close()
+
+
+async def _business_worker_loop() -> None:
+    import asyncio
+
+    from app.services.business_actions import BusinessActionWorker
+
+    worker = BusinessActionWorker()
+    try:
+        while True:
+            await worker.tick()
+            await asyncio.sleep(settings.business_worker_poll_seconds)
+    finally:
+        await worker.close()
 
 
 app = create_app()

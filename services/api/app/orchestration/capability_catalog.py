@@ -25,6 +25,7 @@ class CapabilityDef:
     mcp: tuple[str, ...] = ()
     required_credentials: tuple[str, ...] = ()
     risk_gate: str = "auto"  # auto | approval | prohibited_auto
+    business_tool: str | None = None
 
 
 # Risk gate severity ordering — higher = stricter
@@ -89,6 +90,7 @@ CATALOG: dict[str, CapabilityDef] = {
         description="生成社交媒体内容（发布环节须人工确认）",
         toolsets=("web", "image_gen", "vision"),
         risk_gate="approval",
+        business_tool="publish_social_content",
     ),
     # --- Business capabilities (TD-07) ---
     # Customer service
@@ -113,6 +115,7 @@ CATALOG: dict[str, CapabilityDef] = {
         mcp=("order_system",),
         required_credentials=("ORDER_API_KEY",),
         risk_gate="approval",
+        business_tool="process_refund",
     ),
     "customer_data_lookup": CapabilityDef(
         key="customer_data_lookup",
@@ -147,6 +150,7 @@ CATALOG: dict[str, CapabilityDef] = {
         mcp=("email_service",),
         required_credentials=("EMAIL_API_KEY",),
         risk_gate="approval",
+        business_tool="send_email",
     ),
     "seo_content": CapabilityDef(
         key="seo_content",
@@ -168,6 +172,7 @@ CATALOG: dict[str, CapabilityDef] = {
         mcp=("ad_platform",),
         required_credentials=("AD_API_KEY",),
         risk_gate="approval",
+        business_tool="update_ad_bid",
     ),
     # Data & analytics
     "data_query": CapabilityDef(
@@ -247,6 +252,7 @@ CATALOG: dict[str, CapabilityDef] = {
         mcp=("hris_system",),
         required_credentials=("HRIS_API_KEY",),
         risk_gate="approval",
+        business_tool="submit_payroll",
     ),
     # Legal & compliance
     "contract_review": CapabilityDef(
@@ -298,6 +304,7 @@ CATALOG: dict[str, CapabilityDef] = {
         mcp=("payment_system",),
         required_credentials=("PAYMENT_API_KEY",),
         risk_gate="prohibited_auto",
+        business_tool="execute_payment",
     ),
     # Project management
     "task_delegation": CapabilityDef(

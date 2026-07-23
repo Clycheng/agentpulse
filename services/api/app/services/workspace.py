@@ -535,6 +535,10 @@ def serialize_task_output(row: Row) -> dict:
 
 
 def serialize_approval(row: Row) -> dict:
+    try:
+        payload = json.loads(row.get("payload_json") or "{}")
+    except (TypeError, ValueError):
+        payload = {}
     return {
         "id": row["id"],
         "task_id": row["task_id"],
@@ -544,6 +548,8 @@ def serialize_approval(row: Row) -> dict:
         "description": row["description"],
         "status": row["status"],
         "risk_level": row["risk_level"],
+        "type": row.get("type") or "high_risk",
+        "payload": payload,
         "resolved_by": row["resolved_by"],
         "resolved_at": row["resolved_at"],
         "created_at": row["created_at"],

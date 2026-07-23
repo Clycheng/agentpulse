@@ -53,6 +53,7 @@ def list_capabilities_route(
             description=cap.description,
             risk_gate=cap.risk_gate,
             required_credentials=list(cap.required_credentials),
+            business_tool=cap.business_tool,
         )
         for cap in CATALOG.values()
     ]

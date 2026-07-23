@@ -53,6 +53,7 @@ class AgentCapabilityOut(BaseModel):
     toolset_refs: list[str]
     mcp_refs: list[str]
     required_credentials: list[str]
+    credential_status: dict[str, bool] = Field(default_factory=dict)
     risk_gate: str
     status: str
     created_at: str
@@ -83,6 +84,7 @@ class CapabilityCatalogEntryOut(BaseModel):
     description: str
     risk_gate: str
     required_credentials: list[str] = Field(default_factory=list)
+    business_tool: str | None = None
 
 
 class GrantCapabilityRequest(BaseModel):

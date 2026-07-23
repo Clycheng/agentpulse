@@ -168,6 +168,8 @@ type TaskPlanSnapshot = {
       description: string;
       status: string;
       risk_level: string;
+      type: string;
+      payload: Record<string, unknown>;
       resolved_by: string;
       resolved_at: string | null;
       created_at: string;
@@ -181,6 +183,7 @@ type TaskPlanSnapshot = {
       started_at: string | null;
       completed_at: string | null;
     }>;
+    business_actions: BusinessAction[];
   }>;
   dependencies: Array<{ task_id: string; depends_on_task_id: string }>;
 };
@@ -197,6 +200,32 @@ type TaskRunTrack = {
   created_at: string;
   completed_at: string | null;
   steps: RunStepTrace[];
+  business_actions: BusinessAction[];
+};
+
+type BusinessAction = {
+  id: string;
+  run_id: string | null;
+  task_id: string | null;
+  conversation_id: string | null;
+  agent_id: string | null;
+  capability_key: string;
+  tool_name: string;
+  preview: {
+    to?: string[];
+    subject?: string;
+    body_preview?: string;
+    channel_id?: string;
+  };
+  status: string;
+  approval_id: string | null;
+  provider: string;
+  external_id: string;
+  error: string;
+  attempt_no: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
 };
 
 type ContentPackageData = {
@@ -228,6 +257,8 @@ type Approval = {
   description: string;
   status: 'pending' | 'approved' | 'rejected' | string;
   riskLevel: string;
+  category: string;
+  payload: Record<string, unknown>;
   resolvedBy: string;
   resolvedAt: string | null;
   time: string;
@@ -385,6 +416,8 @@ type ApiBootstrap = {
       description: string;
       status: string;
       risk_level: string;
+      type?: string;
+      payload?: Record<string, unknown>;
       resolved_by: string;
       resolved_at: string | null;
       created_at: string;
@@ -832,6 +865,8 @@ function mapBootstrap(data: ApiBootstrap) {
         description: approval.description,
         status: approval.status,
         riskLevel: approval.risk_level,
+        category: approval.type ?? 'high_risk',
+        payload: approval.payload ?? {},
         resolvedBy: approval.resolved_by,
         resolvedAt: approval.resolved_at
           ? formatTime(approval.resolved_at)
@@ -1141,6 +1176,8 @@ function App() {
                     description: approval.description,
                     status: approval.status,
                     riskLevel: approval.risk_level,
+                    category: approval.type ?? 'high_risk',
+                    payload: approval.payload ?? {},
                     resolvedBy: approval.resolved_by,
                     resolvedAt: approval.resolved_at
                       ? formatTime(approval.resolved_at)
@@ -1162,6 +1199,64 @@ function App() {
       window.clearInterval(timer);
     };
   }, [token, activePlanIds.join('|')]);
+
+  useEffect(() => {
+    if (!token || !chatId) return;
+    let cancelled = false;
+    const refreshApprovals = async () => {
+      try {
+        const pending = await apiRequest<
+          Array<{
+            id: string;
+            type: string;
+            title: string;
+            description: string;
+            payload: Record<string, unknown>;
+          }>
+        >(`/conversations/${chatId}/approvals?status=pending`, { token });
+        if (cancelled || pending.length === 0) return;
+        setMessagesByChat((current) => {
+          const messages = current[chatId] ?? [];
+          const additions = pending
+            .filter(
+              (approval) =>
+                !messages.some(
+                  (message) =>
+                    message.id === `approval_${approval.id}` ||
+                    (message.text.startsWith('APPROVAL_CARD:') &&
+                      message.text.includes(`"approval_id":"${approval.id}"`)),
+                ),
+            )
+            .map((approval): Message => ({
+              id: `approval_${approval.id}`,
+              from: 'system',
+              type: 'system',
+              time: '',
+              text:
+                'APPROVAL_CARD:' +
+                JSON.stringify({
+                  approval_id: approval.id,
+                  category: approval.type,
+                  title: approval.title,
+                  description: approval.description,
+                  ...approval.payload,
+                }),
+            }));
+          return additions.length
+            ? { ...current, [chatId]: [...messages, ...additions] }
+            : current;
+        });
+      } catch {
+        // Pending approvals are restored on the next successful poll.
+      }
+    };
+    void refreshApprovals();
+    const timer = window.setInterval(refreshApprovals, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [chatId, token]);
 
   useEffect(() => {
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight });
@@ -2915,7 +3010,11 @@ type ChannelConfig = {
   channel_type: string;
   name: string;
   token: string;
-  config: Record<string, unknown>;
+  config: Record<string, unknown> & {
+    provider?: string;
+    from_address?: string;
+    from_name?: string;
+  };
   target_agent_id: string | null;
   target_conversation_id: string | null;
   active: boolean;
@@ -2943,6 +3042,8 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
   const [name, setName] = useState('');
   const [channelType, setChannelType] = useState('generic_webhook');
   const [targetAgentId, setTargetAgentId] = useState('');
+  const [fromAddress, setFromAddress] = useState('');
+  const [fromName, setFromName] = useState('');
   const [creating, setCreating] = useState(false);
   const [copiedId, setCopiedId] = useState('');
 
@@ -2979,11 +3080,21 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
           channel_type: channelType,
           name: name.trim(),
           target_agent_id: targetAgentId || null,
+          config:
+            channelType === 'email'
+              ? {
+                  provider: 'resend',
+                  from_address: fromAddress.trim(),
+                  from_name: fromName.trim(),
+                }
+              : {},
         }),
       });
       setChannels((prev) => [created, ...prev]);
       setName('');
       setTargetAgentId('');
+      setFromAddress('');
+      setFromName('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t('channels.createFailed'));
     } finally {
@@ -3064,11 +3175,36 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
                 ))}
               </select>
             </label>
+            {channelType === 'email' && (
+              <>
+                <label className="channel-field">
+                  <span>发件邮箱</span>
+                  <input
+                    type="email"
+                    value={fromAddress}
+                    placeholder="hello@your-domain.com"
+                    onChange={(event) => setFromAddress(event.target.value)}
+                  />
+                </label>
+                <label className="channel-field">
+                  <span>发件名称</span>
+                  <input
+                    value={fromName}
+                    placeholder="品牌名称"
+                    onChange={(event) => setFromName(event.target.value)}
+                  />
+                </label>
+              </>
+            )}
             <button
               className="button primary"
               type="button"
               onClick={create}
-              disabled={creating || !name.trim()}
+              disabled={
+                creating ||
+                !name.trim() ||
+                (channelType === 'email' && (!targetAgentId || !fromAddress.trim()))
+              }
             >
               {materialIcon('add_link')}
               {creating ? t('channels.creating') : t('channels.create')}
@@ -3111,6 +3247,9 @@ function ChannelsView({ token, agents }: { token: string; agents: Agent[] }) {
                 </div>
                 <div className="channel-meta">
                   <span>{t('channels.defaultAgentLabel', { name: agentName(channel.target_agent_id) })}</span>
+                  {channel.channel_type === 'email' && channel.config.from_address && (
+                    <span>{String(channel.config.from_name || channel.config.from_address)} · {String(channel.config.from_address)}</span>
+                  )}
                   {channel.active && (
                     <button
                       className="channel-link-button"
@@ -3309,6 +3448,7 @@ function ChatView({
     approvalId: string,
     status: 'approved' | 'rejected',
     approvedCapabilityKey?: string,
+    scope?: 'once' | 'always',
   ) => Promise<boolean>;
   onAnswerCardClarification?: (
     approvalId: string,
@@ -3662,6 +3802,14 @@ function ApprovalCard({
     title?: string;
     description?: string;
     suggested_capability_key?: string;
+    risk_gate?: string;
+    preview?: {
+      channel_name?: string;
+      from?: string;
+      to?: string[];
+      subject?: string;
+      body_preview?: string;
+    };
   } | null = null;
   try {
     data = JSON.parse(raw);
@@ -3681,6 +3829,8 @@ function ApprovalCard({
       ? { icon: 'help', kind: 'clarify', label: '员工请求澄清' }
       : category === 'capability_upgrade'
         ? { icon: 'bolt', kind: 'upgrade', label: '员工申请能力升级' }
+        : category === 'business_tool'
+          ? { icon: 'send', kind: 'business', label: '对外业务动作待确认' }
         : { icon: 'gpp_maybe', kind: 'risk', label: '高风险动作待确认' };
 
   const doResolve = async (
@@ -3723,6 +3873,14 @@ function ApprovalCard({
         <strong>{data.title || meta.label}</strong>
       </header>
       {data.description && <p className="approval-desc">{data.description}</p>}
+      {category === 'business_tool' && data.preview && (
+        <dl className="approval-business-preview">
+          {data.preview.from && <><dt>发件人</dt><dd>{data.preview.from}</dd></>}
+          {data.preview.to?.length && <><dt>收件人</dt><dd>{data.preview.to.join('、')}</dd></>}
+          {data.preview.subject && <><dt>主题</dt><dd>{data.preview.subject}</dd></>}
+          {data.preview.body_preview && <><dt>正文摘要</dt><dd>{data.preview.body_preview}</dd></>}
+        </dl>
+      )}
 
       {resolved ? (
         <p className="approval-resolved">
@@ -3764,7 +3922,7 @@ function ApprovalCard({
           >
             {category === 'capability_upgrade' ? '批准并升级' : '允许一次'}
           </button>
-          {category !== 'capability_upgrade' && (
+          {category === 'business_tool' && data.risk_gate !== 'prohibited_auto' && (
             <button
               type="button"
               className="button secondary"
@@ -3809,6 +3967,7 @@ function MessageItem({
     approvalId: string,
     status: 'approved' | 'rejected',
     approvedCapabilityKey?: string,
+    scope?: 'once' | 'always',
   ) => Promise<boolean>;
   onAnswerCardClarification?: (
     approvalId: string,
@@ -4827,8 +4986,20 @@ function AgentDetail({
     { name: string; content: string }[] | null
   >(null);
   const [caps, setCaps] = useState<
-    { capability_key: string; status: string }[] | null
+    {
+      capability_key: string;
+      status: string;
+      required_credentials: string[];
+      credential_status: Record<string, boolean>;
+    }[] | null
   >(null);
+  const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
+  const [credentialBusy, setCredentialBusy] = useState('');
+  const [credentialMsg, setCredentialMsg] = useState('');
+  const [businessActions, setBusinessActions] = useState<BusinessAction[]>([]);
+  const [businessPolicies, setBusinessPolicies] = useState<
+    Array<{ id: string; tool_name: string; created_at: string }>
+  >([]);
   const [reflecting, setReflecting] = useState(false);
   const [reflectMsg, setReflectMsg] = useState('');
   const [catalog, setCatalog] = useState<
@@ -4846,12 +5017,28 @@ function AgentDetail({
     )
       .then((r) => setLearned(r.skills))
       .catch(() => setLearned([]));
-    apiRequest<{ capabilities: { capability_key: string; status: string }[] }>(
+    apiRequest<{
+      capabilities: Array<{
+        capability_key: string;
+        status: string;
+        required_credentials: string[];
+        credential_status: Record<string, boolean>;
+      }>;
+    }>(
       `/agents/${agent.id}/spec`,
       { token },
     )
       .then((r) => setCaps(r.capabilities ?? []))
       .catch(() => setCaps([]));
+    apiRequest<BusinessAction[]>(`/business-actions?agent_id=${agent.id}`, { token })
+      .then(setBusinessActions)
+      .catch(() => setBusinessActions([]));
+    apiRequest<Array<{ id: string; tool_name: string; created_at: string }>>(
+      `/agents/${agent.id}/business-tool-policies`,
+      { token },
+    )
+      .then(setBusinessPolicies)
+      .catch(() => setBusinessPolicies([]));
   };
 
   useEffect(() => {
@@ -4916,6 +5103,59 @@ function AgentDetail({
   const grantableCapabilities = (catalog ?? []).filter(
     (entry) => !(caps ?? []).some((cap) => cap.capability_key === entry.key),
   );
+  const credentials = Array.from(
+    new Set((caps ?? []).flatMap((cap) => cap.required_credentials ?? [])),
+  );
+
+  const saveCredential = async (name: string) => {
+    const value = credentialValues[name]?.trim();
+    if (!value) return;
+    setCredentialBusy(name);
+    setCredentialMsg('');
+    try {
+      await apiRequest(`/agents/${agent.id}/credentials`, {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ credential_name: name, value }),
+      });
+      setCredentialValues((current) => ({ ...current, [name]: '' }));
+      setCredentialMsg(`${name} 已安全保存`);
+      loadGrowth();
+    } catch (error) {
+      setCredentialMsg(error instanceof Error ? error.message : '凭证保存失败');
+    } finally {
+      setCredentialBusy('');
+    }
+  };
+
+  const revokeCredential = async (name: string) => {
+    setCredentialBusy(name);
+    setCredentialMsg('');
+    try {
+      await apiRequest(`/agents/${agent.id}/credentials/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+        token,
+      });
+      setCredentialMsg(`${name} 已撤销`);
+      loadGrowth();
+    } catch (error) {
+      setCredentialMsg(error instanceof Error ? error.message : '凭证撤销失败');
+    } finally {
+      setCredentialBusy('');
+    }
+  };
+
+  const revokeBusinessPolicy = async (toolName: string) => {
+    try {
+      await apiRequest(
+        `/agents/${agent.id}/business-tool-policies/${encodeURIComponent(toolName)}`,
+        { method: 'DELETE', token },
+      );
+      loadGrowth();
+    } catch (error) {
+      setCredentialMsg(error instanceof Error ? error.message : '撤销长期放行失败');
+    }
+  };
 
   const skillTitle = (content: string, fallback: string) => {
     const first = content.split('\n').find((l) => l.trim());
@@ -5067,6 +5307,101 @@ function AgentDetail({
               ))}
             </div>
 
+            {credentials.length > 0 && (
+              <>
+                <h4 className="growth-sub">业务凭证</h4>
+                {credentialMsg && <p className="growth-msg">{credentialMsg}</p>}
+                <div className="credential-list">
+                  {credentials.map((name) => {
+                    const configured = (caps ?? []).some(
+                      (cap) => cap.credential_status?.[name],
+                    );
+                    return (
+                      <div className="credential-row" key={name}>
+                        <div>
+                          {materialIcon(configured ? 'verified_user' : 'key')}
+                          <span><strong>{name}</strong><em>{configured ? '已配置' : '待配置'}</em></span>
+                        </div>
+                        <input
+                          type="password"
+                          value={credentialValues[name] ?? ''}
+                          placeholder={configured ? '输入新值以替换' : '输入凭证'}
+                          onChange={(event) =>
+                            setCredentialValues((current) => ({
+                              ...current,
+                              [name]: event.target.value,
+                            }))
+                          }
+                        />
+                        <button
+                          className="button primary small"
+                          type="button"
+                          disabled={credentialBusy === name || !credentialValues[name]?.trim()}
+                          onClick={() => saveCredential(name)}
+                        >
+                          {materialIcon('save')}保存
+                        </button>
+                        {configured && (
+                          <button
+                            className="icon-button"
+                            type="button"
+                            title="撤销凭证"
+                            disabled={credentialBusy === name}
+                            onClick={() => revokeCredential(name)}
+                          >
+                            {materialIcon('delete')}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            <h4 className="growth-sub">长期放行</h4>
+            {businessPolicies.length === 0 ? (
+              <EmptyState>暂无长期放行</EmptyState>
+            ) : (
+              <div className="business-policy-list">
+                {businessPolicies.map((policy) => (
+                  <div key={policy.id}>
+                    <span>{materialIcon('verified')}<strong>{policy.tool_name}</strong></span>
+                    <button
+                      className="icon-button"
+                      type="button"
+                      title="撤销长期放行"
+                      onClick={() => revokeBusinessPolicy(policy.tool_name)}
+                    >
+                      {materialIcon('close')}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <h4 className="growth-sub">最近对外动作</h4>
+            {businessActions.length === 0 ? (
+              <EmptyState>暂无对外动作</EmptyState>
+            ) : (
+              <div className="business-action-list">
+                {businessActions.slice(0, 8).map((action) => (
+                  <article key={action.id}>
+                    <div>
+                      {materialIcon(action.status === 'succeeded' ? 'check_circle' : 'outgoing_mail')}
+                      <span>
+                        <strong>{action.preview.subject || action.tool_name}</strong>
+                        <em>{action.preview.to?.join('、') || action.tool_name}</em>
+                      </span>
+                    </div>
+                    <span className={`run-trace-status run-trace-status-${action.status}`}>
+                      {action.status}
+                    </span>
+                  </article>
+                ))}
+              </div>
+            )}
+
             <h4 className="growth-sub">{t('agentDetail.skillsLearned')}</h4>
             {learned && learned.length === 0 && (
               <EmptyState>{t('agentDetail.noLearnedSkills')}</EmptyState>
@@ -5183,6 +5518,8 @@ function TaskDetail({
   const packageOutput = planTask?.outputs
     .filter((output) => output.output_type === 'content_package_v1')
     .at(-1);
+  const taskBusinessActions =
+    planTask?.business_actions ?? runs.flatMap((run) => run.business_actions ?? []);
   const contentPackage = parseContentPackage(packageOutput?.content);
 
   useEffect(() => {
@@ -5418,6 +5755,28 @@ function TaskDetail({
               </div>
             )}
           </section>
+
+          {taskBusinessActions.length > 0 && (
+            <section className="drawer-section">
+              <h3>对外业务动作</h3>
+              <div className="business-action-list">
+                {taskBusinessActions.map((action) => (
+                  <article key={action.id}>
+                    <div>
+                      {materialIcon(action.status === 'succeeded' ? 'check_circle' : 'send')}
+                      <span>
+                        <strong>{action.preview.subject || action.tool_name}</strong>
+                        <em>{action.preview.to?.join('、') || action.provider || action.tool_name}</em>
+                      </span>
+                    </div>
+                    <span className={`run-trace-status run-trace-status-${action.status}`}>
+                      {action.status}
+                    </span>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="drawer-section">
             <h3>{t('taskDetail.executionLog')}</h3>

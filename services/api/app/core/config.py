@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     task_workspace_concurrency: int = 2
     company_tools_url: str = "http://127.0.0.1:8000/mcp/company-tools/"
     company_tool_token_ttl_seconds: int = 900
+    business_tools_url: str = "http://127.0.0.1:8000/mcp/business-tools/"
+    business_tool_token_ttl_seconds: int = 900
+    business_worker_enabled: bool = True
+    business_worker_poll_seconds: float = 1.0
+    business_action_lease_seconds: int = 30
+    business_action_max_attempts: int = 2
+    resend_base_url: str = "https://api.resend.com"
     # TD-08-T2: idle-reflection cron.
     idle_thinking_cron: bool = False
     idle_cron_interval_seconds: int = 3600
