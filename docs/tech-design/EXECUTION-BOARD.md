@@ -11,7 +11,7 @@
 
 | 序 | 任务 | 一句话 | 会话要求 | 状态 |
 |---|---|---|---|---|
-| 1 | TD-10 **实现**（[TD-10-business-tool-gate.md](TD-10-business-tool-gate.md)，设计已完成） | T1：MCP 服务地基 + `send_email` 试点工具全链路真机跑通；T2：推广到其余业务能力 + 前端卡片渲染 | **agentpulse** | ⚪ 待领 |
+| 1 | TD-10 **实现**（[TD-10-business-tool-gate.md](TD-10-business-tool-gate.md)，设计已完成） | T1：MCP 服务地基 + `send_email` 试点工具全链路真机跑通；T2：推广到其余业务能力 + 前端卡片渲染 | **agentpulse** | 🔵 进行中（Codex，2026-07-23） |
 | 2 | TD-09-T3 剩余(渠道出站回复 + 微信/widget 适配器) | 渠道入站已通，出站未接 | 否（微信/widget 需真账号） | ⚪ |
 | 3 | TD-08-T3 **剩余 UI 收尾**(空闲思考开关设置项，可选) | 前端 + IdleThinkService 均已完成✅ | 否（前端）| ⚪ |
 
