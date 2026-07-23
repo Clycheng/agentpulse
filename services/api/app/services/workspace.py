@@ -15,7 +15,7 @@ from app.orchestration.capability_catalog import (
 from app.services.templates import get_template, list_agent_templates, list_talent_categories
 
 
-DEFAULT_DEPARTMENTS = ["老板办公室"]
+DEFAULT_DEPARTMENTS = ["老板办公室", "内容经营部"]
 HUES = [262, 230, 300, 140, 55, 20, 330]
 GLYPHS = ["✦", "▲", "◆", "◗", "✱", "◍", "◉"]
 
@@ -128,6 +128,77 @@ def create_workspace_for_user(
         content="欢迎老板。我是小秘。你可以直接把想法丢给我，我会帮你拆任务、建议招募谁、或者拉群推进。",
     )
     _bootstrap_secretary_capabilities(conn, secretary_id, workspace_id)
+
+    starter_agents = [
+        {
+            "name": "内容策划",
+            "role": "内容策划",
+            "description": "负责平台研究、受众洞察、选题规划和内容排期",
+            "prompt": "你是内容策划。先核实平台、定位、受众、周期、数量和目标，再用可引用的资料制定选题与排期；不确定的事实必须标成假设。",
+            "capabilities": ["web_scraping", "seo_content", "data_analysis"],
+        },
+        {
+            "name": "内容主笔",
+            "role": "内容主笔",
+            "description": "负责标题、开场钩子、正文或脚本和行动号召",
+            "prompt": "你是内容主笔。依据已确认的策略和来源写可直接审阅的内容，保持平台语气一致，事实性表述必须保留引用。",
+            "capabilities": ["content_writing", "seo_content"],
+        },
+        {
+            "name": "运营执行",
+            "role": "运营执行",
+            "description": "负责发布排期、素材建议、内容包组装和交付检查",
+            "prompt": "你是运营执行。把已完成内容整理成结构化待发布内容包，检查排期、CTA、素材建议、来源和未知项；首版不得真实发布。",
+            "capabilities": ["content_writing", "image_creation", "report_generation"],
+        },
+    ]
+    starter_agent_ids = [secretary_id]
+    for definition in starter_agents:
+        agent_id = create_agent(
+            conn,
+            workspace_id=workspace_id,
+            department_id=department_ids["内容经营部"],
+            name=definition["name"],
+            role=definition["role"],
+            description=definition["description"],
+            prompt=definition["prompt"],
+            skills=[],
+            mcps=[],
+            source="system_content_team",
+            joined="系统内置",
+        )
+        starter_agent_ids.append(agent_id)
+        create_dm_conversation(conn, workspace_id, agent_id)
+        provision_new_agent(
+            conn,
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            role_name=definition["role"],
+            source_request="系统默认配置：自媒体内容经营团队",
+            responsibilities=[definition["description"]],
+            capability_keys=definition["capabilities"],
+        )
+
+    group_id = new_id("conv")
+    group_created_at = now_iso()
+    conn.execute(
+        """INSERT INTO conversations (
+          id, workspace_id, kind, name, agent_id, unread, created_at, updated_at
+        ) VALUES (?, ?, 'group', '内容经营群', NULL, 0, ?, ?)""",
+        (group_id, workspace_id, group_created_at, group_created_at),
+    )
+    for agent_id in starter_agent_ids:
+        conn.execute(
+            "INSERT INTO conversation_members (conversation_id, agent_id) VALUES (?, ?)",
+            (group_id, agent_id),
+        )
+    add_message(
+        conn,
+        conversation_id=group_id,
+        sender_type="system",
+        sender_id="",
+        content="内容经营团队已就位。先把平台、定位、受众、周期、数量、目标和约束讨论清楚，再提交完整分工给老板确认。",
+    )
     return get_workspace_by_id(conn, workspace_id)
 
 
@@ -139,11 +210,9 @@ def create_workspace_for_user(
 # supply.provision docstring), so anything needing a token the owner hasn't
 # configured would leave the secretary worse off than having no spec at all.
 SECRETARY_DEFAULT_CAPABILITIES = [
-    "write_code",
-    "run_tests",
     "task_delegation",
-    "content_writing",
     "data_analysis",
+    "report_generation",
 ]
 
 
@@ -414,6 +483,10 @@ def serialize_task(row: Row, suggestion: dict | None = None) -> dict:
         "due_date": row["due_date"],
         "parent_task_id": row["parent_task_id"],
         "consensus_brief_id": row["consensus_brief_id"],
+        "task_plan_id": row.get("task_plan_id"),
+        "plan_item_key": row.get("plan_item_key"),
+        "expected_output": row.get("expected_output") or "",
+        "output_type": row.get("output_type") or "markdown",
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -723,6 +796,10 @@ def create_task(
     due_date: str | None = None,
     parent_task_id: str | None = None,
     consensus_brief_id: str | None = None,  # Gate condition
+    task_plan_id: str | None = None,
+    plan_item_key: str | None = None,
+    expected_output: str = "",
+    output_type: str = "markdown",
     bypass_gate: bool = False,  # Agent action tools bypass the brief requirement
 ) -> Row:
     from app.orchestration.gate import (
@@ -759,9 +836,10 @@ def create_task(
         INSERT INTO tasks (
           id, workspace_id, title, description, priority, owner_agent_id,
           status, progress, conversation_id, due_date, parent_task_id,
-          consensus_brief_id, created_at, updated_at
+          consensus_brief_id, task_plan_id, plan_item_key, expected_output,
+          output_type, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             task_id,
@@ -776,6 +854,10 @@ def create_task(
             due_date,
             parent_task_id,
             consensus_brief_id,
+            task_plan_id,
+            plan_item_key,
+            expected_output,
+            output_type,
             created_at,
             created_at,
         ),
@@ -1080,7 +1162,7 @@ def normalize_priority(value: str) -> str:
 def normalize_task_status(value: str) -> str:
     if value == "卡住":
         return "阻塞"
-    return value if value in {"待认领", "进行中", "待确认", "阻塞", "已完成"} else "进行中"
+    return value if value in {"待执行", "待认领", "进行中", "待确认", "阻塞", "已完成"} else "进行中"
 
 
 def progress_for_status(status: str, progress: int) -> int:
@@ -1088,6 +1170,8 @@ def progress_for_status(status: str, progress: int) -> int:
     if status == "已完成":
         return 100
     if status == "待认领":
+        return 0
+    if status == "待执行":
         return 0
     if status == "进行中" and bounded == 0:
         return 10
@@ -1174,7 +1258,8 @@ def get_bootstrap(conn: Database, workspace_id: str) -> dict:
         "SELECT * FROM agents WHERE workspace_id = ? ORDER BY created_at", (workspace_id,)
     ).fetchall()
     conversations = conn.execute(
-        "SELECT * FROM conversations WHERE workspace_id = ? ORDER BY updated_at DESC",
+        """SELECT * FROM conversations WHERE workspace_id = ?
+        ORDER BY CASE kind WHEN 'dm' THEN 0 ELSE 1 END, created_at, id""",
         (workspace_id,),
     ).fetchall()
     tasks = conn.execute(

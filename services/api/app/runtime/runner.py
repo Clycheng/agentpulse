@@ -13,14 +13,14 @@ tool activity + approvals get one step each — matching the run_steps design.
 TD-03-T4 suspension: when a Hermes backend fires ``request_permission`` it emits
 an ``approval_required`` event; ``stream_agent_run`` persists an ``approvals`` row
 (via ``_persist_run_approval``) and transitions the run to ``waiting_user`` /
-``waiting_clarify``, while the injected ``make_bridge_resolver`` awaits an
-``approval_bridge`` Future. The ``/approvals/{id}/resolve`` (or ``/answer``) HTTP
-endpoint wakes that Future, and the resolver returns ``allow_once`` / ``deny`` to
-the ACP callback — all without dropping the run's ACP connection across requests.
+``waiting_clarify``. The injected resolver polls that durable row while the ACP
+connection remains open. The approval API only records a decision; RunService
+observes it and resumes the run in place, even when no process-local Future exists.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -47,33 +47,37 @@ class RunBackend(Protocol):
 
 
 def make_bridge_resolver(conn: Database | None = None):
-    """Permission resolver that suspends the run until the owner resolves it.
-
-    Registers a Future on the in-process approval bridge keyed by the request's
-    approval_id and awaits it, so the ACP session (and the run) stays paused in
-    place. Returns the owner's decision string ("allow_once" | "deny").
-
-    ADR 0008 item 4: if the owner never answers, ``await_decision`` resolves to
-    the "expired" sentinel once our own timeout elapses (comfortably before
-    Hermes's own hardcoded 60s ACP fail-close). When that happens — and only
-    if a ``conn`` was supplied — mark the pending approvals row 'expired'
-    instead of leaving it stuck at 'pending' forever with no record of what
-    happened; ACP still gets a plain "deny" either way.
-    """
-    from app.runtime.approval_bridge import await_decision
+    """Poll the durable approval decision instead of relying on a local Future."""
+    if conn is None:
+        raise ValueError("database-backed approval resolver requires a connection")
 
     async def resolver(info: dict) -> str:
-        decision = await await_decision(info["approval_id"])
-        if decision == "expired":
-            if conn is not None:
-                conn.execute(
-                    "UPDATE approvals SET status = 'expired', resolved_at = ? "
-                    "WHERE id = ? AND status = 'pending'",
-                    (_now_iso(), info["approval_id"]),
-                )
-                conn.commit()
-            return "deny"
-        return decision
+        timeout = 50
+        from app.core.config import settings
+
+        timeout = settings.approval_bridge_timeout_seconds
+        elapsed = 0.0
+        while elapsed < timeout:
+            row = conn.execute(
+                "SELECT status, payload_json FROM approvals WHERE id = ?",
+                (info["approval_id"],),
+            ).fetchone()
+            if row and row["status"] in ("approved", "answered", "rejected", "expired"):
+                if row["status"] not in ("approved", "answered"):
+                    return "deny"
+                import json as _json
+
+                payload = _json.loads(row["payload_json"] or "{}")
+                return "allow_always" if payload.get("scope") == "always" else "allow_once"
+            await asyncio.sleep(0.25)
+            elapsed += 0.25
+        conn.execute(
+            """UPDATE approvals SET status = 'expired', resolved_at = ?
+            WHERE id = ? AND status = 'pending'""",
+            (_now_iso(), info["approval_id"]),
+        )
+        conn.commit()
+        return "deny"
 
     return resolver
 
@@ -163,9 +167,10 @@ async def stream_agent_run(
     *,
     ctx: RunContext,
     backend: RunBackend,
-    input_message_id: str,
+    input_message_id: str | None,
     permission_resolver: Any = None,
     persist_message: bool = True,
+    existing_run_id: str | None = None,
 ) -> AsyncIterator[dict]:
     """Drive one run, persist run_steps + the reply, and yield route events.
 
@@ -174,26 +179,36 @@ async def stream_agent_run(
       {"type": "tool_call"|"tool_result"|"approval_required", "payload": dict}
       {"type": "message", "message": <row|None>}   once, at the end
     """
-    run_id = create_run(
-        conn,
-        workspace_id=ctx.workspace_id,
-        conversation_id=ctx.conversation_id,
-        agent_id=ctx.agent_id,
-        input_message_id=input_message_id,
-        task_id=ctx.task_id or None,
-        hermes_profile_id=ctx.profile,
-        workdir=ctx.workdir,
-        provider="hermes",
-        status=RunStatus.QUEUED,
-    )
+    if existing_run_id:
+        existing = get_run(conn, existing_run_id)
+        if existing is None or existing["status"] != RunStatus.QUEUED:
+            raise ValueError("existing run must be queued")
+        if ctx.task_id and existing["task_id"] != ctx.task_id:
+            raise ValueError("existing run does not belong to task")
+        run_id = existing_run_id
+    else:
+        run_id = create_run(
+            conn,
+            workspace_id=ctx.workspace_id,
+            conversation_id=ctx.conversation_id,
+            agent_id=ctx.agent_id,
+            input_message_id=input_message_id,
+            task_id=ctx.task_id or None,
+            hermes_profile_id=ctx.profile,
+            workdir=ctx.workdir,
+            provider="hermes",
+            status=RunStatus.QUEUED,
+        )
     ctx.run_id = run_id
     transition_run(conn, run_id, RunStatus.RUNNING)
+    conn.execute(
+        "UPDATE runs SET started_at = COALESCE(started_at, ?) WHERE id = ?",
+        (_now_iso(), run_id),
+    )
     conn.commit()
 
-    # Build the approval suspension resolver (TD-03-T4) if not injected.
-    # Uses make_bridge_resolver which only awaits the bridge — the
-    # approval row + run transition are handled by _persist_run_approval
-    # inside stream_agent_run's approval_required event handler.
+    # The approval row and wait-state transition are persisted by the event
+    # handler below; this resolver only waits for the durable decision.
     if permission_resolver is None and ctx.workspace_id and ctx.conversation_id:
         permission_resolver = make_bridge_resolver(conn)
 
@@ -205,6 +220,13 @@ async def stream_agent_run(
     try:
         async for event in backend.run(ctx, permission_resolver=permission_resolver):
             etype = event.type
+            current = get_run(conn, run_id)
+            if (
+                etype != "approval_required"
+                and current
+                and current["status"] in (RunStatus.WAITING_USER, RunStatus.WAITING_CLARIFY)
+            ):
+                transition_run(conn, run_id, RunStatus.RUNNING)
             if etype == "message":
                 text = _chunk_text(event.payload)
                 if text:
@@ -217,12 +239,17 @@ async def stream_agent_run(
                     conn, run_id=run_id, type=RunStepType.TOOL_CALL,
                     title=str(event.payload.get("title", "")), payload=event.payload,
                 )
+                # Release SQLite's write lock before Hermes invokes the tool.
+                # Company MCP handlers and the lease heartbeat use independent
+                # connections while this run remains active.
+                conn.commit()
                 yield {"type": "tool_call", "payload": event.payload}
             elif etype == "tool_result":
                 append_run_step(
                     conn, run_id=run_id, type=RunStepType.TOOL_RESULT,
                     payload=event.payload,
                 )
+                conn.commit()
                 yield {"type": "tool_result", "payload": event.payload}
             elif etype == "approval_required":
                 append_run_step(
@@ -233,8 +260,8 @@ async def stream_agent_run(
                 category = event.payload.get("category", "high_risk")
                 if approval_id:
                     # TD-03-T4: persist an approval and suspend the run; the ACP
-                    # session stays paused (resolver awaits the bridge) until the
-                    # owner resolves, which resumes this same run in place.
+                    # session stays paused while the resolver polls the row until
+                    # the owner resolves, then resumes this same run in place.
                     _persist_run_approval(
                         conn, approval_id=approval_id, ctx=ctx, run_id=run_id,
                         category=category, payload=event.payload,
@@ -304,9 +331,10 @@ async def start_run(
     *,
     ctx: RunContext,
     backend: RunBackend,
-    input_message_id: str,
+    input_message_id: str | None,
     permission_resolver: Any = None,
     persist_message: bool = True,
+    existing_run_id: str | None = None,
 ) -> dict:
     """Non-streaming convenience: drain stream_agent_run, return a summary."""
     text_parts: list[str] = []
@@ -318,6 +346,7 @@ async def start_run(
         input_message_id=input_message_id,
         permission_resolver=permission_resolver,
         persist_message=persist_message,
+        existing_run_id=existing_run_id,
     ):
         if ev["type"] == "chunk":
             text_parts.append(ev["content"])

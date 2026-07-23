@@ -48,26 +48,61 @@ def setup(tmp_path, monkeypatch):
     ).json()
     conv_id = group["id"]
 
+    db = connect()
+    try:
+        db.execute(
+            """INSERT INTO agent_specs (
+              id, agent_id, workspace_id, role_name, source_request,
+              responsibilities_json, hermes_profile, status, created_at, updated_at
+            ) VALUES (?, ?, ?, '老板秘书', 'test', '[]', 'test-secretary', 'ready', ?, ?)""",
+            (new_id("spec"), secretary["id"], workspace_id, now_iso(), now_iso()),
+        )
+        db.commit()
+    finally:
+        db.close()
+
     return client, headers, workspace_id, secretary, conv_id
 
 
-@pytest.mark.xfail(reason="DeepSeek SOCKS proxy not configured in CI/test env", strict=False)
+def work_items(agent_id: str) -> list[dict]:
+    return [
+        {"key": "research", "title": "调研", "description": "整理依据", "owner_agent_id": agent_id, "expected_output": "研究摘要", "output_type": "markdown", "depends_on_keys": [], "final_delivery": False},
+        {"key": "draft", "title": "写作", "description": "完成草稿", "owner_agent_id": agent_id, "expected_output": "内容草稿", "output_type": "markdown", "depends_on_keys": ["research"], "final_delivery": False},
+        {"key": "package", "title": "组包", "description": "整理内容包", "owner_agent_id": agent_id, "expected_output": "待发布内容包", "output_type": "content_package_v1", "depends_on_keys": ["draft"], "final_delivery": True},
+    ]
+
+
 def test_step1_no_auto_task(setup):
     """Step 1: send message -> no auto task."""
     client, headers, ws_id, secretary, conv_id = setup
 
-    # The streaming endpoint doesn't try DeepSeek on the server side
-    # but the non-streaming one does. Use streaming to verify no auto task.
+    # This fixture marks the fake profile ready for launch tests. Disable it
+    # before exercising chat so an ordinary test can never start real Hermes.
+    db = connect()
+    try:
+        db.execute(
+            "UPDATE agent_specs SET status = 'failed' WHERE agent_id = ?",
+            (secretary["id"],),
+        )
+        db.commit()
+    finally:
+        db.close()
+
     resp = client.post(
         f"/api/conversations/{conv_id}/messages",
         headers=headers,
         json={"content": "帮我搞下周内容"},
     )
-    # This may fail if DeepSeek is not configured (SOCKS proxy issue).
-    # The key assertion: if it succeeds, no task was auto-created.
-    if resp.status_code == 200:
-        data = resp.json()
-        assert data.get("created_task") is None, "Task should not be auto-created"
+    assert resp.status_code == 503
+
+    db = connect()
+    try:
+        assert db.execute(
+            "SELECT COUNT(*) AS count FROM tasks WHERE workspace_id = ?",
+            (ws_id,),
+        ).fetchone()["count"] == 0
+    finally:
+        db.close()
 
     # Conversation should still be 'discussing'
     bootstrap = client.get("/api/me/bootstrap", headers=headers).json()
@@ -90,6 +125,7 @@ def test_step2_create_brief(setup):
             "success_criteria": "3篇选题+结构定稿",
             "owner_agent_id": secretary["id"],
             "participant_agent_ids": [secretary["id"]],
+            "work_items": work_items(secretary["id"]),
             "created_by_agent_id": secretary["id"],
         },
     )
@@ -122,6 +158,9 @@ def test_step3_reject_brief(setup):
         json={
             "discussion_conversation_id": conv_id,
             "goal": "测试reject",
+            "owner_agent_id": secretary["id"],
+            "participant_agent_ids": [secretary["id"]],
+            "work_items": work_items(secretary["id"]),
             "created_by_agent_id": secretary["id"],
         },
     ).json()
@@ -137,8 +176,8 @@ def test_step3_reject_brief(setup):
     assert conv.get("discussion_status", "discussing") == "discussing"
 
 
-def test_step4_confirm_and_create_task(setup):
-    """Step 4: confirm -> aligned + can create task from brief."""
+def test_step4_confirm_launches_task_plan(setup):
+    """Step 4: compatibility confirm -> aligned + launches the durable plan."""
     client, headers, ws_id, secretary, conv_id = setup
 
     brief = client.post(
@@ -148,6 +187,8 @@ def test_step4_confirm_and_create_task(setup):
             "discussion_conversation_id": conv_id,
             "goal": "本周输出3篇内容",
             "owner_agent_id": secretary["id"],
+            "participant_agent_ids": [secretary["id"]],
+            "work_items": work_items(secretary["id"]),
             "created_by_agent_id": secretary["id"],
         },
     ).json()
@@ -165,26 +206,11 @@ def test_step4_confirm_and_create_task(setup):
         f"Expected aligned, got {conv.get('discussion_status')}"
     )
 
-    # Create task from confirmed brief (should pass gate)
-    resp = client.post(
-        "/api/tasks",
-        headers=headers,
-        json={
-            "title": "写3篇减脂餐文案",
-            "owner_agent_id": secretary["id"],
-            "conversation_id": conv_id,
-            "consensus_brief_id": brief_id,
-        },
-    )
-    assert resp.status_code == 200, f"create task failed: {resp.text}"
-    task = resp.json()
-    assert task["consensus_brief_id"] == brief_id
-    assert task["status"] == "进行中"
-
-    # Task should appear in bootstrap
+    # The confirm compatibility endpoint delegates launch: root + 3 work items.
     bootstrap = client.get("/api/me/bootstrap", headers=headers).json()
-    task_ids = [t["id"] for t in bootstrap["tasks"]]
-    assert task["id"] in task_ids, "Task not found in bootstrap"
+    plan_tasks = [t for t in bootstrap["tasks"] if t["consensus_brief_id"] == brief_id]
+    assert len(plan_tasks) == 4
+    assert len({task["task_plan_id"] for task in plan_tasks}) == 1
 
 
 def test_step5_gate_rejects(setup):

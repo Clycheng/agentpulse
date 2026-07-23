@@ -16,10 +16,9 @@ from app.runtime.runner import (
     resolve_hermes_profile,
     stream_agent_run,
 )
+from app.runtime.runs import RunStatus
 from app.runtime.profile_provisioner import build_provisioner_from_settings
 from app.runtime.reflection import run_reflection
-from app.runtime import approval_bridge
-from app.runtime.runs import RunStatus, RunStateError, transition_run
 from app.schemas.run import (
     LlmAgentExperience,
     LlmChatAgent,
@@ -681,6 +680,10 @@ def create_workspace_task(
             due_date=payload.due_date,
             parent_task_id=payload.parent_task_id,
             consensus_brief_id=payload.consensus_brief_id,  # Gate condition
+            task_plan_id=payload.task_plan_id,
+            plan_item_key=payload.plan_item_key,
+            expected_output=payload.expected_output,
+            output_type=payload.output_type,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -837,6 +840,7 @@ async def send_message(
                 agent=next_agent,
                 user_message=user_message,
                 discussion_context=discussion_ctx,
+                use_tools=False,
             )
             # Commit so the next speaker selection can see this reply.
             conn.commit()
@@ -1012,6 +1016,7 @@ async def send_message_stream(
                     agent=next_agent,
                     user_message=user_message,
                     discussion_context=discussion_ctx,
+                    allow_action_bridge=False,
                 ):
                     yield event
 
@@ -1051,7 +1056,11 @@ async def send_message_stream(
                     yield f"event: approval\ndata: {json.dumps(event.get('payload', {}), ensure_ascii=False)}\n\n"
                 elif etype == "error":
                     yield f"event: error\ndata: {json.dumps({'detail': event['detail']}, ensure_ascii=False)}\n\n"
-                elif etype == "end" and event.get("turns_used") == 0:
+                elif (
+                    etype == "end"
+                    and event.get("turns_used") == 0
+                    and not event.get("converged")
+                ):
                     # Moderator picked nobody (NONE) on the very first turn —
                     # without this, the boss sees the group go dead silent with
                     # no visible signal that it was a deliberate pause rather
@@ -1221,23 +1230,31 @@ def resolve_approval(
 
     resolved_at = now_iso()
     decision = payload.status
+    try:
+        decision_payload = json.loads(approval["payload_json"] or "{}")
+    except (ValueError, TypeError):
+        decision_payload = {}
+    decision_payload["scope"] = payload.scope
     conn.execute(
         """
         UPDATE approvals
-        SET status = ?, resolved_by = ?, resolved_at = ?
+        SET status = ?, resolved_by = ?, resolved_at = ?, payload_json = ?
         WHERE id = ? AND workspace_id = ?
         """,
-        (decision, current_user["id"], resolved_at, approval_id, workspace["id"]),
+        (
+            decision,
+            current_user["id"],
+            resolved_at,
+            json.dumps(decision_payload, ensure_ascii=False),
+            approval_id,
+            workspace["id"],
+        ),
     )
 
-    # TD-03-T4 / TD-06-T2: wake a suspended run for run-linked approvals
-    # (high_risk gate or capability_upgrade). The in-process permission_resolver
-    # is blocked on an approval_bridge Future; waking it lets the ACP stream
-    # continue. clarification approvals are resolved via /answer, not here.
+    # TD-11: this endpoint records the durable decision only. The suspended
+    # RunService polls this row and owns all run-state transitions.
     run_id = approval["run_id"]
     if run_id and approval["type"] in ("high_risk", "capability_upgrade"):
-        from app.runtime.approval_bridge import resolve_pending
-
         # TD-06-T2: approving a capability upgrade installs the capability onto
         # the employee's profile (+ agent_capabilities row) before resuming.
         if approval["type"] == "capability_upgrade" and decision == "approved":
@@ -1261,25 +1278,6 @@ def resolve_approval(
             except UpgradeError as exc:
                 raise HTTPException(status_code=400, detail=f"能力升级失败：{exc}")
 
-        # Map the owner's decision to the ACP permission decision hermes_client
-        # expects ("allow_once" | "allow_always" | "deny") — NOT the raw
-        # approved/rejected string. "always" makes Hermes persist an allowlist
-        # rule so the same action won't ask again (ADR 0008).
-        if decision != "approved":
-            bridge_decision = "deny"
-        elif payload.scope == "always":
-            bridge_decision = "allow_always"
-        else:
-            bridge_decision = "allow_once"
-        try:
-            transition_run(
-                conn, run_id,
-                RunStatus.RUNNING if decision == "approved" else RunStatus.COMPLETED,
-            )
-        except Exception:
-            pass  # run may have already moved on; bridge wake is still needed.
-
-        resolve_pending(approval_id, bridge_decision)
         task_id = approval["task_id"]
         if task_id:
             add_task_event(
@@ -1344,7 +1342,7 @@ def answer_clarification(
     """TD-03-T4: answer an employee's clarification request and resume its run.
 
     The answer is recorded as a chat message (so it enters conversation history)
-    and the suspended run is woken to continue. NOTE: ACP permission responses
+    and the suspended RunService observes the database decision. NOTE: ACP permission responses
     carry only allow/deny, so the paused run resumes as "proceed" rather than
     receiving the answer text inline — the employee picks the answer up from
     conversation history on its next turn. Full inline injection needs a Hermes
@@ -1377,16 +1375,7 @@ def answer_clarification(
             sender_id=current_user["id"],
             content=answer,
         )
-    run_id = approval["run_id"]
-    if run_id:
-        try:
-            transition_run(conn, run_id, RunStatus.RUNNING)
-        except RunStateError:
-            pass
-        conn.commit()
-        approval_bridge.resolve_pending(approval_id, "allow_once")
-    else:
-        conn.commit()
+    conn.commit()
     updated = conn.execute(
         "SELECT * FROM approvals WHERE id = ?", (approval_id,)
     ).fetchone()
@@ -1548,6 +1537,7 @@ async def _stream_reply_events(
     agent: Row,
     user_message: Row,
     discussion_context: str = "",
+    allow_action_bridge: bool = True,
 ) -> AsyncGenerator:
     """Produce an agent's reply as {type: chunk|message|...} events.
 
@@ -1565,8 +1555,10 @@ async def _stream_reply_events(
 
     Employees without a Hermes profile keep using the Agent Action Bridge
     (create_employee/create_task/etc.), then the temporary DeepSeek path.
+    Discussion turns pass ``allow_action_bridge=False`` so no participant can
+    mutate the company before a consensus brief is launched.
 
-    Exception: the secretary (source == "system_secretary") tries the Agent
+    Outside discussion, the secretary (source == "system_secretary") tries the Agent
     Action Bridge FIRST even when she has a ready Hermes profile — her core
     job (create_employee/create_group/create_task) lives in the system tools
     that only function_loop has; sending her straight to Hermes means she can
@@ -1581,7 +1573,7 @@ async def _stream_reply_events(
     """
     profile = resolve_hermes_profile(conn, agent["id"])
     is_secretary = agent.get("source") == "system_secretary"
-    if profile and not is_secretary:
+    if profile and (not is_secretary or not allow_action_bridge):
         async for event in _stream_hermes_reply(
             conn,
             workspace=workspace,
@@ -1594,43 +1586,44 @@ async def _stream_reply_events(
             yield event
         return
 
-    # ── Agent Action Bridge (streaming): try function loop ──
-    bridge_used_tool = False
-    bridge_failed = False
-    try:
-        async for ev in _run_action_bridge_stream(
-            conn,
-            workspace=workspace,
-            conversation=conversation,
-            agent=agent,
-            user_message=user_message,
-        ):
-            if ev["type"] == "tool_call":
-                bridge_used_tool = True
-            yield ev
-    except Exception as exc:
-        logger.warning("function_loop_failed", agent_id=agent["id"], error=str(exc))
-        bridge_failed = True
-    if not bridge_failed and not is_secretary:
-        # 普通员工保持原行为——function_loop 走完（哪怕空产出）也不回落。
-        return
-    if not bridge_failed and is_secretary and bridge_used_tool:
-        # 她的本职工作（招人/建任务等系统工具）真的被调用了，到此为止。
-        return
+    if allow_action_bridge:
+        # ── Agent Action Bridge (streaming): try function loop ──
+        bridge_used_tool = False
+        bridge_failed = False
+        try:
+            async for ev in _run_action_bridge_stream(
+                conn,
+                workspace=workspace,
+                conversation=conversation,
+                agent=agent,
+                user_message=user_message,
+            ):
+                if ev["type"] == "tool_call":
+                    bridge_used_tool = True
+                yield ev
+        except Exception as exc:
+            logger.warning("function_loop_failed", agent_id=agent["id"], error=str(exc))
+            bridge_failed = True
+        if not bridge_failed and not is_secretary:
+            # 普通员工保持原行为——function_loop 走完（哪怕空产出）也不回落。
+            return
+        if not bridge_failed and is_secretary and bridge_used_tool:
+            # 她的本职工作（招人/建任务等系统工具）真的被调用了，到此为止。
+            return
 
-    # 小秘兜底：Bridge 异常/空产出/没调用系统工具（纯聊天）都轮到她的 Hermes profile。
-    if profile:
-        async for event in _stream_hermes_reply(
-            conn,
-            workspace=workspace,
-            conversation=conversation,
-            agent=agent,
-            user_message=user_message,
-            discussion_context=discussion_context,
-            profile=profile,
-        ):
-            yield event
-        return
+        # 小秘私聊兜底：Bridge 没有真正调用系统工具时走 Hermes。
+        if profile:
+            async for event in _stream_hermes_reply(
+                conn,
+                workspace=workspace,
+                conversation=conversation,
+                agent=agent,
+                user_message=user_message,
+                discussion_context=discussion_context,
+                profile=profile,
+            ):
+                yield event
+            return
 
     # Temporary DeepSeek execution layer (employees without a Hermes profile).
     logger.info("agent_reply_via_deepseek", agent_id=agent["id"])
@@ -1712,10 +1705,11 @@ async def _stream_agent_reply(
 def make_speaker_selector():
     """Build the moderator-LLM callback injected into run_discussion_round.
 
-    Pure execution-layer plumbing: given a system prompt (assembled by the
-    orchestration layer), return the model's raw text. All selection logic
-    (@mention priority, JSON parsing/validation, round-robin fallback) lives
-    in orchestration/discussion.py.
+    The same callback serves speaker selection, convergence, brief drafting,
+    and one repair attempt. Its user message must therefore stay neutral;
+    task-specific instructions belong entirely to the injected system prompt.
+    All selection logic (@mention priority, JSON parsing/validation,
+    round-robin fallback) lives in orchestration/discussion.py.
     """
 
     async def _complete(prompt: str) -> str:
@@ -1727,7 +1721,9 @@ def make_speaker_selector():
                     role="讨论主持人",
                     prompt=prompt,
                 ),
-                messages=[LlmChatMessage(role="user", content="请选择下一个发言人")],
+                messages=[
+                    LlmChatMessage(role="user", content="请严格按照系统指令完成输出")
+                ],
             )
         )
         return completion.reply
@@ -1767,7 +1763,9 @@ def _create_brief_from_draft(
             scope=draft.get("scope") or "",
             constraints=draft.get("constraints") or "",
             success_criteria=draft.get("success_criteria") or "",
+            owner_agent_id=draft.get("owner_agent_id"),
             participant_agent_ids=[a["id"] for a in reply_agents],
+            work_items=draft.get("work_items") or [],
             created_by_agent_id=reply_agents[0]["id"],
         )
         conn.commit()

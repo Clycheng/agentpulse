@@ -29,6 +29,7 @@
 | C | [TD-03](TD-03-hermes-execution.md) | 执行层从"直连 DeepSeek"换成"调 Hermes profile"(Run/RunStep + HermesBackend) | **是**（会真起 Hermes 进程，[ADR 0005](../decisions/0005-hermes-poc-safety-findings.md) 隔离规矩） | 大 |
 | D | [TD-05](TD-05-capability-catalog.md) → [TD-04](TD-04-agent-provisioning.md) | 能力映射表 + Agent 供给(一句话→定制员工)。与 B/C 可并行；仅 TD-04-T6 需 agentpulse 会话 | 大部分否 | 中 |
 | V | [HERMES-VERIFICATION-PLAYBOOK](HERMES-VERIFICATION-PLAYBOOK.md) | **验证剧本**：一次实测清掉全部〔待核〕(V1–V7)并回填各文档。建议最先执行——之后 C/D 的 T6 类任务零猜测 | **是** | 小 |
+| E | [TD-11](TD-11-autonomous-content-execution.md) | 自媒体 AI 公司自动执行闭环：完整分工 brief → 一次确认 → 持久依赖调度 → 内容包 | **是** | 大 |
 
 ## Worker AI 执行协议（领任务前必读）
 

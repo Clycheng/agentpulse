@@ -36,10 +36,12 @@ def _make_db() -> Database:
         );
         CREATE TABLE runs (
             id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, conversation_id TEXT NOT NULL,
-            agent_id TEXT NOT NULL, task_id TEXT, status TEXT NOT NULL, input_message_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL, task_id TEXT, status TEXT NOT NULL, input_message_id TEXT,
             output_message_id TEXT, hermes_profile_id TEXT, hermes_run_id TEXT, workdir TEXT,
             provider TEXT NOT NULL DEFAULT 'hermes', model TEXT NOT NULL DEFAULT '',
             usage_json TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '',
+            attempt_no INTEGER NOT NULL DEFAULT 1, lease_owner TEXT,
+            lease_expires_at TEXT, started_at TEXT,
             created_at TEXT NOT NULL, completed_at TEXT
         );
         CREATE TABLE run_steps (

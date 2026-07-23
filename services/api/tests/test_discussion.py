@@ -561,6 +561,7 @@ class TestBuildDiscussionAgentPrompt:
         prompt = build_discussion_agent_prompt("小明", "设计师", "画图")
         assert "讨论" in prompt
         assert "不允许宣称已执行" in prompt
+        assert "不要索要尚未执行产生的文件或结果" in prompt
 
 
 class TestFormatTranscript:
@@ -586,9 +587,8 @@ class TestFormatTranscript:
 # --- Convergence → brief_draft event tests (TD-02-T3 wired into production) ---
 
 class TestDiscussionRoundConvergence:
-    """讨论轮正常结束后（主持人 NONE 或达到轮数上限）且实际发言 ≥2 轮时，
-    编排层用注入的主持人 LLM 回调做收敛检查：已对齐 → 产出 brief_draft 事件。
-    编排层只产事件不写库（落库在路由层）。"""
+    """当前轮或共享 transcript 已有至少两次员工发言时，编排层做收敛
+    检查：已对齐 → 产出 brief_draft 事件。编排层只产事件不写库。"""
 
     def _members(self):
         return [
@@ -623,7 +623,18 @@ class TestDiscussionRoundConvergence:
             if "提炼共识纪要" in prompt:
                 return (
                     '{"goal": "产出三篇选题", "scope": "小红书",'
-                    ' "constraints": "周三前", "success_criteria": "定稿"}'
+                    ' "constraints": "周三前", "success_criteria": "定稿",'
+                    ' "owner_agent_id": "agent_abc", "work_items": ['
+                    '{"key":"research","title":"调研","description":"整理依据",'
+                    '"owner_agent_id":"agent_abc","expected_output":"研究摘要",'
+                    '"output_type":"markdown","depends_on_keys":[],"final_delivery":false},'
+                    '{"key":"draft","title":"起草","description":"完成草稿",'
+                    '"owner_agent_id":"agent_def","expected_output":"内容草稿",'
+                    '"output_type":"markdown","depends_on_keys":["research"],"final_delivery":false},'
+                    '{"key":"package","title":"组包","description":"整理内容包",'
+                    '"owner_agent_id":"agent_def","expected_output":"待发布内容包",'
+                    '"output_type":"content_package_v1","depends_on_keys":["draft"],'
+                    '"final_delivery":true}]}'
                 )
             return "{}"
         return llm
@@ -652,6 +663,7 @@ class TestDiscussionRoundConvergence:
         assert draft["scope"] == "小红书"
         assert draft["constraints"] == "周三前"
         assert draft["success_criteria"] == "定稿"
+        assert len(draft["work_items"]) == 3
         # brief_draft 必须在 end 之前，end 永远最后
         assert events[-1]["type"] == "end"
         assert events[-1]["turns_used"] == 2
@@ -677,6 +689,34 @@ class TestDiscussionRoundConvergence:
         # 收敛检查确实跑过（发言 ≥2 轮）
         assert state["convergence_checks"] == 1
         assert events[-1]["type"] == "end"
+
+    def test_prior_round_can_converge_when_no_new_speaker_is_needed(self):
+        db = _make_db()
+        _insert_conversation(db)
+        _insert_message(db, "conv_1", "agent", "agent_abc", "策划已确认", "msg_prior_1")
+        _insert_message(db, "conv_1", "agent", "agent_def", "交付已确认", "msg_prior_2")
+        _insert_message(db, "conv_1", "user", "user_1", "请生成共识 brief", "msg_final")
+        state = {"n": 0, "speaker_calls": 0}
+        base_llm = self._make_llm(state, converged=True)
+
+        async def llm(prompt):
+            if "选择下一个该发言的人" in prompt:
+                return '{"next_speaker": "NONE", "reason": "无需补充"}'
+            return await base_llm(prompt)
+
+        events = _run(
+            run_discussion_round(
+                db,
+                workspace_id="ws_1",
+                conversation_id="conv_1",
+                member_agents=self._members(),
+                turn_executor=self._make_executor(state),
+                llm_complete=llm,
+                debounce_seconds=0,
+            )
+        )
+        assert len([event for event in events if event["type"] == "brief_draft"]) == 1
+        assert events[-1] == {"type": "end", "converged": True, "turns_used": 0}
 
     def test_no_convergence_check_when_fewer_than_two_turns(self):
         """发言不足 2 轮的琐碎轮次不做收敛检查（省 LLM 调用）。"""

@@ -65,6 +65,10 @@ class TaskOut(BaseModel):
     due_date: str | None = None
     parent_task_id: str | None = None
     consensus_brief_id: str | None = None
+    task_plan_id: str | None = None
+    plan_item_key: str | None = None
+    expected_output: str = ""
+    output_type: str = "markdown"
     created_at: str
     updated_at: str
 
@@ -224,6 +228,10 @@ class CreateTaskRequest(BaseModel):
     due_date: str | None = Field(default=None, max_length=40)
     parent_task_id: str | None = None
     consensus_brief_id: str | None = None  # Gate condition: must be confirmed brief
+    task_plan_id: str | None = None
+    plan_item_key: str | None = Field(default=None, max_length=80)
+    expected_output: str = Field(default="", max_length=2000)
+    output_type: str = Field(default="markdown", max_length=80)
 
 
 class UpdateTaskRequest(BaseModel):

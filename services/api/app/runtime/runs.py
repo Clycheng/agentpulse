@@ -83,7 +83,7 @@ def create_run(
     workspace_id: str,
     conversation_id: str,
     agent_id: str,
-    input_message_id: str,
+    input_message_id: str | None,
     task_id: str | None = None,
     hermes_profile_id: str | None = None,
     hermes_run_id: str | None = None,
@@ -91,6 +91,10 @@ def create_run(
     provider: str = "hermes",
     model: str = "",
     status: str = RunStatus.QUEUED,
+    attempt_no: int = 1,
+    lease_owner: str | None = None,
+    lease_expires_at: str | None = None,
+    started_at: str | None = None,
 ) -> str:
     """Insert a new run row and return its id."""
     if status not in RunStatus.ALL:
@@ -101,9 +105,10 @@ def create_run(
         INSERT INTO runs (
           id, workspace_id, conversation_id, agent_id, task_id, status,
           input_message_id, output_message_id, hermes_profile_id, hermes_run_id,
-          workdir, provider, model, usage_json, error, created_at, completed_at
+          workdir, provider, model, usage_json, error, attempt_no, lease_owner,
+          lease_expires_at, started_at, created_at, completed_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, '{}', '', ?, NULL)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, '{}', '', ?, ?, ?, ?, ?, NULL)
         """,
         (
             run_id,
@@ -118,6 +123,10 @@ def create_run(
             workdir,
             provider,
             model,
+            attempt_no,
+            lease_owner,
+            lease_expires_at,
+            started_at,
             now_iso(),
         ),
     )

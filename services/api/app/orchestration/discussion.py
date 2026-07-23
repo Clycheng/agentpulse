@@ -19,6 +19,10 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from app.core.database import Database
+from app.core.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 # Injected callbacks (provided by the route layer so orchestration never
 # touches the runtime/HTTP layer directly — see services/api/AGENTS.md).
@@ -309,8 +313,8 @@ async def run_discussion_round(
     (and sees the full transcript, so nothing is lost).
 
     After the turn loop ends (moderator returned NONE or max turns reached),
-    if at least ``MIN_TURNS_FOR_CONVERGENCE_CHECK`` agent turns actually
-    happened, a convergence check runs via the same injected ``llm_complete``:
+    a convergence check runs once the current round or shared transcript has
+    at least ``MIN_TURNS_FOR_CONVERGENCE_CHECK`` agent turns:
     converged → a brief draft is produced and yielded as a ``brief_draft``
     event. The orchestration layer never writes the brief itself — the route
     layer consumes the event and persists it. Any failure in the check (LLM
@@ -321,7 +325,8 @@ async def run_discussion_round(
       - {"type": "chunk", "content": str}          (re-emitted from turn_executor)
       - {"type": "message", "message": <row>}      (re-emitted from turn_executor)
       - {"type": "error", "detail": str, "exc": Exception}
-      - {"type": "brief_draft", "draft": {goal, scope, constraints, success_criteria}}
+      - {"type": "brief_draft", "draft": {goal, scope, constraints,
+        success_criteria, owner_agent_id, work_items}}
       - {"type": "end", "converged": bool, "turns_used": int}   (always last)
     """
     turns_used = 0
@@ -367,12 +372,24 @@ async def run_discussion_round(
             converged = True
             break
 
-    # --- 收敛检查（TD-02-T3 接入生产）：讨论轮正常结束后判断是否已对齐 ---
-    # 只对实际发言 ≥ MIN_TURNS_FOR_CONVERGENCE_CHECK 的轮次检查；判定已对齐就
-    # 产出 brief 草稿事件，由路由层落库。任何失败静默兜底为"不出 brief"。
-    if turns_used >= MIN_TURNS_FOR_CONVERGENCE_CHECK and llm_complete is not None:
-        draft = await _maybe_draft_brief(conn, conversation_id, llm_complete)
+    # A multi-round discussion may already be aligned when the moderator picks
+    # NONE. Count the shared transcript as well, otherwise "nothing left to add"
+    # can never produce a brief.
+    transcript_agent_turns = sum(
+        1
+        for message in _load_transcript(conn, conversation_id)
+        if message.get("sender_type") == "agent"
+    )
+    should_check_convergence = (
+        turns_used >= MIN_TURNS_FOR_CONVERGENCE_CHECK
+        or transcript_agent_turns >= MIN_TURNS_FOR_CONVERGENCE_CHECK
+    )
+    if should_check_convergence and llm_complete is not None:
+        draft = await _maybe_draft_brief(
+            conn, conversation_id, llm_complete, member_agents=member_agents
+        )
         if draft is not None:
+            converged = True
             yield {"type": "brief_draft", "draft": draft}
 
     yield {"type": "end", "converged": converged, "turns_used": turns_used}
@@ -382,10 +399,12 @@ async def _maybe_draft_brief(
     conn: Database,
     conversation_id: str,
     llm_complete: LlmComplete,
+    *,
+    member_agents: list[Any],
 ) -> dict | None:
     """收敛检查 + brief 草稿生成（主持人 LLM 回调由路由层注入）。
 
-    返回 {goal, scope, constraints, success_criteria} 草稿；未对齐或任何
+    返回带完整 work_items 的草稿；未对齐或两次 JSON 校验均失败时
     环节失败（LLM 异常 / JSON 解析失败 / 缺 goal）都返回 None——绝不抛出，
     出不了 brief 不能影响正常发消息。
     """
@@ -402,23 +421,66 @@ async def _maybe_draft_brief(
             "SELECT name FROM conversations WHERE id = ?", (conversation_id,)
         ).fetchone()
         conversation_name = (row["name"] if row else "") or ""
-        draft_text = await llm_complete(
-            build_brief_draft_prompt(transcript, conversation_name)
+        member_rows = [
+            {
+                "id": agent["id"],
+                "name": _row_get(agent, "name"),
+                "role": _row_get(agent, "role"),
+                "description": _row_get(agent, "description"),
+            }
+            for agent in member_agents
+        ]
+        allowed_agent_ids = {row["id"] for row in member_rows}
+        prompt = build_brief_draft_prompt(
+            transcript, conversation_name, member_rows
         )
-        draft = _parse_speaker_json(draft_text)
-        if not draft:
-            return None
-        goal = draft.get("goal")
-        if not isinstance(goal, str) or not goal.strip():
-            return None
-        # create_brief 对各字段有 500 字上限，超长截断而不是让落库失败
-        return {
-            "goal": goal.strip()[:500],
-            "scope": str(draft.get("scope") or "")[:500],
-            "constraints": str(draft.get("constraints") or "")[:500],
-            "success_criteria": str(draft.get("success_criteria") or "")[:500],
-        }
-    except Exception:
+        draft_text = await llm_complete(prompt)
+        for attempt in range(2):
+            draft = _parse_speaker_json(draft_text)
+            try:
+                if not draft:
+                    raise ValueError("response is not a JSON object")
+                goal = draft.get("goal")
+                if not isinstance(goal, str) or not goal.strip():
+                    raise ValueError("goal is required")
+                from app.orchestration.brief import validate_work_items
+
+                work_items = validate_work_items(
+                    draft.get("work_items") or [],
+                    allowed_agent_ids=allowed_agent_ids,
+                )
+                owner_agent_id = str(draft.get("owner_agent_id") or "").strip()
+                if owner_agent_id not in allowed_agent_ids:
+                    owner_agent_id = next(
+                        item["owner_agent_id"]
+                        for item in work_items
+                        if item["final_delivery"]
+                    )
+                return {
+                    "goal": goal.strip()[:500],
+                    "scope": str(draft.get("scope") or "")[:500],
+                    "constraints": str(draft.get("constraints") or "")[:500],
+                    "success_criteria": str(draft.get("success_criteria") or "")[:500],
+                    "owner_agent_id": owner_agent_id,
+                    "work_items": work_items,
+                }
+            except ValueError as exc:
+                if attempt == 1:
+                    logger.warning(
+                        "brief_draft_validation_failed",
+                        conversation_id=conversation_id,
+                        error=str(exc),
+                    )
+                    return None
+                draft_text = await llm_complete(
+                    build_brief_repair_prompt(prompt, draft_text, str(exc))
+                )
+    except Exception as exc:
+        logger.warning(
+            "brief_draft_generation_failed",
+            conversation_id=conversation_id,
+            error=str(exc),
+        )
         return None
 
 
@@ -476,8 +538,9 @@ def build_convergence_prompt(
 
 判断标准：
 1. 讨论的目标是否已经明确？
-2. 各成员的分工是否已经清晰？
-3. 是否还有重要的背景信息缺失？
+2. 平台、定位、受众、周期、数量、目标和约束是否已经明确？
+3. 各成员的负责人、交付物和接力关系是否已经清晰？
+4. 是否还有重要的背景信息缺失？
 
 输出严格 JSON（不要多余文字）：
 {{"converged": true/false, "missing": ["还缺什么背景1", "还缺什么背景2"]}}"""
@@ -486,6 +549,7 @@ def build_convergence_prompt(
 def build_brief_draft_prompt(
     transcript: list[dict],
     conversation_name: str = "",
+    members: list[dict] | None = None,
 ) -> str:
     """Build the system prompt for LLM brief drafting from discussion.
 
@@ -497,6 +561,10 @@ def build_brief_draft_prompt(
         System prompt string for LLM call
     """
     transcript_text = _format_transcript(transcript)
+    member_text = "\n".join(
+        f"- id={member['id']}，姓名={member.get('name', '')}，岗位={member.get('role', '')}，职责={member.get('description', '')}"
+        for member in (members or [])
+    ) or "- 无可分配成员"
 
     return f"""你是群讨论主持人，负责从讨论中提炼共识纪要。
 
@@ -504,15 +572,42 @@ def build_brief_draft_prompt(
 讨论记录：
 {transcript_text}
 
-根据讨论内容，产出共识纪要草稿。
+可分配成员（owner_agent_id 必须原样使用这里的 id）：
+{member_text}
+
+根据讨论内容产出共识纪要草稿。必须拆成 3-6 个可执行 work item，依赖无环；
+只能有一个 final_delivery=true 且 output_type=content_package_v1 的最终交付项。
 
 输出严格 JSON（不要多余文字）：
 {{
   "goal": "这次讨论要达成的目标（1-500字）",
   "scope": "范围和边界",
   "constraints": "约束条件",
-  "success_criteria": "成功标准"
+  "success_criteria": "成功标准",
+  "owner_agent_id": "总负责人 agent id",
+  "work_items": [
+    {{
+      "key": "英文小写稳定键",
+      "title": "任务标题",
+      "description": "任务说明",
+      "owner_agent_id": "成员 agent id",
+      "expected_output": "预期交付物",
+      "output_type": "markdown 或 content_package_v1",
+      "depends_on_keys": ["前置任务 key"],
+      "final_delivery": false
+    }}
+  ]
 }}"""
+
+
+def build_brief_repair_prompt(original_prompt: str, invalid_output: str, error: str) -> str:
+    return f"""{original_prompt}
+
+上一次输出没有通过校验：{error}
+上一次输出：
+{invalid_output[:8000]}
+
+只返回修复后的完整 JSON，不要解释。"""
 
 
 # --- Discussion prompt assembly ---
@@ -529,7 +624,8 @@ def build_discussion_agent_prompt(
     return f"""【讨论模式约束】
 当前处于讨论阶段：只允许讨论/提问/补充背景，不允许宣称已执行任何动作。
 你是 {agent_name}（{agent_role}），发言保持角色视角，不重复别人已说的。
-如果背景不清楚，先在群里提问，不要臆测。"""
+如果背景不清楚，先在群里提问，不要臆测。
+此时确认的是未来执行的负责人、依赖和预期交付契约；不要索要尚未执行产生的文件或结果。"""
 
 
 # --- Discussion context assembly (per-agent prompt for a group turn) ---
@@ -639,6 +735,15 @@ def _parse_speaker_json(text: str) -> dict | None:
     """
     if not text:
         return None
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?\s*|\s*```$", "", stripped)
+    try:
+        data = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        data = None
+    if isinstance(data, dict):
+        return data
     match = re.search(r"\{[^{}]*\}", text)
     if not match:
         return None

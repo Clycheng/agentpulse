@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     hermes_bin: str = "hermes"
     # When true, provisioning drives the real `hermes` CLI (creates profiles).
     hermes_provisioning: bool = False
-    # ADR 0008 item 4: how long our own approval_bridge waits for the owner
+    # ADR 0008 item 4: how long RunService polls the durable approval row
     # before auto-denying a suspended run. MUST stay comfortably under 60 —
     # Hermes's ACP adapter hardcodes a 60s fail-closed timeout for
     # request_permission (acp_adapter/permissions.py::make_approval_callback,
@@ -40,9 +40,17 @@ class Settings(BaseSettings):
     # does NOT read the `approvals.timeout` config key on that path (only the
     # CLI-interactive prompt_dangerous_approval() does). If our timeout ever
     # creeps above ~55s, Hermes's own timeout can fire first, racing our
-    # bridge Future's cancellation against a late owner click. Re-verify this
+    # database decision against a late owner click. Re-verify this
     # constant against the installed Hermes version after any `hermes update`.
     approval_bridge_timeout_seconds: int = 50
+    # TD-11 durable task worker and per-run MCP company tools.
+    task_worker_enabled: bool = True
+    task_worker_poll_seconds: float = 2.0
+    task_run_lease_seconds: int = 30
+    task_run_heartbeat_seconds: int = 10
+    task_workspace_concurrency: int = 2
+    company_tools_url: str = "http://127.0.0.1:8000/mcp/company-tools/"
+    company_tool_token_ttl_seconds: int = 900
     # TD-08-T2: idle-reflection cron.
     idle_thinking_cron: bool = False
     idle_cron_interval_seconds: int = 3600

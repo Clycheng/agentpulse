@@ -1,7 +1,7 @@
 # 数据模型 + API 契约（唯一真相源）
 
 > 本文件是 AgentPulse 后端**表结构 / 字段 / 接口 / 错误码**的唯一权威规格。任何人/AI 照此可直接编码，无需再猜。
-> 分两类：`【已实现】`= 当前代码就是这样（读自 `services/api` 实际实现，2026-07-07）；`【目标】`= TD-02/TD-03 要新增，字段已钉死可直接建。
+> 分两类：`【已实现】`= 当前代码就是这样（最后核对 `services/api`：2026-07-23）；`【目标】`= 尚未实现但字段已钉死可直接建。
 > 改动本文件所列任何 schema/接口，必须同步改代码 + 更新本文件；表结构改动**必须两处都改**（见 §0 双 schema 硬约束）。
 
 ## 0. 全局约定（必读，否则直接踩坑）
@@ -32,6 +32,7 @@
 | `success_criteria` | TEXT | NOT NULL DEFAULT `''` | 成功标准 |
 | `owner_agent_id` | TEXT | FK→agents ON DELETE SET NULL, 可空 | 负责人 |
 | `participant_agent_ids_json` | TEXT | NOT NULL DEFAULT `'[]'` | 参与者 agent id 数组的 JSON。**API 侧字段名 `participant_agent_ids`** |
+| `work_items_json` | TEXT | NOT NULL DEFAULT `'[]'` | TD-11 分工合同。API 侧字段名 `work_items`；须通过 §10.1 校验 |
 | `created_by_agent_id` | TEXT | NOT NULL, FK→agents ON DELETE CASCADE | 谁整理出的 |
 | `supersedes_brief_id` | TEXT | FK→consensus_briefs ON DELETE SET NULL, 可空 | 取代哪个旧 brief |
 | `derived_from_brief_id` | TEXT | FK→consensus_briefs ON DELETE SET NULL, 可空 | 派生自哪个 brief |
@@ -50,18 +51,22 @@
 | `description` | TEXT | NOT NULL DEFAULT `''` | API 限长 ≤2000 |
 | `priority` | TEXT | NOT NULL DEFAULT `'P2'` | P0/P1/P2 |
 | `owner_agent_id` | TEXT | FK→agents SET NULL, 可空 | |
-| `status` | TEXT | NOT NULL DEFAULT `'进行中'` | 待认领/进行中/待确认/阻塞/已完成 |
+| `status` | TEXT | NOT NULL DEFAULT `'进行中'` | 待认领/待执行/进行中/待确认/阻塞/已完成 |
 | `progress` | INTEGER | NOT NULL DEFAULT 0 | 0–100 |
 | `conversation_id` | TEXT | FK→conversations SET NULL, 可空 | 来源会话 |
 | `due_date` | TEXT | 可空 | |
 | `parent_task_id` | TEXT | FK→tasks SET NULL, 可空 | 子任务 |
+| `task_plan_id` | TEXT | 可空，FK 语义→task_plans | TD-11 所属执行计划；计划内 task 的 `(task_plan_id, plan_item_key)` 唯一 |
+| `plan_item_key` | TEXT | 可空 | 对应 brief work item；根任务固定 `__root__` |
+| `expected_output` | TEXT | NOT NULL DEFAULT `''` | 交付合同的自然语言说明 |
+| `output_type` | TEXT | NOT NULL DEFAULT `'markdown'` | `markdown` / `content_package_v1` / `plan_summary` |
 | `consensus_brief_id` | TEXT | FK→consensus_briefs SET NULL, 可空* | **门控依据**。经 `ensure_column` 加列。*建任务时：无 parent 则必填且须 confirmed（见 §2.5 门控） |
 | `created_at` / `updated_at` | TEXT | NOT NULL | |
 
 ### 1.3 `conversations`（相关列）【`discussion_status` 为新增】
 | 列 | 类型 | 约束 | 说明 |
 |---|---|---|---|
-| `discussion_status` | TEXT | NOT NULL DEFAULT `'discussing'`, CHECK IN (`discussing`,`aligned`) | 讨论态。经 `ensure_column` 加列。⚠️ 现在**没接线**（brief confirm 不会改它），见 §3 G3 |
+| `discussion_status` | TEXT | NOT NULL DEFAULT `'discussing'`, CHECK IN (`discussing`,`aligned`) | 讨论态。confirm/launch 后置 `aligned`，reject 后回 `discussing` |
 
 （`conversations` 其余列 id/workspace_id/kind/name 等见 database.py，本项目未改。）
 
@@ -69,9 +74,10 @@
 `id / conversation_id / sender_type(user|agent|system) / sender_id / content / provider / model / created_at`。
 - 共识纪要卡片是一条 `sender_type='system'` 且 `content` 以 **`BRIEF_CARD:` 前缀** + brief JSON 的消息（前端据此渲染卡片）。这是当前"卡片"的传递方式。
 
-### 1.5 `runs` 【已实现=旧结构；TD-03 要扩】
-当前列：`id / workspace_id / conversation_id / agent_id / status / input_message_id / output_message_id / provider(默认'deepseek') / model / usage_json / error / created_at / completed_at`。
-- 现状：只是"一次 LLM 调用日志"，无分步。TD-03 的扩列/新表见 §5。
+### 1.5 `runs` 【已实现】
+Run 既是聊天执行轨迹，也是 TD-11 的持久任务队列。核心列：`id / workspace_id / conversation_id / agent_id / task_id? / status / input_message_id? / output_message_id? / hermes_profile_id / hermes_run_id / workdir / provider / model / usage_json / error / attempt_no / lease_owner / lease_expires_at / started_at / created_at / completed_at`。
+- `task_id`、`input_message_id` 均可空：聊天 Run 可以无 Task，任务 Run 可以无输入消息。
+- 任务 Run 的 `(task_id, attempt_no)` 唯一；调度与租约语义见 §10.3。
 
 ---
 
@@ -87,6 +93,7 @@ constraints: str = ""                      (≤500)
 success_criteria: str = ""                 (≤500)
 owner_agent_id: str | null = null
 participant_agent_ids: list[str] = []      (≤12)
+work_items: list[BriefWorkItem] = []        (TD-11 可启动 brief 必须为 3-6 项，见 §10.1)
 created_by_agent_id: str                   (必填)
 supersedes_brief_id: str | null = null
 derived_from_brief_id: str | null = null
@@ -94,8 +101,7 @@ derived_from_brief_id: str | null = null
 错误：校验失败/会话不存在 → `400`。
 
 ### 2.2 `POST /api/briefs/{brief_id}/confirm` → `BriefOut`
-老板确认。空请求体（user 来自 token）。`status: draft→confirmed`，写 `confirmed_at`/`confirmed_by_user_id`。错误 `400`（如 brief 不存在/非 draft）。
-> ⚠️ 应同时把 `discussion_conversation_id` 对应会话置 `aligned`——**当前未做**，见 §3 G3。
+兼容接口。内部委托与 `/launch` 相同的计划启动服务，继续返回 `BriefOut`。空请求体（user 来自 token）；成功后 brief 为 `confirmed`、讨论为 `aligned`，且已创建或复用唯一计划。错误 `400`（如 brief rejected/superseded 或负责人未就绪）。
 
 ### 2.3 `POST /api/briefs/{brief_id}/reject` → `BriefOut`
 老板拒绝。空请求体。`status: draft→rejected`。错误 `400`。
@@ -103,7 +109,7 @@ derived_from_brief_id: str | null = null
 ### 2.4 `GET /api/briefs/{brief_id}` → `BriefOut`
 不存在或不属于本 workspace → `404`。
 
-**`BriefOut`（响应 DTO）**：§1.1 全部字段，但 `participant_agent_ids_json` → 出参为 `participant_agent_ids: list[str]`。
+**`BriefOut`（响应 DTO）**：§1.1 全部字段，但两个 JSON 列分别输出为 `participant_agent_ids: list[str]` 和 `work_items: list[BriefWorkItem]`。
 
 ### 2.5 `POST /api/tasks` → `TaskOut`（含**门控**）
 请求体 `CreateTaskRequest`：`title(1–160,必填) / description(≤2000) / priority / owner_agent_id? / status / progress(0–100) / conversation_id? / due_date? / parent_task_id? / consensus_brief_id?`。
@@ -112,7 +118,7 @@ derived_from_brief_id: str | null = null
 - `consensus_brief_id` 空 但 `parent_task_id` 有值 → 放行（子任务继承父的 brief）。
 - 两者都空 → 拒绝 `400`（"Task creation requires a confirmed consensus_brief_id, or parent_task_id"）。
 
-> ⚠️ **`TaskOut` 当前不含 `consensus_brief_id`**（DB 有、建任务能传，但返回读不回）→ 见 §3 G2。
+`TaskOut` 包含 `consensus_brief_id`，可从任务追溯到 brief。
 
 ---
 
@@ -121,8 +127,8 @@ derived_from_brief_id: str | null = null
 | # | 问题 | 影响 | 解决（归属 task） |
 |---|---|---|---|
 | G1 | ADR 0006 把 DB 列写成 `participant_agent_ids`，实际是 `participant_agent_ids_json` | 照 ADR 建表会错 | 以本文件为准；ADR 0006 加勘误指向本文件（本次已加） |
-| G2 | `TaskOut` 缺 `consensus_brief_id` 字段 | 前端/消费方读不回任务的 brief 溯源 | 给 `TaskOut` 加 `consensus_brief_id: str \| null` 并在查询里带出 → **TD-01-T1 附带修** |
-| G3 | brief confirm/reject 未调 `set_discussion_status`，`conversations.discussion_status` 永远停在 `discussing` | 状态机是死的 | 接线：confirm→会话 `aligned`；新建/reject→保持/回 `discussing` → **TD-01-T1** |
+| G2 | ~~`TaskOut` 缺 `consensus_brief_id` 字段~~ | 已解决 | TD-01-T1b 已补齐 |
+| G3 | ~~brief confirm/reject 未接讨论状态~~ | 已解决 | confirm/launch→`aligned`；reject→`discussing` |
 | G4 | `database.py` 双 schema（init_postgres / init_sqlite）需手工同步 | 漏改一处→生产/测试分叉 | 加列一律走 `ensure_column`；新建表两函数都加；本文件 §0 已列为硬约束 |
 | G5 | reject 也写 `confirmed_by_user_id`（列名语义偏差） | 轻微；"谁拒绝的"存在"谁确认的"列 | 可接受；如需清晰后续可加 `resolved_by_user_id`，暂不改 |
 
@@ -200,6 +206,8 @@ async def run_discussion_round_stream(conn, *, workspace_id: str, conversation_i
 ### 5.3 `HermesBackend` 接口（`services/api/app/runtime/hermes_client.py`）
 
 > ⚠️ **2026-07-10 作废重写中（见 [ADR 0007](../decisions/0007-hermes-v0.18-interface-acp.md)）**：本机实测 Hermes v0.18.2 **没有** REST `/v1/runs`+SSE 接口——`hermes gateway` 现在是消息平台网关。执行传输改用 **ACP（`hermes acp`，stdio JSON-RPC）**，供给用 CLI（`LocalHermesProvisioner` 已实现并过 e2e）。下方 REST 形状的描述仅作历史保留，实现以 ADR 0007 为准；`agents.hermes_gateway_port`（端口/一员工一网关）随之作废。DeepSeek 实测：provider `deepseek`、key env `DEEPSEEK_API_KEY`、模型 `deepseek/deepseek-v4-flash`。
+>
+> **当前实现（2026-07-23）**：`HermesBackend` 启动 `hermes --profile <profile> acp`，`new_session` 传绝对 `cwd` 与动态 `acp.schema.HttpMcpServer`。`RunContext.mcp_servers` 是每 Run 配置，TD-11 用它注入短期 token 的公司工具。下方 HTTP 网关内容只是历史验证记录，不是当前接口。
 
 ```python
 @dataclass
@@ -208,6 +216,7 @@ class RunContext:
     conversation_id: str; task_id: str
     prompt: str; workdir: str                            # workdir 必须绝对路径，否则构造即抛错
     timeout: int = 600
+    mcp_servers: list[dict] = field(default_factory=list) # ACP HttpMcpServer 配置；每 Run 动态注入
 
 @dataclass
 class AgentEvent:                                        # 直接映射 Hermes SSE 事件
@@ -235,7 +244,7 @@ class HermesBackend:
 - **toolsets 真名**(25 个,全表见验证报告 V1)：常用=`terminal` `file`(⚠️不是 files) `code_execution` `web` `browser` `vision` `image_gen` `tts` `skills` `memory` `todo` `clarify` `delegation` `cronjob` `computer_use`。开关：`hermes tools enable|disable <name>`。
 
 ### 5.4 审批复用（高危操作）
-Hermes `approval_required` 事件（`type=high_risk`）→ 建 `approvals` 行（`type='high_risk'`）+ `runs.status=waiting_user` → 前端复用**已有的内联审批卡片**。老板批准 → `decision='approved'` → `resume_after_approval` 调 `POST /v1/runs/{hermes_run_id}/approval` 续跑；驳回 → `decision='rejected'` → `POST /v1/runs/{hermes_run_id}/stop`。
+Hermes ACP `request_permission` → 建 `approvals` 行（`type='high_risk'`）→ 前端复用内联审批卡片。API 只在数据库记录决定；执行中的 Run 每 250ms 轮询，映射为 ACP `AllowedOutcome` / `DeniedOutcome`。50 秒未处理则 `expired` 并 deny；拒绝后允许 Hermes 解释，不由审批 API 提前迁移 Run 状态。
 
 ### 5.5 执行中求援（clarification_required）【TD-03-T4 新增】
 
@@ -409,3 +418,38 @@ def reload_gateway(self, profile_name: str) -> None:
 `POST /webhooks/{channel_type}/{token}` — 各渠道 inbound webhook 统一入口。
 
 ### 9.3 渠道管理 API 见 [TD-09-channel-adapters.md](TD-09-channel-adapters.md)
+
+---
+
+## 10. TD-11 自动执行闭环【已实现】
+
+### 10.1 Brief work item
+
+`BriefWorkItem` 字段固定为：`key / title / description / owner_agent_id / expected_output / output_type / depends_on_keys / final_delivery`。可 launch 的 brief 必须有 3-6 项；负责人都是群成员；key 唯一；依赖 key 存在且无环；必须且只能有一个 `final_delivery=true, output_type='content_package_v1'` 的最终项。
+
+### 10.2 持久计划表
+
+`task_plans`：`id / workspace_id / brief_id UNIQUE / root_task_id? / status(launching|active|blocked|completed|cancelled) / revision_count / blocked_reason / created_at / updated_at / completed_at?`。一个 brief 最多一个计划；`revision_count` 最多 2。
+
+`task_dependencies`：`id / task_plan_id / task_id / depends_on_task_id / created_at`，边唯一且禁止自依赖。依赖环同时在 brief 校验和公司工具调整入口检查。
+
+任务产出写 `task_outputs`：中间项为 Markdown；最终项为经过 `ContentPackageV1` 校验的 JSON。最终包包含 `platform / audience / objective / schedule[] / sources[] / assumptions[]`，每个 schedule 项包含发布时间、顺序、类型、标题、hook、正文或脚本、CTA、素材建议和来源引用。
+
+### 10.3 调度与 API
+
+- worker 每 2 秒扫描；每 workspace 最多 2 个 running Run；租约 30 秒、10 秒续租。
+- 重启回收过期租约：原 Run 失败；常规自动执行最多 attempt 2，仍失败则计划阻塞。老板对阻塞任务调用 resume 后可建立下一 attempt。
+- 只有全部前置任务完成才创建后继 queued Run；全部子任务完成后根任务与计划自动完成。
+- RunStep 工具事件写入后立即提交事务，避免 SQLite 长写事务阻塞独立心跳与 MCP 请求。
+
+| 方法 | 路径 | 语义 |
+|---|---|---|
+| POST | `/api/briefs/{id}/launch` | 原子确认/建计划/任务/依赖/首批 Run；重复或并发调用返回唯一计划 |
+| POST | `/api/briefs/{id}/confirm` | 委托同一 launch service，兼容返回 `BriefOut` |
+| GET | `/api/task-plans/{id}` | 计划、任务、依赖、Run 摘要、审批、产出和阻塞原因快照 |
+| GET | `/api/tasks/{id}/runs` | 任务的全部 attempt、RunStep 和审批轨迹 |
+| POST | `/api/tasks/{id}/resume` | body `{"message":"..."}`；仅阻塞的非根计划任务且无活跃 Run 时恢复 |
+
+### 10.4 公司工具边界
+
+`/mcp/company-tools/` 是 MCP streamable HTTP 端点。每 Run 的签名 token 绑定 workspace/plan/task/run/agent 与过期时间。六个工具为 `search_company_knowledge / report_progress / submit_output / create_subtask / request_support / block_task`；它们只调用服务层，Hermes 不持有数据库凭证，也不能改 brief 的目标、范围或成功标准。

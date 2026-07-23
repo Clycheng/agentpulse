@@ -168,7 +168,7 @@ def test_upgrade_idempotent_upsert(tmp_path, monkeypatch):
 # --------------------------------------------------------------- resolve endpoint
 
 
-def test_resolve_capability_upgrade_installs_and_resumes(tmp_path, monkeypatch):
+def test_resolve_capability_upgrade_installs_without_api_run_transition(tmp_path, monkeypatch):
     monkeypatch.setattr(
         settings, "database_url", f"sqlite:///{tmp_path / 'upg_api.sqlite3'}"
     )
@@ -227,7 +227,8 @@ def test_resolve_capability_upgrade_installs_and_resumes(tmp_path, monkeypatch):
         (agent_id,),
     ).fetchone()
     assert cap["capability_key"] == "write_code"  # installed via the suggested key
-    assert get_run(conn2, run_id)["status"] == RunStatus.RUNNING  # resumed
+    # The suspended RunService observes the decision and owns resumption.
+    assert get_run(conn2, run_id)["status"] == RunStatus.WAITING_USER
 
 
 # --------------------------------------------------- owner-initiated grant (ADR 0008 §5)

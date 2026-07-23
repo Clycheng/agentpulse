@@ -21,7 +21,6 @@ import os
 import shutil
 import tempfile
 import time
-
 import pytest
 
 from app.runtime.hermes_client import (
@@ -29,6 +28,7 @@ from app.runtime.hermes_client import (
     HermesBackend,
     HermesBackendError,
     RunContext,
+    _build_mcp_servers,
     _safe_path,
 )
 
@@ -60,6 +60,26 @@ def test_safe_path_blocks_escape():
     # escaping is refused
     with pytest.raises(HermesBackendError):
         _safe_path(root, "../../etc/passwd")
+
+
+def test_dynamic_http_mcp_servers_include_run_authorization_header():
+    import acp
+
+    servers = _build_mcp_servers(
+        acp,
+        [
+            {
+                "name": "agentpulse-company",
+                "url": "http://127.0.0.1:8000/mcp/company-tools/",
+                "headers": {"Authorization": "Bearer signed-run-token"},
+            }
+        ],
+    )
+    assert servers[0].name == "agentpulse-company"
+    assert servers[0].headers[0].name == "Authorization"
+    assert servers[0].headers[0].value == "Bearer signed-run-token"
+    request = acp.schema.NewSessionRequest(cwd="/tmp", mcpServers=servers)
+    assert request.mcp_servers[0].type == "http"
 
 
 # --- E2E: real Hermes over ACP ---

@@ -325,10 +325,12 @@ def test_execute_create_task():
     db = _make_db()
     # Need the tasks table
     db.executescript("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, conversation_id TEXT,
-            parent_task_id TEXT, consensus_brief_id TEXT,
-            title TEXT NOT NULL, description TEXT DEFAULT '',
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, conversation_id TEXT,
+                parent_task_id TEXT, consensus_brief_id TEXT, task_plan_id TEXT,
+                plan_item_key TEXT, expected_output TEXT DEFAULT '',
+                output_type TEXT DEFAULT 'markdown',
+                title TEXT NOT NULL, description TEXT DEFAULT '',
             priority TEXT DEFAULT 'P2', status TEXT DEFAULT '待认领',
             progress INTEGER DEFAULT 0, owner_agent_id TEXT, due_date TEXT,
             created_at TEXT NOT NULL, updated_at TEXT DEFAULT ''

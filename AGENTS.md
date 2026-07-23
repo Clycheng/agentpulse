@@ -56,7 +56,7 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 
 ## 3. 关键已验证事实（已深度调研，勿重复造轮子）
 
-- **驱动 Hermes**：起 `hermes gateway`(:8642，OpenAI 兼容)。长任务用**异步 Runs API**(`POST /v1/runs` → SSE `GET /v1/runs/{id}/events` → `POST .../approval` 解审批 → `/stop`)——完美对接"创建Run→流式→拍板→写回"。简单对话 `/v1/chat/completions`；定时 Jobs API；也可 Python 库 `from run_agent import AIAgent`。
+- **驱动 Hermes**：本机 Hermes v0.18 实测不存在旧 REST Runs API；执行统一用 ACP（`hermes --profile <profile> acp`，stdio JSON-RPC），供给用 CLI，见 [ADR 0007](docs/decisions/0007-hermes-v0.18-interface-acp.md)。任务 Run 通过 ACP `new_session` 动态注入公司 MCP 工具。
 - **多实例**：`profiles`(每员工独立 HERMES_HOME：人格/技能/记忆/密钥/模型隔离) + `hermes kanban`(orchestrator profile 派任务给 N 个 worker profile 独立进程)。已发布能力。
 - **7×24 / 无 idle**：daemon + cron(60s tick 主动跑) + webhooks + `/goal` 原生；但"空闲自发想 idea"**不原生**(学习是每轮对话后触发) → **idea 中心 = 用 cron 编排"空闲即思考/学技能"**。
 - **多模态**：DeepSeek 是文本模型也没关系——图片走 `vision_analyze`(配 `auxiliary.vision` 辅助视觉模型)、音频走内置 Whisper STT(可本地免费)、视频 `video_analyze`、PDF `web_extract`。Hermes 把一切模态转成文本喂给主模型。
@@ -69,11 +69,12 @@ Monorepo：`apps/`(web/desktop/admin，desktop 是主原型 Electron+React)、`s
 
 | 模块 | 现状 | 目标 |
 |---|---|---|
-| `services/api` | FastAPI + PostgreSQL；已有 workspace/task/审批/会话 + **群讨论编排层(`orchestration/`)**；执行仍是临时的直连 DeepSeek(**尚非真 agent**) | 协作编排层 + 调 Hermes profile 执行 |
-| `apps/desktop` | 单文件原型(聊天/员工/任务/审批/**共识纪要卡片** UI，已接后端) | 保留，渐进接入群讨论 + Hermes |
-| 群讨论协议 | 🟢 **第一片 + 多 agent 讨论 + 路由归位均已实现并过测**：讨论态状态机 + 共识 brief + Task 门控(第一片 `c2054bf`)；多 agent 发言路由(TD-02 T1–T4 `b61005e`)；**TD-02-T5 路由归位(2026-07-09)——群讨论唯一生产入口收回 `run_discussion_round`(async 事件流)，删除路由层重复讨论循环 + 私有选人函数，三层边界干净**。见 [TD-02](docs/tech-design/TD-02-multi-agent-discussion.md)、[ADR 0006](docs/decisions/0006-group-discussion-v1-first-slice.md)。⚠️ 仍**未在跑起来的应用里端到端手测过 UI 流程**(TD-01-T2/T3) | 接 Hermes 执行(TD-03) |
+| `services/api` | FastAPI + PostgreSQL/SQLite；群讨论、brief、计划、任务依赖、审批、持久 Run 调度和 Hermes ACP 执行均已接入 | 接 TD-10 业务动作闸门与后续渠道出站 |
+| `apps/desktop` | 聊天/员工/任务/审批/brief/自动计划/Run 轨迹/结构化内容包 UI 已接后端 | 继续渐进拆分单文件原型 |
+| 群讨论协议 | 🟢 讨论态状态机、多 agent 发言路由、共识 brief 和 Task 门控均已实现；TD-11 已真实跑通 UI 中的“四人讨论→带分工 brief→一次确认” | 后续增强长讨论与衍生 brief 体验 |
 | Hermes 集成 | 🟢 **执行接入真、技术危险动作审批门真强制**：T2 ACP + T3 RunService/热路径 + T5 自动供给 = 真机验证过。**2026-07-14 曾发现审批门不生效的根因是路由顺序 bug**——有 ready Hermes profile 的员工没被优先送去 Hermes（先试 Agent Action Bridge，它总能"成功"兜底，Hermes 永远轮不到），已在 `27e34bf` 修好：`_stream_reply_events`/`complete_agent_reply` 都先查 `resolve_hermes_profile`，有则直接走真 Hermes。审批门本身（`approvals.mode: manual` + option_id 映射 + 前端三选项）已对真 Hermes 复测放行/拒绝均正确（ADR 0008 分片1-4）。**2026-07-16 补齐**：④挂起超时对齐 Hermes ACP 路径硬编码的 60s fail-close（`approval_bridge` 用 50s 内部超时抢先收敛，超时行标记 `expired`）+ ⑥去掉 clarification/capability_upgrade 的 agent 自触发伪装（SOUL 不再指示调用不存在的 `clarify` 工具；能力升级改老板从员工档案"+ 授予能力"直接发起）。⑤业务受控工具门（发布/花钱/对外发送）拆为独立 TD-10，未实现，见 [ADR 0008](docs/decisions/0008-human-in-the-loop-approval-model.md) + 看板 | ⑤业务受控工具门（TD-10，独立立项） |
 | 自然语言捏 agent（北极星③） | 🟢 **第一版已实现并真机验证**：`POST /agents/draft-team`(一段话→可编辑草稿，复用 TD-04-T3 一直未接生产入口的 `draft_role_spec`) + `POST /agents/create-team`(确认后一次性真建员工+自动拉一个团队群)；`provision_new_agent` 统一四条招聘路径(人才市场/秘书 bootstrap/小秘 `create_employee`/团队编译器)的供给入口；桌面端 `TeamCompilerModal`。见 [ADR 0009](docs/decisions/0009-natural-language-team-compiler.md)。四点边界（不规划多群/不编业务技能/不加校验器/不做试运行）已拍板写死在 ADR，避免下一个 AI 又加回去 | 精细协作 SOP（如"机动备援"式动态支援角色）留给老板在群里/资料库后续补充，不在编译器范围 |
+| 自动执行闭环 | 🟢 TD-11 已实现：完整分工 brief、一次 launch、数据库租约调度、依赖接力、重启恢复、动态 MCP 公司工具和 `content_package_v1`；真实 Hermes/UI E2E 已跑通 | TD-10 后接真实受控业务动作；TD-11 首版只交付待发布内容包 |
 
 **下一步 → 直接看 [docs/tech-design/EXECUTION-BOARD.md](docs/tech-design/EXECUTION-BOARD.md)（执行看板 = 唯一任务状态源）**：它列着"现在就做"的任务队列(带顺序/依赖/会话要求/状态)和认领规则——**AI 不需要人类告诉下一步，读看板即知**。设计文档体系(架构/规格/各 TD)入口见 [docs/tech-design/README.md](docs/tech-design/README.md)。
 

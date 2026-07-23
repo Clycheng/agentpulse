@@ -5,6 +5,17 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class WorkItem(BaseModel):
+    key: str = Field(min_length=1, max_length=80, pattern=r"^[a-z][a-z0-9_-]*$")
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=2000)
+    owner_agent_id: str
+    expected_output: str = Field(min_length=1, max_length=2000)
+    output_type: str = Field(min_length=1, max_length=80)
+    depends_on_keys: list[str] = Field(default_factory=list, max_length=5)
+    final_delivery: bool = False
+
+
 class BriefOut(BaseModel):
     """Brief output schema."""
     id: str
@@ -17,6 +28,7 @@ class BriefOut(BaseModel):
     success_criteria: str = Field(default="", max_length=500)
     owner_agent_id: str | None = None
     participant_agent_ids: list[str] = Field(default_factory=list)
+    work_items: list[WorkItem] = Field(default_factory=list)
     created_by_agent_id: str
     supersedes_brief_id: str | None = None
     derived_from_brief_id: str | None = None
@@ -34,6 +46,7 @@ class CreateBriefRequest(BaseModel):
     success_criteria: str = Field(default="", max_length=500)
     owner_agent_id: str | None = None
     participant_agent_ids: list[str] = Field(default_factory=list, max_length=12)
+    work_items: list[WorkItem] = Field(min_length=3, max_length=6)
     created_by_agent_id: str
     supersedes_brief_id: str | None = None
     derived_from_brief_id: str | None = None

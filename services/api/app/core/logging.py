@@ -96,20 +96,27 @@ class _StructuredAdapter:
     def __init__(self, logger: logging.Logger) -> None:
         self._logger = logger
 
+    def _log(self, level: str, msg: str, extra: dict[str, Any]) -> None:
+        method = getattr(self._logger, level)
+        if extra:
+            method(msg, extra)
+        else:
+            method(msg)
+
     def debug(self, msg: str, **extra: Any) -> None:
-        self._logger.debug(msg, extra)
+        self._log("debug", msg, extra)
 
     def info(self, msg: str, **extra: Any) -> None:
-        self._logger.info(msg, extra)
+        self._log("info", msg, extra)
 
     def warning(self, msg: str, **extra: Any) -> None:
-        self._logger.warning(msg, extra)
+        self._log("warning", msg, extra)
 
     def error(self, msg: str, **extra: Any) -> None:
-        self._logger.error(msg, extra)
+        self._log("error", msg, extra)
 
     def exception(self, msg: str, **extra: Any) -> None:
-        self._logger.exception(msg, extra)
+        self._log("exception", msg, extra)
 
     def critical(self, msg: str, **extra: Any) -> None:
-        self._logger.critical(msg, extra)
+        self._log("critical", msg, extra)

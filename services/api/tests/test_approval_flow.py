@@ -1,8 +1,8 @@
-"""Tests for TD-03-T4 approval suspend/resume + clarification.
+"""Tests for durable approval suspend/resume + clarification.
 
-Covers the in-process approval bridge, the full suspend→resolve→resume of a run
-driven through RunService with a fake backend + the real bridge, and the resolve
-/ answer HTTP endpoints for run-linked approvals.
+The legacy in-process bridge remains covered as an isolated compatibility helper.
+Production RunService recovery is database-backed so a decision from another API
+connection, or after process-local state is lost, resumes the waiting ACP call.
 """
 
 import asyncio
@@ -101,7 +101,7 @@ def _setup_db(tmp_path, monkeypatch):
 
 class _ApprovalBackend:
     """Fake backend: emits an approval request, then resolves via the injected
-    resolver (the real bridge) and emits the outcome — mimicking ACP's
+    durable resolver and emits the outcome, mimicking ACP's
     request_permission awaiting in place."""
 
     def __init__(self, approval_id, category="high_risk"):
@@ -147,16 +147,19 @@ def _run_suspend_scenario(tmp_path, monkeypatch, decision: str):
                 ctx=_ctx(ws_id, agent_id, conv_id, tmp_path),
                 backend=_ApprovalBackend(aid),
                 input_message_id=msg_id,
-                permission_resolver=make_bridge_resolver(),
+                permission_resolver=make_bridge_resolver(conn),
             ):
                 events.append(ev)
 
         task = asyncio.create_task(drain())
         for _ in range(200):
-            if approval_bridge.has_pending(aid):
+            pending = conn.execute(
+                "SELECT * FROM approvals WHERE id = ?", (aid,)
+            ).fetchone()
+            if pending is not None:
                 break
             await asyncio.sleep(0.005)
-        assert approval_bridge.has_pending(aid), "run did not suspend on approval"
+        assert pending is not None, "run did not persist its approval"
 
         # approval row persisted + run suspended
         appr = conn.execute("SELECT * FROM approvals WHERE id = ?", (aid,)).fetchone()
@@ -165,7 +168,17 @@ def _run_suspend_scenario(tmp_path, monkeypatch, decision: str):
         run = get_run(conn, appr["run_id"])
         assert run["status"] == RunStatus.WAITING_USER
 
-        approval_bridge.resolve_pending(aid, decision)
+        status = "approved" if decision.startswith("allow") else "rejected"
+        scope = "always" if decision == "allow_always" else "once"
+        other = connect()
+        try:
+            other.execute(
+                "UPDATE approvals SET status = ?, payload_json = ? WHERE id = ?",
+                (status, f'{{"scope":"{scope}"}}', aid),
+            )
+            other.commit()
+        finally:
+            other.close()
         await task
         return conn, appr["run_id"], events
 
@@ -270,7 +283,7 @@ def _seed_run_approval(ws_id, agent_id, *, category, run_status, appr_status="pe
     return aid, run_id, conv_id
 
 
-def test_resolve_endpoint_approves_and_transitions_run(tmp_path, monkeypatch):
+def test_resolve_endpoint_records_decision_without_transitioning_run(tmp_path, monkeypatch):
     client, token, ws_id, agent_id = _client(tmp_path, monkeypatch)
     aid, run_id, _ = _seed_run_approval(
         ws_id, agent_id, category="high_risk", run_status=RunStatus.WAITING_USER
@@ -281,11 +294,11 @@ def test_resolve_endpoint_approves_and_transitions_run(tmp_path, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "approved"
-    # run-linked approval transitions the run back to running (no waiter → no-op wake)
-    assert get_run(connect(), run_id)["status"] == RunStatus.RUNNING
+    # RunService owns the transition after its durable resolver observes this row.
+    assert get_run(connect(), run_id)["status"] == RunStatus.WAITING_USER
 
 
-def test_answer_endpoint_records_and_resumes(tmp_path, monkeypatch):
+def test_answer_endpoint_records_without_transitioning_run(tmp_path, monkeypatch):
     client, token, ws_id, agent_id = _client(tmp_path, monkeypatch)
     aid, run_id, conv_id = _seed_run_approval(
         ws_id, agent_id, category="clarification", run_status=RunStatus.WAITING_CLARIFY
@@ -297,7 +310,7 @@ def test_answer_endpoint_records_and_resumes(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["status"] == "answered"
     conn = connect()
-    assert get_run(conn, run_id)["status"] == RunStatus.RUNNING
+    assert get_run(conn, run_id)["status"] == RunStatus.WAITING_CLARIFY
     msgs = conn.execute(
         "SELECT content FROM messages WHERE conversation_id = ? AND sender_type = 'user'",
         (conv_id,),

@@ -11,7 +11,7 @@ type View = 'chat' | 'staff' | 'market' | 'tasks' | 'ideas' | 'lib' | 'channels'
 type ThemeMode = 'system' | 'light' | 'dark';
 type EffectiveTheme = 'light' | 'dark';
 type AgentStatus = 'busy' | 'wait' | 'stuck' | 'idle';
-type TaskStatus = '待认领' | '进行中' | '待确认' | '阻塞' | '已完成';
+type TaskStatus = '待执行' | '待认领' | '进行中' | '待确认' | '阻塞' | '已完成';
 type Priority = 'P0' | 'P1' | 'P2';
 type LibraryTab = 'docs' | 'skills' | 'mcp';
 
@@ -102,6 +102,10 @@ type Task = {
   srcLabel: string;
   dueDate?: string | null;
   parentTaskId?: string | null;
+  taskPlanId?: string | null;
+  planItemKey?: string | null;
+  expectedOutput: string;
+  outputType: string;
   createdAt: string;
   updatedAt: string;
   events: TaskEvent[];
@@ -129,6 +133,90 @@ type TaskOutput = {
   outputType: string;
   content: string;
   time: string;
+};
+
+type TaskPlanSnapshot = {
+  id: string;
+  brief_id: string;
+  root_task_id: string | null;
+  status: 'launching' | 'active' | 'blocked' | 'completed' | 'cancelled';
+  revision_count: number;
+  blocked_reason: string;
+  tasks: Array<{
+    id: string;
+    title: string;
+    owner_agent_id: string | null;
+    status: string;
+    progress: number;
+    plan_item_key: string | null;
+    expected_output: string;
+    output_type: string;
+    blocked_reason: string;
+    outputs: Array<{
+      id: string;
+      title: string;
+      output_type: string;
+      content: unknown;
+      created_at: string;
+    }>;
+    approvals: Array<{
+      id: string;
+      task_id: string | null;
+      conversation_id: string | null;
+      agent_id: string | null;
+      title: string;
+      description: string;
+      status: string;
+      risk_level: string;
+      resolved_by: string;
+      resolved_at: string | null;
+      created_at: string;
+    }>;
+    runs: Array<{
+      id: string;
+      status: string;
+      attempt_no: number;
+      error: string;
+      created_at: string;
+      started_at: string | null;
+      completed_at: string | null;
+    }>;
+  }>;
+  dependencies: Array<{ task_id: string; depends_on_task_id: string }>;
+};
+
+type TaskRunTrack = {
+  id: string;
+  task_id: string;
+  status: string;
+  attempt_no: number;
+  error: string;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  started_at: string | null;
+  created_at: string;
+  completed_at: string | null;
+  steps: RunStepTrace[];
+};
+
+type ContentPackageData = {
+  platform: string;
+  audience: string;
+  objective: string;
+  schedule: Array<{
+    publish_at: string;
+    order: number;
+    content_type: string;
+    title: string;
+    hook: string;
+    body?: string | null;
+    script?: string | null;
+    cta: string;
+    asset_suggestion: string;
+    source_refs: string[];
+  }>;
+  sources: Array<{ id?: string | null; title: string; url?: string | null }>;
+  assumptions: string[];
 };
 
 type Approval = {
@@ -244,6 +332,10 @@ type ApiBootstrap = {
     conversation_id: string | null;
     due_date?: string | null;
     parent_task_id?: string | null;
+    task_plan_id?: string | null;
+    plan_item_key?: string | null;
+    expected_output?: string;
+    output_type?: string;
     created_at: string;
     updated_at: string;
   }>;
@@ -460,6 +552,8 @@ function priorityStyle(priority: Priority) {
 }
 
 function statusStyle(status: TaskStatus) {
+  if (status === '待执行')
+    return { background: '#F0F7F5', color: '#18766A', bar: '#2A8C7F' };
   if (status === '待认领')
     return { background: '#F2F4F7', color: '#475467', bar: '#98A2B3' };
   if (status === '进行中')
@@ -496,6 +590,7 @@ function normalizePriority(value: string): Priority {
 
 function normalizeTaskStatus(value: string): TaskStatus {
   return value === '进行中' ||
+    value === '待执行' ||
     value === '待认领' ||
     value === '待确认' ||
     value === '阻塞' ||
@@ -507,6 +602,7 @@ function normalizeTaskStatus(value: string): TaskStatus {
 }
 
 function nextTaskStatus(status: TaskStatus): TaskStatus {
+  if (status === '待执行') return '进行中';
   if (status === '待认领') return '进行中';
   if (status === '进行中') return '待确认';
   if (status === '待确认') return '已完成';
@@ -517,6 +613,7 @@ function nextTaskStatus(status: TaskStatus): TaskStatus {
 function progressForNextStatus(status: TaskStatus, current: number) {
   if (status === '已完成') return 100;
   if (status === '待认领') return 0;
+  if (status === '待执行') return 0;
   if (status === '待确认') return Math.max(current, 80);
   if (status === '进行中') return Math.max(current, 20);
   return current;
@@ -700,6 +797,10 @@ function mapBootstrap(data: ApiBootstrap) {
         : '未关联会话',
       dueDate: task.due_date ?? null,
       parentTaskId: task.parent_task_id ?? null,
+      taskPlanId: task.task_plan_id ?? null,
+      planItemKey: task.plan_item_key ?? null,
+      expectedOutput: task.expected_output ?? '',
+      outputType: task.output_type ?? 'markdown',
       createdAt: formatTime(task.created_at),
       updatedAt: formatTime(task.updated_at),
       events: (data.task_events_by_task[task.id] ?? []).map((event) => ({
@@ -812,6 +913,7 @@ function App() {
     Record<string, Message[]>
   >({});
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskPlans, setTaskPlans] = useState<Record<string, TaskPlanSnapshot>>({});
   const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSource[]>(
     [],
   );
@@ -927,15 +1029,12 @@ function App() {
   const confirmBrief = async (briefId: string): Promise<boolean> => {
     if (!token) return false;
     try {
-      const confirmed = await apiRequest<{
-        id: string;
-        status: string;
-        goal: string;
-      }>(`/briefs/${briefId}/confirm`, {
+      const plan = await apiRequest<TaskPlanSnapshot>(`/briefs/${briefId}/launch`, {
         token,
         method: 'POST',
       });
-      showToast(`已确认共识：${confirmed.goal}`);
+      setTaskPlans((current) => ({ ...current, [plan.id]: plan }));
+      showToast('计划已启动，员工会按依赖自动接力');
       await loadBootstrap();
       return true;
     } catch (error) {
@@ -964,33 +1063,6 @@ function App() {
     }
   };
 
-  const createTaskFromBrief = async (
-    briefId: string,
-    title: string,
-    ownerId?: string,
-  ): Promise<boolean> => {
-    if (!token) return false;
-    try {
-      const task = await apiRequest<{ id: string; title: string }>(`/tasks`, {
-        token,
-        method: 'POST',
-        body: JSON.stringify({
-          title,
-          consensus_brief_id: briefId,
-          owner_agent_id: ownerId ?? null,
-          status: '进行中',
-          progress: 10,
-        }),
-      });
-      showToast(`已创建任务：${task.title}`);
-      await loadBootstrap();
-      return true;
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '创建任务失败');
-      return false;
-    }
-  };
-
   useEffect(() => {
     localStorage.setItem('agentpulse_theme_mode', themeMode);
   }, [themeMode]);
@@ -1008,6 +1080,88 @@ function App() {
   useEffect(() => {
     if (token) void loadBootstrap(token);
   }, []);
+
+  const activePlanIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          tasks
+            .filter((task) => task.taskPlanId && task.status !== '已完成')
+            .map((task) => task.taskPlanId as string),
+        ),
+      ),
+    [tasks],
+  );
+
+  useEffect(() => {
+    if (!token || activePlanIds.length === 0) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const plans = await Promise.all(
+          activePlanIds.map((planId) =>
+            apiRequest<TaskPlanSnapshot>(`/task-plans/${planId}`, { token }),
+          ),
+        );
+        if (cancelled) return;
+        setTaskPlans((current) => ({
+          ...current,
+          ...Object.fromEntries(plans.map((plan) => [plan.id, plan])),
+        }));
+        const taskById = new Map(
+          plans.flatMap((plan) => plan.tasks).map((task) => [task.id, task]),
+        );
+        setTasks((current) =>
+          current.map((task) => {
+            const snapshot = taskById.get(task.id);
+            return snapshot
+              ? {
+                  ...task,
+                  status: normalizeTaskStatus(snapshot.status),
+                  progress: snapshot.progress,
+                  outputs: snapshot.outputs.map((output) => ({
+                    id: output.id,
+                    taskId: snapshot.id,
+                    conversationId: task.src || null,
+                    agentId: snapshot.owner_agent_id,
+                    title: output.title,
+                    outputType: output.output_type,
+                    content:
+                      typeof output.content === 'string'
+                        ? output.content
+                        : JSON.stringify(output.content),
+                    time: formatTime(output.created_at),
+                  })),
+                  approvals: snapshot.approvals.map((approval) => ({
+                    id: approval.id,
+                    taskId: approval.task_id,
+                    conversationId: approval.conversation_id,
+                    agentId: approval.agent_id,
+                    title: approval.title,
+                    description: approval.description,
+                    status: approval.status,
+                    riskLevel: approval.risk_level,
+                    resolvedBy: approval.resolved_by,
+                    resolvedAt: approval.resolved_at
+                      ? formatTime(approval.resolved_at)
+                      : null,
+                    time: formatTime(approval.created_at),
+                  })),
+                }
+              : task;
+          }),
+        );
+      } catch {
+        // A transient poll failure should not interrupt the active workspace.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [token, activePlanIds.join('|')]);
 
   useEffect(() => {
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight });
@@ -1773,7 +1927,7 @@ function App() {
     (task) => taskFilter === '全部' || task.status === taskFilter,
   );
   const taskTabs = (
-    ['全部', '待认领', '进行中', '待确认', '阻塞', '已完成'] as const
+    ['全部', '待执行', '待认领', '进行中', '待确认', '阻塞', '已完成'] as const
   ).map((status) => ({
     status,
     count:
@@ -1920,7 +2074,6 @@ function App() {
             onOpenAgent={(id) => setDetailId(id)}
             onConfirmBrief={confirmBrief}
             onRejectBrief={rejectBrief}
-            onCreateTaskFromBrief={createTaskFromBrief}
             onResolveCardApproval={resolveChatApproval}
             onAnswerCardClarification={answerChatClarification}
           />
@@ -2026,6 +2179,12 @@ function App() {
       {detailTask && (
         <TaskDetail
           task={detailTask}
+          token={token}
+          plan={
+            detailTask.taskPlanId
+              ? taskPlans[detailTask.taskPlanId]
+              : undefined
+          }
           agent={detailTask.owner ? agentById(detailTask.owner) : undefined}
           onClose={() => setTaskDetailId(null)}
           onOpenChat={openChat}
@@ -3117,7 +3276,6 @@ function ChatView({
   onOpenAgent,
   onConfirmBrief,
   onRejectBrief,
-  onCreateTaskFromBrief,
   onResolveCardApproval,
   onAnswerCardClarification,
 }: {
@@ -3147,11 +3305,6 @@ function ChatView({
   onOpenAgent: (id: string) => void;
   onConfirmBrief?: (briefId: string) => Promise<boolean>;
   onRejectBrief?: (briefId: string) => Promise<boolean>;
-  onCreateTaskFromBrief?: (
-    briefId: string,
-    title: string,
-    ownerId?: string,
-  ) => Promise<boolean>;
   onResolveCardApproval?: (
     approvalId: string,
     status: 'approved' | 'rejected',
@@ -3332,7 +3485,6 @@ function ChatView({
             agents={agents}
             onConfirmBrief={onConfirmBrief}
             onRejectBrief={onRejectBrief}
-            onCreateTaskFromBrief={onCreateTaskFromBrief}
             onResolveCardApproval={onResolveCardApproval}
             onAnswerCardClarification={onAnswerCardClarification}
           />
@@ -3644,7 +3796,6 @@ function MessageItem({
   onOpenAgent,
   onConfirmBrief,
   onRejectBrief,
-  onCreateTaskFromBrief,
   onResolveCardApproval,
   onAnswerCardClarification,
 }: {
@@ -3654,11 +3805,6 @@ function MessageItem({
   onOpenAgent: (id: string) => void;
   onConfirmBrief?: (briefId: string) => Promise<boolean>;
   onRejectBrief?: (briefId: string) => Promise<boolean>;
-  onCreateTaskFromBrief?: (
-    briefId: string,
-    title: string,
-    ownerId?: string,
-  ) => Promise<boolean>;
   onResolveCardApproval?: (
     approvalId: string,
     status: 'approved' | 'rejected',
@@ -3691,6 +3837,14 @@ function MessageItem({
       constraints?: string;
       success_criteria?: string;
       owner_agent_id?: string;
+      work_items?: Array<{
+        key: string;
+        title: string;
+        owner_agent_id: string;
+        expected_output: string;
+        depends_on_keys: string[];
+        final_delivery: boolean;
+      }>;
     };
     try {
       briefData = JSON.parse(briefJson);
@@ -3703,11 +3857,8 @@ function MessageItem({
       : undefined;
 
     const handleConfirm = async () => {
-      if (!onConfirmBrief || !onCreateTaskFromBrief) return;
-      const confirmed = await onConfirmBrief(briefData.id);
-      if (confirmed) {
-        await onCreateTaskFromBrief(briefData.id, briefData.goal, briefData.owner_agent_id);
-      }
+      if (!onConfirmBrief) return;
+      await onConfirmBrief(briefData.id);
     };
 
     const handleReject = async () => {
@@ -3756,6 +3907,34 @@ function MessageItem({
               </button>
             </section>
           )}
+          {briefData.work_items && briefData.work_items.length > 0 && (
+            <section className="brief-work-items">
+              <strong>分工与接力：</strong>
+              <ol>
+                {briefData.work_items.map((item) => {
+                  const owner = agents.find((agent) => agent.id === item.owner_agent_id);
+                  const nextOwners = briefData.work_items
+                    ?.filter((candidate) => candidate.depends_on_keys.includes(item.key))
+                    .map(
+                      (candidate) =>
+                        agents.find((agent) => agent.id === candidate.owner_agent_id)?.name ??
+                        candidate.title,
+                    );
+                  return (
+                    <li key={item.key}>
+                      <span>
+                        <b>{owner?.name ?? '待定员工'}</b>负责{item.title}，交付
+                        {item.expected_output}
+                        {nextOwners && nextOwners.length > 0
+                          ? `，完成后交给${nextOwners.join('、')}`
+                          : '，完成后汇总交付'}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          )}
         </div>
         <footer className="brief-card-footer">
           <button
@@ -3763,7 +3942,7 @@ function MessageItem({
             className="button primary green"
             onClick={handleConfirm}
           >
-            确认并创建任务
+            确认并启动
           </button>
           <button
             type="button"
@@ -4457,7 +4636,11 @@ function TasksView({
                   <button type="button" onClick={() => onOpenTask(task.id)}>
                     {t('tasks.detail')}
                   </button>
-                  {task.status === '待认领' ? (
+                  {task.taskPlanId ? (
+                    <span className="task-auto-label">
+                      {materialIcon('autoplay')}自动执行
+                    </span>
+                  ) : task.status === '待认领' ? (
                     <button
                       type="button"
                       onClick={() => onOpenClaimTask(task.id)}
@@ -4961,6 +5144,8 @@ function AgentDetail({
 
 function TaskDetail({
   task,
+  token,
+  plan,
   agent,
   onClose,
   onOpenChat,
@@ -4969,6 +5154,8 @@ function TaskDetail({
   onResolveApproval,
 }: {
   task: Task;
+  token: string | null;
+  plan?: TaskPlanSnapshot;
   agent?: Agent;
   onClose: () => void;
   onOpenChat: (id: string) => void;
@@ -4980,12 +5167,62 @@ function TaskDetail({
   ) => void;
 }) {
   const { t } = useTranslation();
-  const status = statusStyle(task.status);
+  const planTask = plan?.tasks.find((item) => item.id === task.id);
+  const effectiveStatus = normalizeTaskStatus(planTask?.status ?? task.status);
+  const status = statusStyle(effectiveStatus);
   const priority = priorityStyle(task.pr);
+  const [runs, setRuns] = useState<TaskRunTrack[]>([]);
+  const [resumeMessage, setResumeMessage] = useState('');
+  const [resumeError, setResumeError] = useState('');
+  const [resuming, setResuming] = useState(false);
   const pendingApprovals = task.approvals.filter(
     (approval) => approval.status === 'pending',
   );
   const latestOutput = task.outputs[0];
+  const planOutput = planTask?.outputs.at(-1);
+  const packageOutput = planTask?.outputs
+    .filter((output) => output.output_type === 'content_package_v1')
+    .at(-1);
+  const contentPackage = parseContentPackage(packageOutput?.content);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const refreshRuns = async () => {
+      try {
+        const nextRuns = await apiRequest<TaskRunTrack[]>(`/tasks/${task.id}/runs`, {
+          token,
+        });
+        if (!cancelled) setRuns(nextRuns);
+      } catch {
+        // Keep the latest successful trace visible during transient failures.
+      }
+    };
+    void refreshRuns();
+    const timer = window.setInterval(refreshRuns, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [task.id, token]);
+
+  const resumeBlockedTask = async () => {
+    if (!token || !resumeMessage.trim()) return;
+    setResuming(true);
+    setResumeError('');
+    try {
+      await apiRequest(`/tasks/${task.id}/resume`, {
+        token,
+        method: 'POST',
+        body: JSON.stringify({ message: resumeMessage.trim() }),
+      });
+      setResumeMessage('');
+    } catch (error) {
+      setResumeError(error instanceof Error ? error.message : '恢复失败');
+    } finally {
+      setResuming(false);
+    }
+  };
 
   return (
     <>
@@ -5004,7 +5241,7 @@ function TaskDetail({
             {task.title}
             <span style={{ color: status.color }}>
               <i style={{ background: status.bar }} />
-              {task.status}
+              {effectiveStatus}
             </span>
           </h2>
           <p>{task.description || t('taskDetail.noDescription')}</p>
@@ -5018,13 +5255,15 @@ function TaskDetail({
                 {materialIcon('forum')}{t('taskDetail.relatedConversation')}
               </button>
             )}
-            <button
-              className="button primary"
-              type="button"
-              onClick={() => onAdvanceTask(task)}
-            >
-              {task.status === '已完成' ? task.status : t('taskDetail.advance')}
-            </button>
+            {!task.taskPlanId && (
+              <button
+                className="button primary"
+                type="button"
+                onClick={() => onAdvanceTask(task)}
+              >
+                {effectiveStatus === '已完成' ? effectiveStatus : t('taskDetail.advance')}
+              </button>
+            )}
           </div>
         </header>
 
@@ -5059,14 +5298,35 @@ function TaskDetail({
               <div className="progress-track">
                 <i
                   style={{
-                    width: `${task.progress}%`,
+                  width: `${planTask?.progress ?? task.progress}%`,
                     background: status.bar,
                   }}
                 />
               </div>
-              <span>{task.progress}%</span>
+              <span>{planTask?.progress ?? task.progress}%</span>
             </div>
           </section>
+
+          {effectiveStatus === '阻塞' && (
+            <section className="drawer-section task-resume-panel">
+              <h3>需要老板补充</h3>
+              <p>{planTask?.blocked_reason || plan?.blocked_reason || '任务已阻塞，请补充执行所需信息。'}</p>
+              <textarea
+                value={resumeMessage}
+                onChange={(event) => setResumeMessage(event.target.value)}
+                placeholder="补充缺失信息或说明如何继续"
+              />
+              {resumeError && <span className="form-error">{resumeError}</span>}
+              <button
+                className="button primary"
+                type="button"
+                disabled={resuming || !resumeMessage.trim()}
+                onClick={resumeBlockedTask}
+              >
+                {materialIcon('play_arrow')}{resuming ? '恢复中…' : '恢复执行'}
+              </button>
+            </section>
+          )}
 
           {pendingApprovals.length > 0 && (
             <section className="drawer-section">
@@ -5103,7 +5363,21 @@ function TaskDetail({
 
           <section className="drawer-section">
             <h3>{t('taskDetail.latestOutput')}</h3>
-            {latestOutput ? (
+            {contentPackage ? (
+              <ContentPackagePreview value={contentPackage} />
+            ) : planOutput ? (
+              <article className="task-output-card">
+                <header>
+                  <strong>{planOutput.title}</strong>
+                  <span>{formatTime(planOutput.created_at)}</span>
+                </header>
+                <pre>
+                  {typeof planOutput.content === 'string'
+                    ? planOutput.content
+                    : JSON.stringify(planOutput.content, null, 2)}
+                </pre>
+              </article>
+            ) : latestOutput ? (
               <article className="task-output-card">
                 <header>
                   <strong>{latestOutput.title}</strong>
@@ -5113,6 +5387,35 @@ function TaskDetail({
               </article>
             ) : (
               <EmptyState>{t('taskDetail.noOutput')}</EmptyState>
+            )}
+          </section>
+
+          <section className="drawer-section">
+            <h3>Run 轨迹</h3>
+            {runs.length === 0 ? (
+              <EmptyState>尚无运行记录</EmptyState>
+            ) : (
+              <div className="task-run-list">
+                {runs.map((run) => (
+                  <article className="task-run-card" key={run.id}>
+                    <header>
+                      <strong>第 {run.attempt_no} 次执行</strong>
+                      <span className={`run-trace-status run-trace-status-${run.status}`}>
+                        {run.status}
+                      </span>
+                    </header>
+                    {run.error && <p className="run-trace-error">{run.error}</p>}
+                    <ol>
+                      {run.steps.map((step) => (
+                        <li key={step.id}>
+                          <b>{step.title || step.type}</b>
+                          {step.detail && <span>{step.detail}</span>}
+                        </li>
+                      ))}
+                    </ol>
+                  </article>
+                ))}
+              </div>
             )}
           </section>
 
@@ -5137,6 +5440,138 @@ function TaskDetail({
         </div>
       </aside>
     </>
+  );
+}
+
+function parseContentPackage(value: unknown): ContentPackageData | null {
+  if (!value) return null;
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'platform' in parsed &&
+      'schedule' in parsed &&
+      Array.isArray((parsed as ContentPackageData).schedule)
+    ) {
+      return parsed as ContentPackageData;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function contentPackageToMarkdown(value: ContentPackageData) {
+  const lines = [
+    `# ${value.platform} 内容发布计划`,
+    '',
+    `- 受众：${value.audience}`,
+    `- 目标：${value.objective}`,
+    '',
+    '## 发布日历',
+  ];
+  [...value.schedule]
+    .sort((left, right) => left.order - right.order)
+    .forEach((item) => {
+      lines.push(
+        '',
+        `### ${item.order}. ${item.title}`,
+        `- 发布时间：${item.publish_at}`,
+        `- 类型：${item.content_type}`,
+        `- 开场钩子：${item.hook}`,
+        `- CTA：${item.cta}`,
+        `- 素材建议：${item.asset_suggestion}`,
+        `- 来源：${item.source_refs.join('、') || '无'}`,
+        '',
+        item.body || item.script || '',
+      );
+    });
+  lines.push('', '## 来源');
+  value.sources.forEach((source) =>
+    lines.push(`- ${source.title || source.id || source.url}: ${source.id || source.url}`),
+  );
+  lines.push('', '## 假设与未知项');
+  value.assumptions.forEach((assumption) => lines.push(`- ${assumption}`));
+  return `${lines.join('\n')}\n`;
+}
+
+function ContentPackagePreview({ value }: { value: ContentPackageData }) {
+  const exportMarkdown = () => {
+    const blob = new Blob([contentPackageToMarkdown(value)], {
+      type: 'text/markdown;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${value.platform}-内容计划.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="content-package">
+      <header>
+        <div>
+          <strong>{value.platform}</strong>
+          <span>{value.audience} · {value.objective}</span>
+        </div>
+        <button className="button secondary" type="button" onClick={exportMarkdown}>
+          {materialIcon('download')}导出 Markdown
+        </button>
+      </header>
+      <div className="publish-calendar">
+        {[...value.schedule]
+          .sort((left, right) => left.order - right.order)
+          .map((item) => (
+            <article key={`${item.order}-${item.title}`}>
+              <div className="publish-date">
+                <b>{item.order}</b>
+                <span>{item.publish_at}</span>
+              </div>
+              <div>
+                <em>{item.content_type}</em>
+                <h4>{item.title}</h4>
+                <strong>{item.hook}</strong>
+                <p>{item.body || item.script}</p>
+                <dl>
+                  <dt>CTA</dt><dd>{item.cta}</dd>
+                  <dt>素材</dt><dd>{item.asset_suggestion}</dd>
+                  <dt>来源</dt><dd>{item.source_refs.join('、') || '无'}</dd>
+                </dl>
+              </div>
+            </article>
+          ))}
+      </div>
+      <section className="content-package-notes">
+        <div>
+          <h4>来源</h4>
+          {value.sources.length === 0 ? (
+            <p>无</p>
+          ) : (
+            value.sources.map((source) => (
+              <p key={source.id || source.url}>
+                {source.url ? (
+                  <a href={source.url} target="_blank" rel="noreferrer">
+                    {source.title || source.url}
+                  </a>
+                ) : (
+                  `${source.title || source.id} · ${source.id}`
+                )}
+              </p>
+            ))
+          )}
+        </div>
+        <div>
+          <h4>假设与未知项</h4>
+          {value.assumptions.length === 0 ? (
+            <p>无</p>
+          ) : (
+            value.assumptions.map((assumption) => <p key={assumption}>{assumption}</p>)
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 

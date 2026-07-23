@@ -5,12 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import get_current_user_id, get_db, get_workspace_id
 from app.orchestration import (
     create_brief,
-    confirm_brief,
     reject_brief,
     get_brief_by_id,
     serialize_brief,
 )
 from app.schemas.brief import BriefOut, CreateBriefRequest
+from app.schemas.task_plan import TaskPlanOut
+from app.services.task_plans import TaskPlanError, launch_brief
 
 router = APIRouter(prefix="/briefs", tags=["briefs"])
 
@@ -37,6 +38,7 @@ async def create_brief_route(
             success_criteria=payload.success_criteria,
             owner_agent_id=payload.owner_agent_id,
             participant_agent_ids=payload.participant_agent_ids,
+            work_items=[item.model_dump() for item in payload.work_items],
             created_by_agent_id=payload.created_by_agent_id,
             supersedes_brief_id=payload.supersedes_brief_id,
             derived_from_brief_id=payload.derived_from_brief_id,
@@ -55,19 +57,40 @@ async def confirm_brief_route(
 ) -> BriefOut:
     """Confirm a brief (owner action).
 
-    Changes brief status from 'draft' to 'confirmed'.
-    Only confirmed briefs can be used to create tasks.
+    Compatibility endpoint: delegates to the same atomic launch service as
+    /launch, but keeps returning BriefOut for older clients.
     """
     try:
-        brief = confirm_brief(
+        launch_brief(
             db,
             workspace_id=workspace_id,
             brief_id=brief_id,
             confirmed_by_user_id=user_id,
         )
+        brief = get_brief_by_id(db, brief_id)
         return BriefOut(**brief)
-    except ValueError as e:
+    except (ValueError, TaskPlanError) as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{brief_id}/launch", response_model=TaskPlanOut)
+async def launch_brief_route(
+    brief_id: str,
+    workspace_id: str = Depends(get_workspace_id),
+    user_id: str = Depends(get_current_user_id),
+    db=Depends(get_db),
+) -> TaskPlanOut:
+    try:
+        return TaskPlanOut(
+            **launch_brief(
+                db,
+                workspace_id=workspace_id,
+                brief_id=brief_id,
+                confirmed_by_user_id=user_id,
+            )
+        )
+    except TaskPlanError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/{brief_id}/reject", response_model=BriefOut)

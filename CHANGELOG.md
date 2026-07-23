@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 2026-07-23（TD-11：自媒体 AI 公司自动执行闭环）
+
+- **feat(orchestration)**：共识 brief 增加 3-6 项严格分工合同（负责人/交付/依赖/最终项），生成时携带群成员 ID、岗位和职责；非法负责人、重复 key、未知依赖、依赖环或缺少唯一 `content_package_v1` 最终项时修复一次，仍失败则继续讨论。群讨论中的小秘禁用执行型 Action Bridge，主持人选择 NONE 时仍能用历史 transcript 收敛，避免讨论门被绕过或永不收口。
+- **feat(plan-api)**：新增 `task_plans`、`task_dependencies`、任务计划字段和 Run 租约字段；`POST /briefs/{id}/launch` 原子确认并创建根任务、子任务、依赖和首批 Run，支持并发幂等、legacy confirmed 补建和 ready profile 前置检查。兼容 `/confirm` 委托同一服务；新增计划快照、任务 Run 轨迹和阻塞恢复 API。
+- **feat(runtime)**：常驻 `TaskScheduler` 每 2 秒领取就绪任务，每 workspace 最多并发 2 个 Run，30 秒租约/10 秒续租；依赖完成后自动接力，重启回收过期租约并自动重试一次，持续失败才阻塞老板，全部完成后根任务与计划自动归档。RunService 可执行数据库中已有 queued Run，并在工具 RunStep 后提交事务，避免 SQLite 长写事务饿死心跳。
+- **feat(mcp)**：新增每 Run 动态 `acp.schema.HttpMcpServer` 公司工具，短期 token 绑定 workspace/plan/task/run/agent；受控暴露资料检索、进度、交付、子任务、支援和阻塞六个工具，Hermes 不接触数据库凭证。固定 `mcp==1.26.0`、`sse-starlette==2.1.3`，保留 `starlette==0.41.3`。
+- **feat(delivery)**：中间项支持 Markdown 与最终回复兜底；最终项必须提交合法 `content_package_v1`，校验发布排期、内容字段、来源引用和 assumptions，并支持 Markdown 导出。审批改为数据库决定轮询（250ms/50s fail-close），API 只记录决定，RunService 负责最终状态迁移。
+- **feat(product)**：新 workspace 默认创建小秘、内容策划、内容主笔、运营执行和“内容经营群”，开启 Hermes 供给时四个 profile 自动上岗。桌面端 brief 卡片自然语言展示分工接力，一次点击 launch；计划每 3 秒刷新任务/Run/审批/产出，任务详情支持阻塞恢复，最终包提供发布日历、逐篇预览、来源、未知项和 Markdown 导出。
+- **test/e2e**：测试配置清空真实 key 并在非 `HERMES_E2E=1` 时禁止外网/真实 profile；新增 brief/launch/调度/MCP/审批/内容包/日志回归。全套 **325 passed / 8 skipped**；desktop TypeScript/Vite/Electron build 通过；真实 Hermes 四人“小红书周计划”从群讨论、一次确认、自动接力、API 重启恢复到结构化内容包全链跑通。
+- **architecture**：新增 [ADR 0010](docs/decisions/0010-durable-task-dispatch-and-company-tools.md) 与 [TD-11](docs/tech-design/TD-11-autonomous-content-execution.md)，确定数据库持久调度 + 动态 MCP 公司工具边界；不接真实发布平台，后续顺序为 TD-10 → TD-09 → TD-08。
+
 ### 2026-07-21（讨论闭环核心修复：共识 brief 自动产出 + 小秘真招人 + 群成员全员可发言）
 
 - **feat(orchestration)**：讨论轮结束自动产出共识 brief——`run_discussion_round` 的讨论循环正常结束后，本轮实际发言 ≥2 轮就用注入的主持人 LLM 回调跑收敛检查（`build_convergence_prompt` → `check_convergence` → `build_brief_draft_prompt`，这三个函数 TD-02-T3 起就是只有测试引用的死码，本次接入生产），判定已对齐则 yield `brief_draft` 事件。编排层不写库；LLM 异常/JSON 垃圾/缺 goal 一律静默兜底为"不出 brief"，绝不影响发消息。

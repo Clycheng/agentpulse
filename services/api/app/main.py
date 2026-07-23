@@ -14,7 +14,9 @@ from app.api.routes.health import router as health_router
 from app.api.routes.ideas import router as ideas_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.team_compiler import router as team_compiler_router
+from app.api.routes.task_plans import router as task_plans_router
 from app.api.routes.webhooks import router as webhooks_router
+from app.api.company_tools_mcp import company_tools_app, company_tools_lifespan
 from app.api.routes.workspace import router as workspace_router
 from app.core.database import connect, init_db, shutdown_db
 from app.core.config import settings
@@ -32,16 +34,26 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _check_hermes_binary_if_provisioning_enabled()
 
     cron_task = None
+    scheduler_task = None
     if settings.idle_thinking_cron:
         import asyncio
 
         cron_task = asyncio.create_task(_idle_cron_loop())
         logger.info("idle_cron_started", interval_s=settings.idle_cron_interval_seconds)
 
-    yield
+    if settings.task_worker_enabled:
+        import asyncio
+
+        scheduler_task = asyncio.create_task(_task_worker_loop())
+        logger.info("task_worker_started", interval_s=settings.task_worker_poll_seconds)
+
+    async with company_tools_lifespan():
+        yield
 
     if cron_task is not None:
         cron_task.cancel()
+    if scheduler_task is not None:
+        scheduler_task.cancel()
     shutdown_db()
     logger.info("server_stopped")
 
@@ -71,7 +83,9 @@ def create_app() -> FastAPI:
     app.include_router(channels_router, prefix="/api")
     app.include_router(catalog_router, prefix="/api")
     app.include_router(team_compiler_router, prefix="/api")
+    app.include_router(task_plans_router, prefix="/api")
     app.include_router(webhooks_router)
+    app.mount("/mcp/company-tools", company_tools_app)
 
     return app
 
@@ -148,6 +162,21 @@ async def _idle_cron_loop() -> None:
                 conn.close()
         except Exception:
             continue
+
+
+async def _task_worker_loop() -> None:
+    import asyncio
+
+    from app.runtime.task_scheduler import TaskScheduler
+
+    scheduler = TaskScheduler()
+    await scheduler.recover_expired_runs()
+    try:
+        while True:
+            await scheduler.tick()
+            await asyncio.sleep(settings.task_worker_poll_seconds)
+    finally:
+        await scheduler.close()
 
 
 app = create_app()

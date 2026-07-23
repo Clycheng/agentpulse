@@ -1,11 +1,14 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from app.api.routes import workspace as workspace_routes
 from app.core.config import settings
 from app.core.database import connect, init_db
 from app.main import app
+from app.orchestration.brief import confirm_brief
 from app.schemas.run import LlmChatResponse
-from app.services.workspace import new_id, now_iso
+from app.services.workspace import add_message, new_id, now_iso
 
 
 def make_client(tmp_path, monkeypatch) -> TestClient:
@@ -37,6 +40,41 @@ def register_user(client: TestClient) -> dict:
     return response.json()
 
 
+def brief_work_items(agent_id: str) -> list[dict]:
+    return [
+        {
+            "key": "research",
+            "title": "调研",
+            "description": "整理执行依据",
+            "owner_agent_id": agent_id,
+            "expected_output": "研究摘要",
+            "output_type": "markdown",
+            "depends_on_keys": [],
+            "final_delivery": False,
+        },
+        {
+            "key": "draft",
+            "title": "起草",
+            "description": "完成草稿",
+            "owner_agent_id": agent_id,
+            "expected_output": "内容草稿",
+            "output_type": "markdown",
+            "depends_on_keys": ["research"],
+            "final_delivery": False,
+        },
+        {
+            "key": "package",
+            "title": "组包",
+            "description": "整理待发布内容包",
+            "owner_agent_id": agent_id,
+            "expected_output": "待发布内容包",
+            "output_type": "content_package_v1",
+            "depends_on_keys": ["draft"],
+            "final_delivery": True,
+        },
+    ]
+
+
 def create_confirmed_brief(
     client: TestClient,
     token: str,
@@ -51,18 +89,29 @@ def create_confirmed_brief(
         json={
             "discussion_conversation_id": conversation_id,
             "goal": goal,
+            "owner_agent_id": agent_id,
+            "participant_agent_ids": [agent_id],
+            "work_items": brief_work_items(agent_id),
             "created_by_agent_id": agent_id,
         },
     )
     assert brief.status_code == 200
     brief_id = brief.json()["id"]
 
-    confirmed = client.post(
-        f"/api/briefs/{brief_id}/confirm",
-        headers=auth_header(token),
-    )
-    assert confirmed.status_code == 200
-    return confirmed.json()
+    conn = connect()
+    try:
+        row = conn.execute("SELECT workspace_id FROM consensus_briefs WHERE id = ?", (brief_id,)).fetchone()
+        user = conn.execute("SELECT id FROM users ORDER BY created_at LIMIT 1").fetchone()
+        confirmed = confirm_brief(
+            conn,
+            workspace_id=row["workspace_id"],
+            brief_id=brief_id,
+            confirmed_by_user_id=user["id"],
+        )
+        conn.commit()
+        return confirmed
+    finally:
+        conn.close()
 
 
 def test_register_bootstrap_creates_real_workspace_foundation(tmp_path, monkeypatch):
@@ -79,17 +128,23 @@ def test_register_bootstrap_creates_real_workspace_foundation(tmp_path, monkeypa
     assert data["workspace"]["name"] == "AgentPulse 工作室"
     assert data["workspace"]["onboarding_completed"] is False
     assert [department["name"] for department in data["departments"]] == [
-        "老板办公室",
+        "老板办公室", "内容经营部",
     ]
-    assert [agent["name"] for agent in data["agents"]] == ["小秘"]
+    assert [agent["name"] for agent in data["agents"]] == [
+        "小秘", "内容策划", "内容主笔", "运营执行",
+    ]
     assert data["agents"][0]["role"] == "老板秘书"
     assert data["tasks"] == []
-    assert len(data["conversations"]) == 1
+    assert len(data["conversations"]) == 5
     assert data["conversations"][0]["kind"] == "dm"
     welcome_messages = data["messages_by_conversation"][data["conversations"][0]["id"]]
     assert len(welcome_messages) == 1
     assert welcome_messages[0]["sender_type"] == "agent"
     assert "我是小秘" in welcome_messages[0]["content"]
+    assert any(
+        conversation["kind"] == "group" and conversation["name"] == "内容经营群"
+        for conversation in data["conversations"]
+    )
     assert data["agent_template_categories"]
     assert data["agent_template_categories"][0]["id"] == "business-ops"
     assert data["agent_templates"]
@@ -726,6 +781,7 @@ def test_group_discussion_auto_creates_brief_when_converged(tmp_path, monkeypatc
 
     async def fake_complete(self, payload):
         if payload.agent.name == "主持人":
+            assert payload.messages[-1].content == "请严格按照系统指令完成输出"
             prompt = payload.agent.prompt or ""
             if "判断讨论是否已经充分" in prompt:
                 return LlmChatResponse(
@@ -734,9 +790,26 @@ def test_group_discussion_auto_creates_brief_when_converged(tmp_path, monkeypatc
                 )
             if "提炼共识纪要" in prompt:
                 return LlmChatResponse(
-                    reply=(
-                        '{"goal": "自动产出的共识目标", "scope": "范围A",'
-                        ' "constraints": "约束B", "success_criteria": "标准C"}'
+                    reply=json.dumps(
+                        {
+                            "goal": "自动产出的共识目标",
+                            "scope": "范围A",
+                            "constraints": "约束B",
+                            "success_criteria": "标准C",
+                            "owner_agent_id": analyst["id"],
+                            "work_items": [
+                                *brief_work_items(analyst["id"])[:1],
+                                {
+                                    **brief_work_items(writer["id"])[1],
+                                    "depends_on_keys": ["research"],
+                                },
+                                {
+                                    **brief_work_items(writer["id"])[2],
+                                    "depends_on_keys": ["draft"],
+                                },
+                            ],
+                        },
+                        ensure_ascii=False,
                     ),
                     provider="deepseek", model="deepseek-v4-flash", usage={},
                 )
@@ -846,6 +919,18 @@ def test_stream_group_discussion_emits_brief_card_system_event(tmp_path, monkeyp
                 "scope": "",
                 "constraints": "",
                 "success_criteria": "",
+                "owner_agent_id": analyst["id"],
+                "work_items": [
+                    *brief_work_items(analyst["id"])[:1],
+                    {
+                        **brief_work_items(writer["id"])[1],
+                        "depends_on_keys": ["research"],
+                    },
+                    {
+                        **brief_work_items(writer["id"])[2],
+                        "depends_on_keys": ["draft"],
+                    },
+                ],
             },
         }
         yield {"type": "end", "converged": True, "turns_used": 2}
@@ -961,6 +1046,7 @@ def test_secretary_with_hermes_profile_uses_function_loop_first(tmp_path, monkey
 
     async def fake_function_loop(**_kwargs):
         calls["function_loop"] += 1
+        yield {"type": "tool_call", "payload": {"name": "create_task"}}
         yield {"type": "chunk", "content": "已通过系统工具处理好"}
 
     async def fail_stream_agent_run(*_a, **_kw):
@@ -1001,6 +1087,67 @@ def test_secretary_with_hermes_profile_uses_function_loop_first(tmp_path, monkey
         body = "".join(resp.iter_text())
     assert "已通过系统工具处理好" in body
     assert calls["function_loop"] == 2
+
+
+def test_group_discussion_secretary_cannot_use_action_bridge(tmp_path, monkeypatch):
+    """Discussion-mode production routing keeps the secretary away from
+    create_task/create_group tools until the owner launches a valid brief."""
+    calls = {"hermes": 0}
+
+    async def fail_function_loop(**_kwargs):
+        raise AssertionError("discussion turn must not call the Action Bridge")
+        yield  # pragma: no cover
+
+    async def fake_stream_agent_run(conn, *, ctx, **_kwargs):
+        calls["hermes"] += 1
+        message = add_message(
+            conn,
+            conversation_id=ctx.conversation_id,
+            sender_type="agent",
+            sender_id=ctx.agent_id,
+            content="小秘只讨论，不创建任务。",
+            provider="hermes",
+        )
+        conn.commit()
+        yield {"type": "chunk", "content": message["content"]}
+        yield {"type": "message", "message": message}
+
+    client = make_client(tmp_path, monkeypatch)
+    auth = register_user(client)
+    token = auth["access_token"]
+    bootstrap = client.get("/api/me/bootstrap", headers=auth_header(token)).json()
+    secretary = next(agent for agent in bootstrap["agents"] if agent["source"] == "system_secretary")
+    group = next(conv for conv in bootstrap["conversations"] if conv["name"] == "内容经营群")
+    _give_agent_ready_hermes_profile(secretary["id"], auth["workspace"]["id"])
+
+    async def fake_discussion_round(conn, *, turn_executor, **_kwargs):
+        async for event in turn_executor(conn, secretary["id"]):
+            yield event
+        yield {"type": "end", "converged": False, "turns_used": 1}
+
+    monkeypatch.setattr(workspace_routes, "run_function_loop", fail_function_loop)
+    monkeypatch.setattr(workspace_routes, "stream_agent_run", fake_stream_agent_run)
+    monkeypatch.setattr(workspace_routes, "run_discussion_round", fake_discussion_round)
+
+    with client.stream(
+        "POST",
+        f"/api/conversations/{group['id']}/messages/stream",
+        headers=auth_header(token),
+        json={"content": "先讨论清楚再分工。"},
+    ) as response:
+        body = "".join(response.iter_text())
+    assert response.status_code == 200
+    assert "小秘只讨论，不创建任务" in body
+    assert calls["hermes"] == 1
+
+    conn = connect()
+    try:
+        assert conn.execute(
+            "SELECT COUNT(*) AS count FROM tasks WHERE workspace_id = ?",
+            (auth["workspace"]["id"],),
+        ).fetchone()["count"] == 0
+    finally:
+        conn.close()
 
 
 def test_recruit_intent_not_triggered_outside_secretary_dm(tmp_path, monkeypatch):
@@ -1431,6 +1578,9 @@ def test_discussion_status_changes_on_brief_lifecycle(tmp_path, monkeypatch):
         json={
             "discussion_conversation_id": secretary_chat["id"],
             "goal": "本周增长打法",
+            "owner_agent_id": secretary_agent["id"],
+            "participant_agent_ids": [secretary_agent["id"]],
+            "work_items": brief_work_items(secretary_agent["id"]),
             "created_by_agent_id": secretary_agent["id"],
         },
     )
@@ -1464,16 +1614,25 @@ def test_discussion_status_changes_on_brief_lifecycle(tmp_path, monkeypatch):
         json={
             "discussion_conversation_id": secretary_chat["id"],
             "goal": "官网改版计划",
+            "owner_agent_id": secretary_agent["id"],
+            "participant_agent_ids": [secretary_agent["id"]],
+            "work_items": brief_work_items(secretary_agent["id"]),
             "created_by_agent_id": secretary_agent["id"],
         },
     )
     assert brief2.status_code == 200
 
-    confirmed = client.post(
-        f"/api/briefs/{brief2.json()['id']}/confirm",
-        headers=auth_header(token),
-    )
-    assert confirmed.status_code == 200
+    conn = connect()
+    try:
+        confirm_brief(
+            conn,
+            workspace_id=auth["workspace"]["id"],
+            brief_id=brief2.json()["id"],
+            confirmed_by_user_id=auth["user"]["id"],
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
     # After confirm, status should be 'aligned'
     reloaded = client.get("/api/me/bootstrap", headers=auth_header(token)).json()

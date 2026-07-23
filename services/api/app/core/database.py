@@ -308,6 +308,10 @@ def init_postgres(conn: Database) -> None:
           conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
           due_date TEXT,
           parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+          task_plan_id TEXT,
+          plan_item_key TEXT,
+          expected_output TEXT NOT NULL DEFAULT '',
+          output_type TEXT NOT NULL DEFAULT 'markdown',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -347,25 +351,6 @@ def init_postgres(conn: Database) -> None:
           created_at TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS approvals (
-          id TEXT PRIMARY KEY,
-          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
-          task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
-          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
-          title TEXT NOT NULL,
-          description TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL DEFAULT 'pending',
-          risk_level TEXT NOT NULL DEFAULT 'medium',
-          type TEXT NOT NULL DEFAULT 'high_risk'
-            CHECK(type IN ('high_risk','clarification','capability_upgrade')),
-          payload_json TEXT NOT NULL DEFAULT '{}',
-          resolved_by TEXT NOT NULL DEFAULT '',
-          resolved_at TEXT,
-          created_at TEXT NOT NULL
-        );
-
         CREATE TABLE IF NOT EXISTS agent_experiences (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -388,6 +373,7 @@ def init_postgres(conn: Database) -> None:
           success_criteria TEXT NOT NULL DEFAULT '',
           owner_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
           participant_agent_ids_json TEXT NOT NULL DEFAULT '[]',
+          work_items_json TEXT NOT NULL DEFAULT '[]',
           created_by_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
           supersedes_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
           derived_from_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
@@ -403,7 +389,7 @@ def init_postgres(conn: Database) -> None:
           agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
           task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
           status TEXT NOT NULL,
-          input_message_id TEXT NOT NULL,
+          input_message_id TEXT,
           output_message_id TEXT,
           hermes_profile_id TEXT,
           hermes_run_id TEXT,
@@ -412,8 +398,55 @@ def init_postgres(conn: Database) -> None:
           model TEXT NOT NULL DEFAULT '',
           usage_json TEXT NOT NULL DEFAULT '{}',
           error TEXT NOT NULL DEFAULT '',
+          attempt_no INTEGER NOT NULL DEFAULT 1,
+          lease_owner TEXT,
+          lease_expires_at TEXT,
+          started_at TEXT,
           created_at TEXT NOT NULL,
           completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS approvals (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
+          task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'pending',
+          risk_level TEXT NOT NULL DEFAULT 'medium',
+          type TEXT NOT NULL DEFAULT 'high_risk'
+            CHECK(type IN ('high_risk','clarification','capability_upgrade')),
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          resolved_by TEXT NOT NULL DEFAULT '',
+          resolved_at TEXT,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS task_plans (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          brief_id TEXT NOT NULL UNIQUE REFERENCES consensus_briefs(id) ON DELETE CASCADE,
+          root_task_id TEXT,
+          status TEXT NOT NULL DEFAULT 'active'
+            CHECK(status IN ('launching','active','blocked','completed','cancelled')),
+          revision_count INTEGER NOT NULL DEFAULT 0,
+          blocked_reason TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS task_dependencies (
+          id TEXT PRIMARY KEY,
+          task_plan_id TEXT NOT NULL REFERENCES task_plans(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          depends_on_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL,
+          UNIQUE(task_id, depends_on_task_id),
+          CHECK(task_id <> depends_on_task_id)
         );
 
         CREATE TABLE IF NOT EXISTS run_steps (
@@ -501,6 +534,11 @@ def init_postgres(conn: Database) -> None:
     ensure_column(conn, "tasks", "due_date", "TEXT")
     ensure_column(conn, "tasks", "parent_task_id", "TEXT REFERENCES tasks(id) ON DELETE SET NULL")
     ensure_column(conn, "tasks", "consensus_brief_id", "TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL")
+    ensure_column(conn, "tasks", "task_plan_id", "TEXT REFERENCES task_plans(id) ON DELETE CASCADE")
+    ensure_column(conn, "tasks", "plan_item_key", "TEXT")
+    ensure_column(conn, "tasks", "expected_output", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "tasks", "output_type", "TEXT NOT NULL DEFAULT 'markdown'")
+    ensure_column(conn, "consensus_briefs", "work_items_json", "TEXT NOT NULL DEFAULT '[]'")
     ensure_column(conn, "conversations", "discussion_status", "TEXT NOT NULL DEFAULT 'discussing' CHECK(discussion_status IN ('discussing', 'aligned'))")
     # TD-03-T1: Run/RunStep data model. New columns are nullable here; RunService
     # (TD-03-T3) enforces "every Run belongs to a Task" + absolute workdir at the
@@ -509,6 +547,10 @@ def init_postgres(conn: Database) -> None:
     ensure_column(conn, "runs", "hermes_profile_id", "TEXT")
     ensure_column(conn, "runs", "hermes_run_id", "TEXT")
     ensure_column(conn, "runs", "workdir", "TEXT")
+    ensure_column(conn, "runs", "attempt_no", "INTEGER NOT NULL DEFAULT 1")
+    ensure_column(conn, "runs", "lease_owner", "TEXT")
+    ensure_column(conn, "runs", "lease_expires_at", "TEXT")
+    ensure_column(conn, "runs", "started_at", "TEXT")
     ensure_column(conn, "approvals", "run_id", "TEXT REFERENCES runs(id) ON DELETE SET NULL")
     ensure_column(
         conn,
@@ -552,6 +594,17 @@ def init_postgres(conn: Database) -> None:
     # instead of the flat list that forced "A/B/C" path strings into `name`.
     ensure_column(
         conn, "departments", "parent_id", "TEXT REFERENCES departments(id) ON DELETE CASCADE"
+    )
+    if conn.dialect == "postgres":
+        conn.execute("ALTER TABLE runs ALTER COLUMN input_message_id DROP NOT NULL")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_runs_task_attempt "
+        "ON runs(task_id, attempt_no) WHERE task_id IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_tasks_plan_item "
+        "ON tasks(task_plan_id, plan_item_key) WHERE task_plan_id IS NOT NULL "
+        "AND plan_item_key IS NOT NULL"
     )
 
 
@@ -670,6 +723,10 @@ def init_sqlite(conn: Database) -> None:
           conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
           due_date TEXT,
           parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+          task_plan_id TEXT,
+          plan_item_key TEXT,
+          expected_output TEXT NOT NULL DEFAULT '',
+          output_type TEXT NOT NULL DEFAULT 'markdown',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -750,6 +807,7 @@ def init_sqlite(conn: Database) -> None:
           success_criteria TEXT NOT NULL DEFAULT '',
           owner_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
           participant_agent_ids_json TEXT NOT NULL DEFAULT '[]',
+          work_items_json TEXT NOT NULL DEFAULT '[]',
           created_by_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
           supersedes_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
           derived_from_brief_id TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL,
@@ -765,7 +823,7 @@ def init_sqlite(conn: Database) -> None:
           agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
           task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
           status TEXT NOT NULL,
-          input_message_id TEXT NOT NULL,
+          input_message_id TEXT,
           output_message_id TEXT,
           hermes_profile_id TEXT,
           hermes_run_id TEXT,
@@ -774,8 +832,36 @@ def init_sqlite(conn: Database) -> None:
           model TEXT NOT NULL DEFAULT '',
           usage_json TEXT NOT NULL DEFAULT '{}',
           error TEXT NOT NULL DEFAULT '',
+          attempt_no INTEGER NOT NULL DEFAULT 1,
+          lease_owner TEXT,
+          lease_expires_at TEXT,
+          started_at TEXT,
           created_at TEXT NOT NULL,
           completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS task_plans (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          brief_id TEXT NOT NULL UNIQUE REFERENCES consensus_briefs(id) ON DELETE CASCADE,
+          root_task_id TEXT,
+          status TEXT NOT NULL DEFAULT 'active'
+            CHECK(status IN ('launching','active','blocked','completed','cancelled')),
+          revision_count INTEGER NOT NULL DEFAULT 0,
+          blocked_reason TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS task_dependencies (
+          id TEXT PRIMARY KEY,
+          task_plan_id TEXT NOT NULL REFERENCES task_plans(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          depends_on_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL,
+          UNIQUE(task_id, depends_on_task_id),
+          CHECK(task_id <> depends_on_task_id)
         );
 
         CREATE TABLE IF NOT EXISTS run_steps (
@@ -863,6 +949,11 @@ def init_sqlite(conn: Database) -> None:
     ensure_column(conn, "tasks", "due_date", "TEXT")
     ensure_column(conn, "tasks", "parent_task_id", "TEXT REFERENCES tasks(id) ON DELETE SET NULL")
     ensure_column(conn, "tasks", "consensus_brief_id", "TEXT REFERENCES consensus_briefs(id) ON DELETE SET NULL")
+    ensure_column(conn, "tasks", "task_plan_id", "TEXT REFERENCES task_plans(id) ON DELETE CASCADE")
+    ensure_column(conn, "tasks", "plan_item_key", "TEXT")
+    ensure_column(conn, "tasks", "expected_output", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "tasks", "output_type", "TEXT NOT NULL DEFAULT 'markdown'")
+    ensure_column(conn, "consensus_briefs", "work_items_json", "TEXT NOT NULL DEFAULT '[]'")
     ensure_column(conn, "conversations", "discussion_status", "TEXT NOT NULL DEFAULT 'discussing' CHECK(discussion_status IN ('discussing', 'aligned'))")
     # TD-03-T1: Run/RunStep data model. New columns are nullable here; RunService
     # (TD-03-T3) enforces "every Run belongs to a Task" + absolute workdir at the
@@ -871,6 +962,10 @@ def init_sqlite(conn: Database) -> None:
     ensure_column(conn, "runs", "hermes_profile_id", "TEXT")
     ensure_column(conn, "runs", "hermes_run_id", "TEXT")
     ensure_column(conn, "runs", "workdir", "TEXT")
+    ensure_column(conn, "runs", "attempt_no", "INTEGER NOT NULL DEFAULT 1")
+    ensure_column(conn, "runs", "lease_owner", "TEXT")
+    ensure_column(conn, "runs", "lease_expires_at", "TEXT")
+    ensure_column(conn, "runs", "started_at", "TEXT")
     ensure_column(conn, "approvals", "run_id", "TEXT REFERENCES runs(id) ON DELETE SET NULL")
     ensure_column(
         conn,
@@ -914,6 +1009,15 @@ def init_sqlite(conn: Database) -> None:
     # instead of the flat list that forced "A/B/C" path strings into `name`.
     ensure_column(
         conn, "departments", "parent_id", "TEXT REFERENCES departments(id) ON DELETE CASCADE"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_runs_task_attempt "
+        "ON runs(task_id, attempt_no) WHERE task_id IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_tasks_plan_item "
+        "ON tasks(task_plan_id, plan_item_key) WHERE task_plan_id IS NOT NULL "
+        "AND plan_item_key IS NOT NULL"
     )
 
 

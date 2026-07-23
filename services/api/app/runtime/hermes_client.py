@@ -49,6 +49,7 @@ class RunContext:
     workspace_id: str = ""
     conversation_id: str = ""
     task_id: str = ""
+    mcp_servers: list[dict] = field(default_factory=list)
     timeout: int = 600
 
 
@@ -62,6 +63,22 @@ class AgentEvent:
 
 class HermesBackendError(RuntimeError):
     pass
+
+
+def _build_mcp_servers(acp_module: Any, servers: list[dict]) -> list[Any]:
+    """Convert per-run company endpoints to ACP's typed MCP representation."""
+    return [
+        acp_module.schema.HttpMcpServer(
+            type="http",
+            name=server["name"],
+            url=server["url"],
+            headers=[
+                acp_module.schema.HttpHeader(name=name, value=value)
+                for name, value in server.get("headers", {}).items()
+            ],
+        )
+        for server in servers
+    ]
 
 
 def _safe_path(workdir: str, path: str) -> Path:
@@ -245,7 +262,8 @@ class HermesBackend:
 
         async def drive() -> AgentEvent:
             await conn.initialize(protocol_version=acp.PROTOCOL_VERSION)
-            session = await conn.new_session(cwd=ctx.workdir, mcp_servers=[])
+            mcp_servers = _build_mcp_servers(acp, ctx.mcp_servers)
+            session = await conn.new_session(cwd=ctx.workdir, mcp_servers=mcp_servers)
             result = await conn.prompt(
                 prompt=[acp.schema.TextContentBlock(type="text", text=ctx.prompt)],
                 session_id=session.session_id,
