@@ -37,14 +37,11 @@ npm run package:linux  # → release/*.AppImage
 `apps/site/favicon.svg` 用 `rsvg-convert` + `iconutil`/Pillow 生成，
 改 logo 后要重新生成这三个文件）。
 
-**上线前必须处理的两件事**：
-1. **签名/公证**：现在 `mac.identity` 强制设为 `null`（跳过签名），
-   打出来的是未签名 App——本地测试没问题，但如果要给别人下载安装，
-   macOS Gatekeeper 会直接拦截，需要 Apple Developer ID 证书 + 公证
-   （`electron-builder` 原生支持，配好 `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`
-   等环境变量即可，去掉 `identity: null`）。Windows 同理需要代码签名证书，
-   否则 SmartScreen 会报"未知发布者"警告。
-2. **生产 API 地址**：桌面端默认连 `http://127.0.0.1:8000/api`
-   （见 `src/main.tsx` 的 `apiBaseUrl`），构建产物前必须设置
-   `VITE_AGENTPULSE_API_URL` 环境变量指向真实部署的后端域名，
-   否则打包出去的客户端谁也连不上。
+**当前分发约定（ADR 0012）**：
+1. 首发是未签名公开内测包。macOS Gatekeeper 和 Windows SmartScreen 会提示
+   未知开发者，官网必须展示 SHA256 和安装说明；代码签名、公证和自动更新后置。
+2. 开发模式默认连接 `http://127.0.0.1:8000/api`；打包后的生产版本固定连接
+   `https://api.agentpulse.cc/api`，使用 `app://agentpulse` 协议加载资源，不允许
+   环境变量把发布包指向任意 API。
+3. JWT 只经 preload IPC 读写 Electron `safeStorage`，renderer 不使用
+   `localStorage` 持久化登录态；主进程禁止非白名单导航、弹窗和 webview。

@@ -198,15 +198,25 @@ async def run_reflection(
             agent_id=agent_id,
             workspace_id=workspace_id,
         )
+        from app.services.model_credentials import (
+            ModelCredentialRequired,
+            runtime_model_environment,
+        )
+
         parts: list[str] = []
         try:
-            async for event in backend.run(ctx, permission_resolver=None):
-                if event.type == "message":
-                    content = event.payload.get("content") or {}
-                    if isinstance(content, dict):
-                        parts.append(content.get("text", "") or "")
-        except Exception:
-            parts = []  # fall through to stamp + return
+            ctx.environment.update(runtime_model_environment(conn, workspace_id))
+        except ModelCredentialRequired:
+            pass
+        else:
+            try:
+                async for event in backend.run(ctx, permission_resolver=None):
+                    if event.type == "message":
+                        content = event.payload.get("content") or {}
+                        if isinstance(content, dict):
+                            parts.append(content.get("text", "") or "")
+            except Exception:
+                parts = []  # fall through to stamp + return
 
         for skill in parse_skills("".join(parts)):
             provisioner.update_skill(profile, skill["skill_name"], skill["content"])

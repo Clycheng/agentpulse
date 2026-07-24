@@ -34,6 +34,9 @@ GATED_TOOLSETS = frozenset({
     "image_gen", "video_gen", "video", "x_search", "tts",
     "homeassistant", "spotify", "yuanbao",
 })
+HOSTED_DENIED_TOOLSETS = frozenset(
+    {"web", "browser", "terminal", "file", "code_execution", "computer_use"}
+)
 
 
 @dataclass
@@ -277,6 +280,7 @@ class LocalHermesProvisioner:
         hermes_bin: str = "hermes",
         default_model: str = "deepseek/deepseek-v4-flash",
         timeout: int = 120,
+        hosted_safe_mode: bool = False,
     ) -> None:
         if not os.path.isabs(work_root):
             raise HermesProvisionError(
@@ -286,6 +290,7 @@ class LocalHermesProvisioner:
         self.hermes_bin = hermes_bin
         self.default_model = default_model
         self.timeout = timeout
+        self.hosted_safe_mode = hosted_safe_mode
 
     def _run(self, args: list[str], *, profile: str | None = None) -> str:
         cmd = [self.hermes_bin]
@@ -369,13 +374,19 @@ class LocalHermesProvisioner:
         # our side: `settings.approval_bridge_timeout_seconds` in
         # `approval_bridge.await_decision`, kept comfortably under 60s so we
         # always resolve before Hermes's hardcoded timeout would.
-        if toolsets:
-            self._run(["tools", "enable", *toolsets], profile=profile_name)
+        effective_toolsets = set(toolsets)
+        if self.hosted_safe_mode:
+            effective_toolsets -= HOSTED_DENIED_TOOLSETS
+        if effective_toolsets:
+            self._run(
+                ["tools", "enable", *sorted(effective_toolsets)],
+                profile=profile_name,
+            )
         # Deny-by-default: disable every gated toolset this agent's granted
         # capabilities didn't ask for (see GATED_TOOLSETS docstring — a fresh
         # profile ships with computer_use/terminal/file/code_execution/web/
         # browser already on, and `tools enable` above is additive only).
-        to_disable = sorted(GATED_TOOLSETS - set(toolsets))
+        to_disable = sorted(GATED_TOOLSETS - effective_toolsets)
         if to_disable:
             self._run(["tools", "disable", *to_disable], profile=profile_name)
         # NOTE: real MCP servers need endpoints/auth (`hermes mcp add ...`); the
@@ -391,6 +402,10 @@ class LocalHermesProvisioner:
     ) -> None:
         # SECURITY: values are written only to the profile's gitignored .env,
         # never logged or returned.
+        if self.hosted_safe_mode and creds:
+            raise HermesProvisionError(
+                "hosted profiles cannot persist provider credentials"
+            )
         env_path = self._profile_dir(profile_name) / ".env"
         with env_path.open("a", encoding="utf-8") as handle:
             for key, value in creds.items():
@@ -405,7 +420,7 @@ class LocalHermesProvisioner:
         if not safe:
             # All-CJK (or otherwise non-ASCII) names sanitize to empty; hash the
             # original so distinct names get distinct files instead of colliding.
-            digest = hashlib.sha1(skill_name.strip().encode("utf-8")).hexdigest()[:10]
+            digest = hashlib.sha256(skill_name.strip().encode("utf-8")).hexdigest()[:10]
             safe = f"skill-{digest}"
         return safe[:64] + ".md"
 
@@ -445,6 +460,10 @@ class LocalHermesProvisioner:
         and reloads the gateway.
         """
         new_toolsets: list[str] = bundle.get("toolsets", [])
+        if self.hosted_safe_mode:
+            new_toolsets = [
+                tool for tool in new_toolsets if tool not in HOSTED_DENIED_TOOLSETS
+            ]
         new_skills: list[str] = bundle.get("skills", [])
 
         # Enable new toolsets (append to existing)
@@ -485,5 +504,9 @@ def build_provisioner_from_settings() -> ProfileProvisioner:
 
     if settings.hermes_provisioning:
         work_root = os.path.abspath(settings.hermes_work_root or ".hermes-data")
-        return LocalHermesProvisioner(work_root=work_root, hermes_bin=settings.hermes_bin)
+        return LocalHermesProvisioner(
+            work_root=work_root,
+            hermes_bin=settings.hermes_bin,
+            hosted_safe_mode=settings.hermes_hosted_safe_mode,
+        )
     return RecordOnlyProvisioner()

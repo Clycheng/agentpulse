@@ -37,6 +37,17 @@ _UPDATE_TYPE_MAP = {
 # Permission decision: given the tool-call info, return one of
 # "allow_once" | "allow_always" | "deny". Default policy denies (safe).
 PermissionResolver = Callable[[dict], Awaitable[str]]
+_ENV_PASSTHROUGH = (
+    "HOME",
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "TZ",
+    "TMPDIR",
+)
+_RUN_SECRET_ENV = frozenset({"DEEPSEEK_API_KEY"})
 
 
 @dataclass
@@ -50,6 +61,7 @@ class RunContext:
     conversation_id: str = ""
     task_id: str = ""
     mcp_servers: list[dict] = field(default_factory=list)
+    environment: dict[str, str] = field(default_factory=dict)
     timeout: int = 600
 
 
@@ -63,6 +75,19 @@ class AgentEvent:
 
 class HermesBackendError(RuntimeError):
     pass
+
+
+def _subprocess_environment(overrides: dict[str, str]) -> dict[str, str]:
+    unknown = set(overrides) - _RUN_SECRET_ENV
+    if unknown:
+        raise HermesBackendError(
+            f"unsupported Hermes environment variables: {', '.join(sorted(unknown))}"
+        )
+    environment = {
+        name: value for name in _ENV_PASSTHROUGH if (value := os.environ.get(name))
+    }
+    environment.update(overrides)
+    return environment
 
 
 def _build_mcp_servers(acp_module: Any, servers: list[dict]) -> list[Any]:
@@ -249,6 +274,7 @@ class HermesBackend:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             cwd=ctx.workdir,
+            env=_subprocess_environment(ctx.environment),
         )
 
         queue: asyncio.Queue = asyncio.Queue()

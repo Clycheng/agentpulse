@@ -12,9 +12,11 @@ from app.api.routes.catalog import router as catalog_router
 from app.api.routes.channels import router as channels_router
 from app.api.routes.health import router as health_router
 from app.api.routes.ideas import router as ideas_router
+from app.api.routes.model_settings import router as model_settings_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.team_compiler import router as team_compiler_router
 from app.api.routes.task_plans import router as task_plans_router
+from app.api.routes.telemetry import router as telemetry_router
 from app.api.routes.webhooks import router as webhooks_router
 from app.api.company_tools_mcp import company_tools_app, company_tools_lifespan
 from app.api.business_tools_mcp import business_tools_app, business_tools_lifespan
@@ -23,6 +25,7 @@ from app.api.routes.workspace import router as workspace_router
 from app.core.database import connect, init_db, shutdown_db
 from app.core.config import settings
 from app.core.logging import get_logger, setup_logging
+from app.core.http_security import RequestSecurityMiddleware
 
 logger = get_logger(__name__)
 
@@ -38,6 +41,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     cron_task = None
     scheduler_task = None
     business_worker_task = None
+    _app.state.task_worker = None
+    _app.state.business_worker = None
     if settings.idle_thinking_cron:
         import asyncio
 
@@ -48,12 +53,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         import asyncio
 
         scheduler_task = asyncio.create_task(_task_worker_loop())
+        _app.state.task_worker = scheduler_task
         logger.info("task_worker_started", interval_s=settings.task_worker_poll_seconds)
 
     if settings.business_worker_enabled:
         import asyncio
 
         business_worker_task = asyncio.create_task(_business_worker_loop())
+        _app.state.business_worker = business_worker_task
         logger.info(
             "business_worker_started", interval_s=settings.business_worker_poll_seconds
         )
@@ -76,23 +83,32 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.app_version,
         lifespan=lifespan,
+        docs_url=None if settings.environment == "production" else "/docs",
+        redoc_url=None if settings.environment == "production" else "/redoc",
+        openapi_url=None if settings.environment == "production" else "/openapi.json",
     )
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(
+        RequestSecurityMiddleware,
+        max_body_bytes=settings.max_request_body_bytes,
+    )
 
     app.include_router(health_router, prefix="/api")
+    app.include_router(telemetry_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(admin_router, prefix="/api")
     app.include_router(workspace_router, prefix="/api")
     app.include_router(briefs_router, prefix="/api")
     app.include_router(runs_router, prefix="/api")
     app.include_router(ideas_router, prefix="/api")
+    app.include_router(model_settings_router, prefix="/api")
     app.include_router(channels_router, prefix="/api")
     app.include_router(catalog_router, prefix="/api")
     app.include_router(team_compiler_router, prefix="/api")

@@ -6,7 +6,7 @@
     <title>AgentPulse — Hire a team of AI employees. Run them like a real company.</title>
     <meta
       name="description"
-      content="AgentPulse is an open-source AI company workspace. Hire AI employees, assign goals in a group chat, let them discuss before they act, and approve every high-risk move. No prompts, no workflow graphs — if you can run a group chat, you can run an AI company."
+      content="AgentPulse is an AI company workspace for solo founders and creators. Hire AI employees, assign goals in a group chat, let them discuss before they act, and approve every high-risk move."
     />
     <meta name="theme-color" content="#06090c" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -17,7 +17,7 @@
     <meta property="og:title" content="AgentPulse — Run AI like a company, not a chatbot" />
     <meta
       property="og:description"
-      content="Hire AI employees, brief them in a group chat, let them discuss before acting, approve the risky moves. Open source."
+      content="Hire AI employees, brief them in a group chat, let them discuss before acting, and approve the risky moves."
     />
     <meta name="twitter:card" content="summary_large_image" />
 
@@ -28,6 +28,12 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+    <script>
+      window.va = window.va || function () {
+        (window.vaq = window.vaq || []).push(arguments);
+      };
+    </script>
+    <script defer src="/_vercel/insights/script.js"></script>
   </head>
   <body>
     <!-- living pulse-network canvas behind the hero -->
@@ -47,16 +53,17 @@
       </a>
       <nav class="nav-links" aria-label="Primary">
         <a href="#how">How it works</a>
+        <a href="#download">Download</a>
         <a href="#features">Features</a>
         <a href="#compare">Why it's different</a>
         <a href="#faq">FAQ</a>
       </nav>
       <div class="nav-cta">
-        <a class="ghost" href="https://github.com/Clycheng/agentpulse" target="_blank" rel="noopener">
+        <a class="ghost" href="https://github.com/Clycheng/agentpulse-releases/releases/latest" target="_blank" rel="noopener">
           <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-          GitHub
+          Releases
         </a>
-        <a class="solid" href="#cta">Start building</a>
+        <a class="solid download-link" href="https://github.com/Clycheng/agentpulse-releases/releases/latest/download/AgentPulse-mac-arm64.dmg" data-download="macos">Download</a>
       </div>
     </header>
 
@@ -66,7 +73,7 @@
         <div class="hero-inner">
           <p class="status" data-reveal>
             <span class="dot" aria-hidden="true"></span>
-            Alpha · open source · self-hostable
+            Public alpha · desktop app · bring your DeepSeek key
           </p>
           <h1 data-reveal>
             Hire a team of<br /><span class="grad">AI employees.</span><br />
@@ -79,17 +86,73 @@
             high-risk move. If you can run a group chat, you can run a company.
           </p>
           <div class="hero-actions" data-reveal>
-            <a class="solid lg" href="https://github.com/Clycheng/agentpulse" target="_blank" rel="noopener">
-              View on GitHub
+            <a id="primary-download" class="solid lg download-link" href="https://github.com/Clycheng/agentpulse-releases/releases/latest/download/AgentPulse-mac-arm64.dmg" data-download="macos">
+              Download for macOS
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M7 17 17 7M17 7H8M17 7v9"/></svg>
             </a>
-            <a class="ghost lg" href="#how">See the loop</a>
+            <a class="ghost lg" href="#download">Other platforms</a>
           </div>
           <ul class="hero-chips" data-reveal>
             <li>No prompts to write</li>
             <li>No workflow graphs</li>
-            <li>Any OpenAI-compatible model</li>
+            <li>Your DeepSeek key stays encrypted</li>
           </ul>
+        </div>
+      </section>
+
+      <!-- ───────────────────────── DOWNLOAD ───────────────────────── -->
+      <section class="download" id="download">
+        <div class="section-head">
+          <h2 data-reveal>Download AgentPulse Desktop.</h2>
+          <p data-reveal>
+            Install the client, create an account, connect your own DeepSeek key,
+            and your four-person content team is ready in the cloud.
+          </p>
+        </div>
+        <div class="download-inner" data-reveal>
+          <div class="release-meta">
+            <span>Public alpha</span>
+            <strong>v<span data-release-version>0.1.0</span></strong>
+            <a href="https://github.com/Clycheng/agentpulse-releases/releases/latest/download/SHA256SUMS">SHA256SUMS</a>
+          </div>
+
+          <div class="platform-downloads">
+            <article class="platform-download">
+              <div class="platform-icon" aria-hidden="true">⌘</div>
+              <div>
+                <h3>macOS</h3>
+                <p>Apple Silicon · macOS 13 or later</p>
+                <code data-sha="macos">Checksum published with release</code>
+              </div>
+              <a class="solid download-link" href="https://github.com/Clycheng/agentpulse-releases/releases/latest/download/AgentPulse-mac-arm64.dmg" data-download="macos">Download DMG</a>
+            </article>
+
+            <article class="platform-download">
+              <div class="platform-icon windows-icon" aria-hidden="true">⊞</div>
+              <div>
+                <h3>Windows</h3>
+                <p>x64 · Windows 10 or later</p>
+                <code data-sha="windows">Checksum published with release</code>
+              </div>
+              <a class="solid download-link" href="https://github.com/Clycheng/agentpulse-releases/releases/latest/download/AgentPulse-windows-x64.exe" data-download="windows">Download EXE</a>
+            </article>
+          </div>
+
+          <div class="unsigned-notice">
+            <strong>Unsigned alpha build</strong>
+            <p>macOS and Windows will identify AgentPulse as an unknown developer. Verify the SHA256 before opening.</p>
+          </div>
+
+          <div class="install-help">
+            <details data-install-help="macos">
+              <summary>Install on macOS</summary>
+              <p>Open the DMG and move AgentPulse to Applications. If macOS blocks the first launch, open System Settings → Privacy &amp; Security and choose Open Anyway.</p>
+            </details>
+            <details data-install-help="windows">
+              <summary>Install on Windows</summary>
+              <p>Open the EXE. When SmartScreen appears, choose More info, verify the publisher is shown as unknown, then choose Run anyway.</p>
+            </details>
+          </div>
         </div>
       </section>
 
@@ -255,23 +318,23 @@
         </div>
       </section>
 
-      <!-- ───────────────────────── OPEN SOURCE ───────────────────────── -->
+      <!-- ───────────────────────── RUNTIME ───────────────────────── -->
       <section class="oss">
         <div class="oss-inner" data-reveal>
-          <h2>Open source, and yours to run.</h2>
+          <h2>Built on an open agent runtime.</h2>
           <p>
-            The code is open for study and research. Each employee runs on the
+            Each employee runs on the MIT-licensed
             <a href="https://github.com/NousResearch/hermes-agent" target="_blank" rel="noopener">Hermes Agent</a>
-            runtime; any OpenAI-compatible model works (DeepSeek by default), and
-            text-only models still handle images, audio and video.
+            runtime. The public alpha uses your own DeepSeek key while AgentPulse
+            hosts the collaboration, task, approval, and execution state.
           </p>
           <div class="stack">
             <span>Electron + React</span>
             <span>FastAPI + PostgreSQL</span>
             <span>Hermes runtime</span>
-            <span>DeepSeek / OpenAI-compatible</span>
+            <span>DeepSeek BYOK</span>
           </div>
-          <a class="ghost lg" href="https://github.com/Clycheng/agentpulse" target="_blank" rel="noopener">Read the source</a>
+          <a class="ghost lg" href="https://github.com/Clycheng/agentpulse-releases/releases/latest" target="_blank" rel="noopener">Release notes</a>
         </div>
       </section>
 
@@ -293,11 +356,11 @@
           </details>
           <details>
             <summary>Which models does it support?</summary>
-            <p>Any OpenAI-compatible API, DeepSeek by default. A text-only model still handles images, audio and video — the runtime converts every modality to text for the main model.</p>
+            <p>The public alpha supports workspace-owned DeepSeek keys. The server validates and encrypts the key, then injects it only into that workspace's employee runs.</p>
           </details>
           <details>
             <summary>Is it ready to use?</summary>
-            <p>It's Alpha. The desktop workspace, group chat, tasks, consensus briefs and the approval gate are working; real multi-agent execution is being wired in on the open-source runtime. Try it and tell us what breaks.</p>
+            <p>It's a public alpha. macOS Apple Silicon and Windows x64 builds are available unsigned, so the operating system shows an unknown-developer warning. The download section includes the exact installation path and SHA256 verification files.</p>
           </details>
         </div>
       </section>
@@ -306,11 +369,11 @@
       <section class="cta" id="cta">
         <div class="cta-inner" data-reveal>
           <h2>Start your one-person company —<br />with a full staff.</h2>
-          <p>Clone it, run it locally, hire your first employee tonight.</p>
+          <p>Download the desktop client, register, and connect your DeepSeek key.</p>
           <div class="hero-actions">
-            <a class="solid lg" href="https://github.com/Clycheng/agentpulse" target="_blank" rel="noopener">Get AgentPulse on GitHub</a>
+            <a class="solid lg download-link" href="https://github.com/Clycheng/agentpulse-releases/releases/latest/download/AgentPulse-mac-arm64.dmg" data-download="macos">Download AgentPulse</a>
           </div>
-          <code class="clone">git clone git@github.com:Clycheng/agentpulse.git</code>
+          <a class="source-link" href="https://github.com/Clycheng/agentpulse-releases/releases/latest" target="_blank" rel="noopener">View release notes</a>
         </div>
       </section>
     </main>
@@ -328,11 +391,11 @@
       </div>
       <p>Hire a team of AI employees. Run them like a real company.</p>
       <div class="foot-links">
-        <a href="https://github.com/Clycheng/agentpulse" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Clycheng/agentpulse-releases/releases/latest" target="_blank" rel="noopener">Releases</a>
         <a href="#how">How it works</a>
         <a href="#faq">FAQ</a>
       </div>
-      <small>© 2026 AgentPulse · Source-available for study &amp; research · Commercial use requires a license.</small>
+      <small>© 2026 AgentPulse · Public alpha</small>
     </footer>
 
     <script src="main.js" defer></script>

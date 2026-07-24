@@ -10,6 +10,7 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from app.core.config import settings
 from app.core.database import connect
 from app.runtime.company_tools_auth import decode_company_tool_token
 from app.services import company_tools
@@ -42,7 +43,9 @@ company_mcp = FastMCP(
     stateless_http=True,
     json_response=True,
     transport_security=TransportSecuritySettings(
-        enable_dns_rebinding_protection=False
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=settings.mcp_allowed_hosts,
+        allowed_origins=settings.mcp_allowed_origins,
     ),
 )
 

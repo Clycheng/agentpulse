@@ -1,0 +1,81 @@
+name: agentpulse
+
+services:
+  api:
+    image: ${AGENTPULSE_IMAGE:-ghcr.io/clycheng/agentpulse-api:latest}
+    environment:
+      AGENTPULSE_DATABASE_URL: ${AGENTPULSE_DATABASE_URL}
+      AGENTPULSE_AUTH_SECRET_KEY: ${AGENTPULSE_AUTH_SECRET_KEY}
+      AGENTPULSE_CREDENTIAL_ENCRYPTION_KEY: ${AGENTPULSE_CREDENTIAL_ENCRYPTION_KEY}
+      AGENTPULSE_CORS_ORIGINS: ${AGENTPULSE_CORS_ORIGINS}
+      AGENTPULSE_RESEND_BASE_URL: ${AGENTPULSE_RESEND_BASE_URL:-https://api.resend.com}
+      AGENTPULSE_MODEL_BYOK_REQUIRED: "true"
+      AGENTPULSE_ENVIRONMENT: production
+      AGENTPULSE_HERMES_PROVISIONING: "true"
+      AGENTPULSE_HERMES_HOSTED_SAFE_MODE: "true"
+      AGENTPULSE_HERMES_WORK_ROOT: /var/lib/agentpulse/work
+      AGENTPULSE_COMPANY_TOOLS_URL: http://api:8000/mcp/company-tools/
+      AGENTPULSE_BUSINESS_TOOLS_URL: http://api:8000/mcp/business-tools/
+      AGENTPULSE_TASK_WORKER_ENABLED: "true"
+      AGENTPULSE_BUSINESS_WORKER_ENABLED: "true"
+      AGENTPULSE_AUTH_RATE_LIMIT_ENABLED: "true"
+      AGENTPULSE_TRUST_PROXY_HEADERS: "true"
+      AGENTPULSE_REGISTRATION_MAX_USERS: "100"
+      AGENTPULSE_INBOUND_WEBHOOKS_ENABLED: "false"
+      AGENTPULSE_MCP_ALLOWED_HOSTS: '["api:*","127.0.0.1:*","localhost:*"]'
+      AGENTPULSE_LOG_JSON: "true"
+    volumes:
+      - agentpulse_data:/var/lib/agentpulse
+    expose:
+      - "8000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    deploy:
+      replicas: 1
+
+  caddy:
+    image: ${AGENTPULSE_CADDY_IMAGE:-agentpulse-caddy:2.11.4-patched}
+    build:
+      context: ..
+      dockerfile: deploy/Caddy.Dockerfile
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-api.agentpulse.cc}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  agentpulse_data:
+  caddy_data:
+  caddy_config:

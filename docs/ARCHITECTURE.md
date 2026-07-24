@@ -100,8 +100,10 @@ Hermes 能力感知**自动路由**：主模型能看图就原生看；主模型
 - 配置在 `~/.hermes/config.yaml` 的 `model` 块；每 profile 可不同模型。
 
 ### 3.9 部署
-- 服务端设计：官方 Docker 镜像 `nousresearch/hermes-agent`，$5 VPS 起，headless Linux，远程可达(消息平台 / API 端口，用 `API_SERVER_KEY` 保护)。
-- 单实例footprint：约 1 vCPU/1GB 起(无浏览器)，推荐 2 vCPU/2–4GB。LLM 是远程调用。多实例受 RAM/CPU + 速率限制约束。
+- TD-12 首版采用薄 Electron + 云端单节点：Oracle ARM64 运行一个 AgentPulse API/Hermes 容器和 Caddy，Supabase 只提供 PostgreSQL，Vercel 承载官网，公开 GitHub Releases 承载安装包（[ADR 0012](decisions/0012-cloud-hosted-desktop-distribution.md)）。
+- workspace 自带 DeepSeek Key。密文由独立凭证密钥保护，只在对应 Hermes ACP 子进程环境中注入；profile、日志、Run 和 API 都不保存或返回明文。
+- 托管 Hermes 使用白名单环境和安全工具集，公网只开放 `/api`，动态 company/business MCP 仅容器内可达。生产单副本是首版边界，profile、记忆和 workdir 放持久卷，业务状态以 PostgreSQL 为准。
+- 单实例 footprint 约 1 vCPU/1GB 起(无浏览器)，公开内测配置 2 OCPU/12GB。免费层无 SLA，多实例受 RAM/CPU、模型速率和本地 profile 状态约束。
 
 ### 3.10 地基验证结论（实测于 2026-07-05，见 [ADR 0005](decisions/0005-hermes-poc-safety-findings.md)）
 2026-07-05 曾在当时版本上验证 HTTP Runs API；该接口结论已被 2026-07-10 的 Hermes v0.18 ACP 实测和 ADR 0007 取代，当前实现以 §3.4 为准。那次验证发现的以下两条安全结论仍然有效：

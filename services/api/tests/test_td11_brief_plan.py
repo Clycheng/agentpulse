@@ -75,7 +75,7 @@ def _client(tmp_path, monkeypatch):
         "/api/auth/register",
         json={
             "email": "td11@example.com",
-            "password": "test1234",
+            "password": "test123456",
             "display_name": "老板",
             "workspace_name": "内容公司",
         },

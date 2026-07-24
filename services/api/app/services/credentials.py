@@ -12,16 +12,22 @@ from app.core.config import settings
 from app.core.database import Database
 from app.services.workspace import new_id, now_iso
 
-_CIPHERTEXT_VERSION = "fernet-v1:"
+_CIPHERTEXT_VERSION = "fernet-v2:"
+_LEGACY_CIPHERTEXT_VERSION = "fernet-v1:"
 
 
 class CredentialError(ValueError):
     pass
 
 
-def _fernet(secret: str | None = None) -> Fernet:
-    material = (secret or settings.auth_secret_key).encode("utf-8")
-    derived = hashlib.sha256(b"agentpulse:credentials:v1:" + material).digest()
+def _fernet(secret: str | None = None, *, legacy: bool = False) -> Fernet:
+    material = (
+        secret
+        or settings.credential_encryption_key
+        or settings.auth_secret_key
+    ).encode("utf-8")
+    context = b"agentpulse:credentials:v1:" if legacy else b"agentpulse:credentials:v2:"
+    derived = hashlib.sha256(context + material).digest()
     return Fernet(base64.urlsafe_b64encode(derived))
 
 
@@ -31,11 +37,14 @@ def encrypt_value(value: str, *, secret: str | None = None) -> str:
 
 
 def decrypt_value(value: str, *, secret: str | None = None) -> str:
-    if not value.startswith(_CIPHERTEXT_VERSION):
+    legacy = value.startswith(_LEGACY_CIPHERTEXT_VERSION)
+    if not value.startswith(_CIPHERTEXT_VERSION) and not legacy:
         raise CredentialError("unsupported credential ciphertext version")
     try:
-        plain = _fernet(secret).decrypt(
-            value.removeprefix(_CIPHERTEXT_VERSION).encode("ascii")
+        version = _LEGACY_CIPHERTEXT_VERSION if legacy else _CIPHERTEXT_VERSION
+        legacy_secret = secret or settings.auth_secret_key
+        plain = _fernet(legacy_secret if legacy else secret, legacy=legacy).decrypt(
+            value.removeprefix(version).encode("ascii")
         )
     except (InvalidToken, ValueError) as exc:
         raise CredentialError("credential cannot be decrypted") from exc

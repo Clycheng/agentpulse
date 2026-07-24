@@ -13,6 +13,8 @@ if os.environ.get("HERMES_E2E") != "1":
     os.environ["AGENTPULSE_HERMES_PROVISIONING"] = "false"
     os.environ["AGENTPULSE_TASK_WORKER_ENABLED"] = "false"
 
+os.environ.setdefault("AGENTPULSE_AUTH_RATE_LIMIT_ENABLED", "false")
+
 os.environ.setdefault("AGENTPULSE_ALLOW_DEFAULT_SECRET", "1")
 
 

@@ -1,7 +1,76 @@
 /* AgentPulse site — pulse-network canvas, scroll reveal, nav, live chat demo */
 document.documentElement.classList.add('js');
 
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reduceMotion = window.matchMedia(
+  '(prefers-reduced-motion: reduce)',
+).matches;
+
+/* ── release assets + privacy-friendly download analytics ── */
+(() => {
+  const links = [...document.querySelectorAll('[data-download]')];
+  const primary = document.getElementById('primary-download');
+  const isWindows = /Windows/i.test(navigator.userAgent);
+  const recordEvent = (event) => {
+    fetch('https://api.agentpulse.cc/api/telemetry/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event }),
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+      keepalive: true,
+    }).catch(() => {
+      // Telemetry must never interfere with downloads or install help.
+    });
+  };
+
+  if (isWindows && primary) {
+    primary.href =
+      'https://github.com/Clycheng/agentpulse-releases/releases/latest/download/AgentPulse-windows-x64.exe';
+    primary.dataset.download = 'windows';
+    primary.firstChild.textContent = 'Download for Windows ';
+  }
+
+  for (const link of links) {
+    link.addEventListener('click', () => {
+      const platform =
+        link.dataset.download === 'windows' ? 'windows' : 'macos';
+      recordEvent(`download_${platform}`);
+    });
+  }
+
+  for (const details of document.querySelectorAll('[data-install-help]')) {
+    details.addEventListener('toggle', () => {
+      if (details.open) {
+        recordEvent(`install_help_${details.dataset.installHelp}`);
+      }
+    });
+  }
+
+  fetch(
+    'https://github.com/Clycheng/agentpulse-releases/releases/latest/download/latest.json',
+  )
+    .then((response) => {
+      if (!response.ok) throw new Error('release manifest unavailable');
+      return response.json();
+    })
+    .then((manifest) => {
+      document.querySelectorAll('[data-release-version]').forEach((element) => {
+        element.textContent = manifest.version;
+      });
+      const macSha = document.querySelector('[data-sha="macos"]');
+      const windowsSha = document.querySelector('[data-sha="windows"]');
+      if (macSha && manifest.platforms?.macos_arm64?.dmg_sha256) {
+        macSha.textContent = manifest.platforms.macos_arm64.dmg_sha256;
+      }
+      if (windowsSha && manifest.platforms?.windows_x64?.sha256) {
+        windowsSha.textContent = manifest.platforms.windows_x64.sha256;
+      }
+    })
+    .catch(() => {
+      // The first release may not exist yet; stable download URLs stay valid
+      // as soon as the tagged release workflow publishes the assets.
+    });
+})();
 
 /* ── nav: condense on scroll ── */
 const nav = document.getElementById('nav');
@@ -102,7 +171,7 @@ window.addEventListener('scroll', onScroll, { passive: true });
       const a = nodes[e.a];
       const b = nodes[e.b];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      const alpha = Math.max(0, 0.10 * (1 - d / (Math.min(w, h) * 0.24)));
+      const alpha = Math.max(0, 0.1 * (1 - d / (Math.min(w, h) * 0.24)));
       if (alpha <= 0) continue;
       ctx.strokeStyle = `rgba(45, 212, 191, ${alpha})`;
       ctx.beginPath();
@@ -123,7 +192,10 @@ window.addEventListener('scroll', onScroll, { passive: true });
     for (let i = pulses.length - 1; i >= 0; i--) {
       const p = pulses[i];
       p.t += p.speed;
-      if (p.t >= 1) { pulses.splice(i, 1); continue; }
+      if (p.t >= 1) {
+        pulses.splice(i, 1);
+        continue;
+      }
       const a = nodes[p.a];
       const b = nodes[p.b];
       const x = a.x + (b.x - a.x) * p.t;
@@ -137,7 +209,10 @@ window.addEventListener('scroll', onScroll, { passive: true });
       ctx.fill();
     }
 
-    if (ts - last > 520) { last = ts; if (pulses.length < 8) spawnPulse(); }
+    if (ts - last > 520) {
+      last = ts;
+      if (pulses.length < 8) spawnPulse();
+    }
   }
 
   build();
@@ -167,11 +242,20 @@ window.addEventListener('scroll', onScroll, { passive: true });
 
   const script = [
     { who: 'you', text: 'Plan next week’s content for us.' },
-    { who: 'nova', text: 'Last week “office gear” posts got 2.3× the saves of skincare. Lead with office scenes?' },
+    {
+      who: 'nova',
+      text: 'Last week “office gear” posts got 2.3× the saves of skincare. Lead with office scenes?',
+    },
     { who: 'you', text: 'Yes. Feature our own desk shelf. No paid promos.' },
-    { who: 'aria', text: 'Got it — 5 topics, 2 spotlighting the shelf. Video, or image-only?' },
+    {
+      who: 'aria',
+      text: 'Got it — 5 topics, 2 spotlighting the shelf. Video, or image-only?',
+    },
     { who: 'you', text: 'Image-only for now.' },
-    { who: 'mira', text: 'Aligned. Wrapping the discussion into a brief for your sign-off.' },
+    {
+      who: 'mira',
+      text: 'Aligned. Wrapping the discussion into a brief for your sign-off.',
+    },
     { type: 'brief' },
     { type: 'approve' },
   ];
@@ -236,14 +320,26 @@ window.addEventListener('scroll', onScroll, { passive: true });
     return row;
   }
 
-  function scroll() { body.scrollTop = body.scrollHeight; }
+  function scroll() {
+    body.scrollTop = body.scrollHeight;
+  }
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   async function play() {
     body.innerHTML = '';
     for (const step of script) {
-      if (step.type === 'brief') { await wait(700); addBrief(); await wait(1600); continue; }
-      if (step.type === 'approve') { await wait(700); addApprove(); await wait(1600); continue; }
+      if (step.type === 'brief') {
+        await wait(700);
+        addBrief();
+        await wait(1600);
+        continue;
+      }
+      if (step.type === 'approve') {
+        await wait(700);
+        addApprove();
+        await wait(1600);
+        continue;
+      }
       if (step.who !== 'you') {
         const t = typing();
         await wait(900 + step.text.length * 12);
@@ -265,11 +361,23 @@ window.addEventListener('scroll', onScroll, { passive: true });
   // start when the chat scrolls into view
   if (reduceMotion || !('IntersectionObserver' in window)) {
     // static fallback: render the whole thread once
-    script.forEach((s) => (s.type === 'brief' ? addBrief() : s.type === 'approve' ? addApprove() : addMsg(s)));
+    script.forEach((s) =>
+      s.type === 'brief'
+        ? addBrief()
+        : s.type === 'approve'
+          ? addApprove()
+          : addMsg(s),
+    );
     return;
   }
-  const io = new IntersectionObserver((entries, obs) => {
-    if (entries[0].isIntersecting) { obs.disconnect(); play(); }
-  }, { threshold: 0.3 });
+  const io = new IntersectionObserver(
+    (entries, obs) => {
+      if (entries[0].isIntersecting) {
+        obs.disconnect();
+        play();
+      }
+    },
+    { threshold: 0.3 },
+  );
   io.observe(body);
 })();

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from app.channels.adapters import UnsupportedChannelError
 from app.channels.router import route_inbound
 from app.core.database import Database, get_db
+from app.core.config import settings
 from app.runtime.deepseek import DeepSeekAPIError, DeepSeekNotConfigured
 from app.services.channels import get_channel_by_token, verify_signature
 
@@ -29,11 +30,15 @@ async def inbound_webhook(
     x_signature: str | None = Header(default=None),
     conn: Database = Depends(get_db),
 ) -> dict:
+    if not settings.inbound_webhooks_enabled:
+        raise HTTPException(status_code=404, detail="channel not found")
     channel = get_channel_by_token(conn, channel_type, token)
     if channel is None:
         raise HTTPException(status_code=404, detail="channel not found")
 
     raw_body = await request.body()
+    if len(raw_body) > settings.max_request_body_bytes:
+        raise HTTPException(status_code=413, detail="request body too large")
     if not verify_signature(channel, raw_body, x_signature):
         raise HTTPException(status_code=401, detail="invalid signature")
 

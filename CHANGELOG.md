@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 2026-07-24（TD-12：零成本云端部署与桌面分发闭环，进行中）
+
+- **feat(cloud/BYOK)**：新增 workspace 级 DeepSeek 模型凭证和设置 API；注册即创建四人内容团队与内容经营群，保存并验证 Key 后幂等供给全部员工，撤销后阻止新 Run。密钥使用独立 `credential_encryption_key` 派生的版本化 Fernet 密文，只按 Run 注入 Hermes ACP 环境，不写 profile、日志或 API 响应。
+- **feat(desktop)**：生产 Electron 改用 `app://agentpulse` 安全协议并固定连接 `https://api.agentpulse.cc/api`；JWT 经 preload IPC 和 `safeStorage` 保存，renderer 不再持久化 token。主进程限制导航/弹窗，页面增加 CSP、API 兼容检查和 DeepSeek onboarding/settings。
+- **feat(distribution)**：新增固定 Hermes `v0.18.2` 提交的 ARM64 Docker 镜像、单副本 Compose/Caddy、加密 PostgreSQL 备份、UFW bootstrap 和健康检查失败回滚脚本；Caddy 从固定 `v2.11.4` 提交以 Go 1.26.5/gRPC 1.82.1 自建，避开官方镜像仍存在的可修复高危项。新增 SHA 固定的 API 镜像与跨平台桌面发布 Actions。独立公开 `Clycheng/agentpulse-releases` 已创建，官网增加系统识别下载、GitHub Release、SHA256 和未签名安装说明。
+- **feat(analytics)**：Vercel `agentpulse-web` 已启用无 Cookie Web Analytics，官网加载 Insights；下载/安装帮助事件只进入 API 的 UTC 日聚合表，不保存原始 IP、UA 或用户标识。
+- **security**：JWT 强制 issuer/audience/type/jti/iat/exp；登录/注册使用数据库持久限流和 HMAC 匿名 IP；生产配置对默认/重复/过短密钥、非 HTTPS CORS、未启用托管 Hermes 安全模式和提前开放 webhook fail-close。Hermes 子进程环境改为白名单，托管模式禁用本地文件、终端、浏览器、网页、代码执行和 computer use；公网 Caddy 阻断 MCP。容器以非 root、只读文件系统、零 capabilities 运行并接入 `pip-audit`、Bandit、npm audit 和 Trivy 发布门。
+- **verification**：API **355 passed / 9 skipped**，desktop lint/build、npm audit、Bandit、API/Hermes 双 `pip-audit` 均通过；ARM64 API 与 Caddy 两个镜像的可修复 HIGH/CRITICAL 均为 0，生产式只读非 root API ready smoke 通过。macOS DMG/ZIP 完整性已验证；Oracle/Supabase、DNS、Windows CI 资产、v0.1.0 Release 和线上完整 E2E 尚未完成，TD-12 保持进行中。
+- **architecture**：新增并修订 [ADR 0012](docs/decisions/0012-cloud-hosted-desktop-distribution.md) 与 [TD-12](docs/tech-design/TD-12-cloud-deployment-and-desktop-distribution.md)，确定薄桌面客户端、Oracle 单节点 Hermes、Supabase PostgreSQL、用户 BYOK、独立发布仓和生产 fail-close 边界；Vercel 上误建的 API Function 不修复，`api.agentpulse.cc` 将迁移到 Oracle。
+
 ### 2026-07-23（TD-10：受控业务工具门与真实邮件闭环）
 
 - **feat(runtime)**：新增与公司内部工具隔离的 `/mcp/business-tools`，RunService 在数据库 Run 建立后按员工已启用能力动态注入短期签名 token；token 绑定 workspace/conversation/run/agent/可选 task，服务端再次校验 Run 归属、工具映射和员工能力。聊天 Run 只获得业务工具，任务 Run 可同时获得 company/business tools。

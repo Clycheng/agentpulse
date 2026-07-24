@@ -39,6 +39,7 @@ from app.services.workspace import (
     now_iso,
     provision_new_agent,
 )
+from app.services.model_credentials import deepseek_client_for_workspace
 
 router = APIRouter(tags=["team-compiler"])
 
@@ -47,11 +48,12 @@ router = APIRouter(tags=["team-compiler"])
 async def draft_team(
     payload: DraftTeamRequest,
     workspace_id: str = Depends(get_workspace_id),
+    conn: Database = Depends(get_db),
 ) -> DraftTeamResponse:
     """Parse the description into role drafts. Nothing is created here —
     this is the "预览" step: the owner reviews/edits the drafts before
     POST /agents/create-team actually provisions anyone."""
-    client = DeepSeekChatClient()
+    client = deepseek_client_for_workspace(conn, workspace_id)
     request = LlmChatRequest(
         company_name="团队编译器",
         conversation_title="团队编译",

@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.core.config import settings
 from app.core.database import Database, get_db
+from app.core.rate_limit import enforce_auth_rate_limit
 from app.core.security import create_access_token, hash_password, verify_password
 from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest
 from app.services.workspace import (
@@ -23,11 +25,31 @@ def normalize_email(email: str) -> str:
 
 
 @router.post("/register", response_model=AuthResponse)
-def register(payload: RegisterRequest, conn: Database = Depends(get_db)):
+def register(
+    payload: RegisterRequest,
+    request: Request,
+    conn: Database = Depends(get_db),
+):
+    enforce_auth_rate_limit(
+        request,
+        conn,
+        kind="register",
+        limit=settings.registration_rate_limit,
+        window_seconds=settings.registration_rate_window_seconds,
+    )
     email = normalize_email(payload.email)
     exists = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
     if exists is not None:
         raise HTTPException(status_code=409, detail="这个邮箱已经注册")
+
+    if conn.dialect == "postgres":
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext(?))",
+            ("agentpulse:registration-capacity",),
+        )
+    user_count = conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"]
+    if settings.registration_max_users > 0 and user_count >= settings.registration_max_users:
+        raise HTTPException(status_code=503, detail="内测名额已满")
 
     user_id = new_id("user")
     conn.execute(
@@ -53,7 +75,18 @@ def register(payload: RegisterRequest, conn: Database = Depends(get_db)):
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(payload: LoginRequest, conn: Database = Depends(get_db)):
+def login(
+    payload: LoginRequest,
+    request: Request,
+    conn: Database = Depends(get_db),
+):
+    enforce_auth_rate_limit(
+        request,
+        conn,
+        kind="login",
+        limit=settings.login_rate_limit,
+        window_seconds=settings.login_rate_window_seconds,
+    )
     email = normalize_email(payload.email)
     user = conn.execute(
         "SELECT * FROM users WHERE email = ?", (email,)

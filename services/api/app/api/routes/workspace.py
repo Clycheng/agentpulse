@@ -75,6 +75,7 @@ from app.services.workspace import (
     update_task,
 )
 from app.services.credentials import delete_credential, put_credential
+from app.services.model_credentials import deepseek_client_for_workspace
 from app.orchestration.supply import create_agent_spec, provision, ProvisioningError
 from app.tools.function_loop import run_function_loop
 from app.orchestration.brief import create_brief
@@ -890,7 +891,7 @@ async def send_message(
             conversation_id=conversation_id,
             member_agents=reply_agents,
             turn_executor=turn_executor,
-            llm_complete=make_speaker_selector(),
+            llm_complete=make_speaker_selector(conn, workspace["id"]),
         ):
             if event["type"] == "message":
                 agent_messages.append(event["message"])
@@ -1061,7 +1062,7 @@ async def send_message_stream(
                 conversation_id=conversation_id,
                 member_agents=reply_agents,
                 turn_executor=turn_executor,
-                llm_complete=make_speaker_selector(),
+                llm_complete=make_speaker_selector(conn, workspace["id"]),
             ):
                 etype = event["type"]
                 if etype == "speaker":
@@ -1546,7 +1547,7 @@ async def _run_action_bridge_stream(
     逐段产出 chunk 事件，结尾把完整回复落库并产出 message 事件；
     空产出则没有 message 事件（由调用方决定是否兜底）。
     """
-    deepseek = DeepSeekChatClient()
+    deepseek = deepseek_client_for_workspace(conn, workspace["id"])
     history = load_llm_history(conn, conversation["id"])
     related_tasks, knowledge_sources, agent_experiences = load_agent_llm_context(
         conn,
@@ -1754,10 +1755,10 @@ async def _stream_agent_reply(
         discussion_context=discussion_context,
     )
 
-    return DeepSeekChatClient().complete_stream(request)
+    return deepseek_client_for_workspace(conn, workspace["id"]).complete_stream(request)
 
 
-def make_speaker_selector():
+def make_speaker_selector(conn: Database, workspace_id: str):
     """Build the moderator-LLM callback injected into run_discussion_round.
 
     The same callback serves speaker selection, convergence, brief drafting,
@@ -1768,7 +1769,7 @@ def make_speaker_selector():
     """
 
     async def _complete(prompt: str) -> str:
-        completion = await DeepSeekChatClient().complete(
+        completion = await deepseek_client_for_workspace(conn, workspace_id).complete(
             LlmChatRequest(
                 agent=LlmChatAgent(
                     id="system",
@@ -1909,7 +1910,7 @@ async def complete_agent_reply(
     history = load_llm_history(conn, conversation_id)
 
     if use_tools:
-        deepseek = DeepSeekChatClient()
+        deepseek = deepseek_client_for_workspace(conn, workspace["id"])
         related_tasks, knowledge_sources, agent_experiences = load_agent_llm_context(
             conn,
             workspace_id=workspace["id"],
@@ -1969,7 +1970,7 @@ async def complete_agent_reply(
         agent_id=agent["id"],
         query=latest_user_content,
     )
-    completion = await DeepSeekChatClient().complete(
+    completion = await deepseek_client_for_workspace(conn, workspace["id"]).complete(
         LlmChatRequest(
             company_name=workspace["name"],
             conversation_title=conversation_title(conversation, agent),

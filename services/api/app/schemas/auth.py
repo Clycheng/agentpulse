@@ -22,7 +22,7 @@ class AuthResponse(BaseModel):
 
 class RegisterRequest(BaseModel):
     email: str = Field(min_length=3, max_length=255)
-    password: str = Field(min_length=6, max_length=128)
+    password: str = Field(min_length=10, max_length=128)
     display_name: str = Field(min_length=1, max_length=80)
     workspace_name: str = Field(default="我的一人公司", min_length=1, max_length=120)
 

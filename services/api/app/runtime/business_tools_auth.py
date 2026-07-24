@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import secrets
+import time
 
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import InvalidTokenError
 
 from app.core.config import settings
 
@@ -17,9 +19,7 @@ def create_business_tool_token(
     agent_id: str,
     task_id: str | None = None,
 ) -> str:
-    expires = datetime.now(UTC) + timedelta(
-        seconds=settings.business_tool_token_ttl_seconds
-    )
+    now = int(time.time())
     return jwt.encode(
         {
             "type": "business_tool",
@@ -28,7 +28,11 @@ def create_business_tool_token(
             "run_id": run_id,
             "agent_id": agent_id,
             "task_id": task_id,
-            "exp": expires,
+            "iat": now,
+            "exp": now + settings.business_tool_token_ttl_seconds,
+            "iss": "agentpulse-api",
+            "aud": "agentpulse-business-tools",
+            "jti": secrets.token_urlsafe(12),
         },
         settings.auth_secret_key,
         algorithm=ALGORITHM,
@@ -37,8 +41,15 @@ def create_business_tool_token(
 
 def decode_business_tool_token(token: str) -> dict:
     try:
-        payload = jwt.decode(token, settings.auth_secret_key, algorithms=[ALGORITHM])
-    except JWTError as exc:
+        payload = jwt.decode(
+            token,
+            settings.auth_secret_key,
+            algorithms=[ALGORITHM],
+            issuer="agentpulse-api",
+            audience="agentpulse-business-tools",
+            options={"require": ["exp", "iat", "iss", "aud", "jti", "type"]},
+        )
+    except InvalidTokenError as exc:
         raise ValueError("invalid or expired business tool token") from exc
     if payload.get("type") != "business_tool":
         raise ValueError("invalid business tool token type")

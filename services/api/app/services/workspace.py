@@ -1481,15 +1481,8 @@ def provision_new_agent(
     otherwise) — so the test suite's DeepSeek-fallback assumptions for
     agents created without this flag aren't disturbed.
 
-    Splits capability_keys into credential-free vs credential-needing
-    (capability_catalog.split_by_credentials) because provision() is
-    all-or-nothing: a bundle that mixes both (e.g. 运营负责人's
-    credential-free data_analysis with its credential-needing ad_bidding)
-    would otherwise leave the employee with zero working capabilities
-    instead of the ones that could have worked immediately. The
-    credential-needing keys are registered afterward via the
-    profile-already-exists fast path so they show up as "待补凭证" on an
-    otherwise-ready employee.
+    Credential-needing capabilities remain visible as pending while the
+    employee's credential-free capabilities receive a working profile.
     """
     from app.core.config import settings
 
@@ -1501,16 +1494,35 @@ def provision_new_agent(
         create_agent_spec,
         provision,
     )
-    from app.runtime.upgrade import UpgradeError, execute_upgrade
-
     try:
         validate_capability_keys(capability_keys)
     except ValueError:
         capability_keys = [k for k in capability_keys if k in CATALOG]
 
-    ready_keys, pending_keys = split_by_credentials(capability_keys)
-    provisioner = build_provisioner_from_settings()
     try:
+        from app.services.model_credentials import has_workspace_model_credential
+
+        if settings.model_byok_required and not has_workspace_model_credential(
+            conn, workspace_id
+        ):
+            create_agent_spec(
+                conn,
+                agent_id=agent_id,
+                workspace_id=workspace_id,
+                role_name=role_name,
+                source_request=source_request,
+                responsibilities=responsibilities,
+                capability_keys=capability_keys,
+            )
+            conn.execute(
+                "UPDATE agent_specs SET status = 'blocked_on_credentials', updated_at = ? "
+                "WHERE agent_id = ?",
+                (now_iso(), agent_id),
+            )
+            return
+
+        ready_keys, pending_keys = split_by_credentials(capability_keys)
+        provisioner = build_provisioner_from_settings()
         create_agent_spec(
             conn,
             agent_id=agent_id,
@@ -1521,6 +1533,8 @@ def provision_new_agent(
             capability_keys=ready_keys,
         )
         provision(conn, agent_id, provisioner)
+        from app.runtime.upgrade import UpgradeError, execute_upgrade
+
         for key in pending_keys:
             try:
                 execute_upgrade(
@@ -1530,7 +1544,7 @@ def provision_new_agent(
                     provisioner=provisioner,
                 )
             except UpgradeError:
-                pass  # non-fatal — the ready_keys capabilities still work
+                pass
     except ProvisioningError:
         pass  # non-fatal — the employee is still usable via the DeepSeek fallback
 

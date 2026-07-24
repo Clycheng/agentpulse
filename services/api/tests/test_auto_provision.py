@@ -82,10 +82,7 @@ def test_wiring_records_soul_and_credentials(monkeypatch):
     actions = [a.action for a in rec.get_actions()]
     assert actions[:2] == ["create_profile", "write_soul"]
     assert "configure" in actions
-    assert "write_credentials" in actions  # DeepSeek key handed to the profile
-    # credential values are never recorded, only key names
-    wc = next(a for a in rec.get_actions() if a.action == "write_credentials")
-    assert wc.details["credential_keys"] == ["DEEPSEEK_API_KEY"]
+    assert "write_credentials" not in actions  # injected into each ACP subprocess
 
 
 def test_default_provisioner_is_record_only_when_flag_off(monkeypatch):

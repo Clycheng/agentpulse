@@ -202,6 +202,10 @@ async def stream_agent_run(
             status=RunStatus.QUEUED,
         )
     ctx.run_id = run_id
+    if ctx.workspace_id:
+        from app.services.model_credentials import runtime_model_environment
+
+        ctx.environment.update(runtime_model_environment(conn, ctx.workspace_id))
     business_tools = enabled_business_tools(conn, ctx.agent_id) if ctx.agent_id else []
     if business_tools and ctx.workspace_id and ctx.conversation_id:
         from app.core.config import settings

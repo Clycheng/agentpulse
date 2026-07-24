@@ -1,0 +1,11 @@
+.env
+.hermes-data
+.pytest_cache
+.venv
+__pycache__
+*.pyc
+*.sqlite3
+alembic
+alembic.ini
+tests
+uv.lock

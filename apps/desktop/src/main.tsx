@@ -6,8 +6,34 @@ import './i18n';
 import './styles.css';
 import { getAppLanguage, setAppLanguage } from './i18n';
 import type { AppLanguage } from './i18n';
+import {
+  ModelProviderModal,
+  ModelProviderSettings,
+} from './ModelProviderSettings';
+import type { ModelProviderStatus } from './ModelProviderSettings';
 
-type View = 'chat' | 'staff' | 'market' | 'tasks' | 'ideas' | 'lib' | 'channels';
+declare global {
+  interface Window {
+    agentpulse?: {
+      platform: string;
+      session: {
+        get: () => Promise<{ accessToken: string; user: User } | null>;
+        set: (value: { accessToken: string; user: User }) => Promise<boolean>;
+        clear: () => Promise<boolean>;
+      };
+    };
+  }
+}
+
+type View =
+  | 'chat'
+  | 'staff'
+  | 'market'
+  | 'tasks'
+  | 'ideas'
+  | 'lib'
+  | 'channels'
+  | 'settings';
 type ThemeMode = 'system' | 'light' | 'dark';
 type EffectiveTheme = 'light' | 'dark';
 type AgentStatus = 'busy' | 'wait' | 'stuck' | 'idle';
@@ -468,10 +494,9 @@ const themeOptions: Array<{
   { mode: 'system', icon: 'computer', labelKey: 'nav.system' },
 ];
 
-const apiBaseUrl =
-  import.meta.env.VITE_AGENTPULSE_API_URL ?? 'http://127.0.0.1:8000/api';
-const tokenStorageKey = 'agentpulse_access_token';
-const userStorageKey = 'agentpulse_user';
+const apiBaseUrl = import.meta.env.DEV
+  ? (import.meta.env.VITE_AGENTPULSE_API_URL ?? 'http://127.0.0.1:8000/api')
+  : 'https://api.agentpulse.cc/api';
 
 let messageCounter = 1;
 const tempMessageId = () => `temp_${messageCounter++}`;
@@ -927,18 +952,9 @@ function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialThemeMode);
   const [systemTheme, setSystemTheme] =
     useState<EffectiveTheme>(getSystemTheme);
-  const [token, setToken] = useState(() =>
-    localStorage.getItem(tokenStorageKey),
-  );
-  const [user, setUser] = useState<User | null>(() => {
-    const raw = localStorage.getItem(userStorageKey);
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as User;
-    } catch {
-      return null;
-    }
-  });
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [anomalyCount24h, setAnomalyCount24h] = useState(0);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -956,7 +972,7 @@ function App() {
   const [talentCategories, setTalentCategories] = useState<TalentCategory[]>(
     [],
   );
-  const [bootLoading, setBootLoading] = useState(Boolean(token));
+  const [bootLoading, setBootLoading] = useState(false);
   const [authError, setAuthError] = useState('');
   const [view, setView] = useState<View>('chat');
   const [chatId, setChatId] = useState('');
@@ -1006,6 +1022,13 @@ function App() {
   const [knowledgeContent, setKnowledgeContent] = useState('');
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
+  const [modelProvider, setModelProvider] =
+    useState<ModelProviderStatus | null>(null);
+  const [modelProviderLoading, setModelProviderLoading] = useState(false);
+  const [modelProviderOpen, setModelProviderOpen] = useState(false);
+  const [modelProviderSaving, setModelProviderSaving] = useState(false);
+  const [modelProviderError, setModelProviderError] = useState('');
+  const modelProviderPrompted = useRef(false);
   const messagesRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -1051,12 +1074,32 @@ function App() {
       setAuthError('');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : '加载工作台失败');
-      localStorage.removeItem(tokenStorageKey);
+      void window.agentpulse?.session.clear();
       setToken(null);
       setUser(null);
       setWorkspace(null);
     } finally {
       setBootLoading(false);
+    }
+  };
+
+  const loadModelProvider = async (activeToken = token) => {
+    if (!activeToken) return;
+    setModelProviderLoading(true);
+    try {
+      const status = await apiRequest<ModelProviderStatus>(
+        '/settings/model-provider',
+        { token: activeToken },
+      );
+      setModelProvider(status);
+      if (!status.configured && !modelProviderPrompted.current) {
+        modelProviderPrompted.current = true;
+        setModelProviderOpen(true);
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : '模型配置加载失败');
+    } finally {
+      setModelProviderLoading(false);
     }
   };
 
@@ -1113,8 +1156,29 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (token) void loadBootstrap(token);
+    let cancelled = false;
+    const restoreSession = async () => {
+      try {
+        const stored = await window.agentpulse?.session.get();
+        if (!cancelled && stored?.accessToken && stored.user) {
+          setToken(stored.accessToken);
+          setUser(stored.user);
+        }
+      } finally {
+        if (!cancelled) setSessionLoading(false);
+      }
+    };
+    void restoreSession();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!sessionLoading && token && user) {
+      void Promise.all([loadBootstrap(token), loadModelProvider(token)]);
+    }
+  }, [sessionLoading]);
 
   const activePlanIds = useMemo(
     () =>
@@ -1273,17 +1337,22 @@ function App() {
     user: User;
     workspace: Workspace;
   }) => {
-    localStorage.setItem(tokenStorageKey, payload.access_token);
-    localStorage.setItem(userStorageKey, JSON.stringify(payload.user));
+    await window.agentpulse?.session.set({
+      accessToken: payload.access_token,
+      user: payload.user,
+    });
     setToken(payload.access_token);
     setUser(payload.user);
     setWorkspace(payload.workspace);
-    await loadBootstrap(payload.access_token);
+    modelProviderPrompted.current = false;
+    await Promise.all([
+      loadBootstrap(payload.access_token),
+      loadModelProvider(payload.access_token),
+    ]);
   };
 
   const logout = () => {
-    localStorage.removeItem(tokenStorageKey);
-    localStorage.removeItem(userStorageKey);
+    void window.agentpulse?.session.clear();
     setToken(null);
     setUser(null);
     setWorkspace(null);
@@ -1294,6 +1363,46 @@ function App() {
     setKnowledgeSources([]);
     setHireTemplates([]);
     setTalentCategories([]);
+    setModelProvider(null);
+    setModelProviderOpen(false);
+    modelProviderPrompted.current = false;
+  };
+
+  const saveModelProvider = async (apiKey: string) => {
+    if (!token) return;
+    setModelProviderSaving(true);
+    setModelProviderError('');
+    try {
+      const status = await apiRequest<ModelProviderStatus>(
+        '/settings/model-provider',
+        {
+          token,
+          method: 'PUT',
+          body: JSON.stringify({ provider: 'deepseek', api_key: apiKey }),
+        },
+      );
+      setModelProvider(status);
+      setModelProviderOpen(false);
+      showToast('DeepSeek 已连接，AI 团队正在就位');
+      await loadBootstrap(token);
+    } catch (error) {
+      setModelProviderError(
+        error instanceof Error ? error.message : 'DeepSeek Key 验证失败',
+      );
+    } finally {
+      setModelProviderSaving(false);
+    }
+  };
+
+  const revokeModelProvider = async () => {
+    if (!token) return;
+    const status = await apiRequest<ModelProviderStatus>(
+      '/settings/model-provider',
+      { token, method: 'DELETE' },
+    );
+    setModelProvider(status);
+    showToast('DeepSeek Key 已撤销，新 Run 已停止');
+    await loadBootstrap(token);
   };
 
   const agentById = (id: string) => agents.find((agent) => agent.id === id);
@@ -2086,6 +2195,14 @@ function App() {
     ? tasks.find((task) => task.id === taskDetailId)
     : null;
 
+  if (sessionLoading) {
+    return (
+      <main className="workbench-shell auth-shell" data-theme={effectiveTheme}>
+        <div className="loading-panel">正在恢复登录状态...</div>
+      </main>
+    );
+  }
+
   if (!token || !user || !workspace) {
     return (
       <AuthScreen
@@ -2253,6 +2370,18 @@ function App() {
 
         {view === 'channels' && token && (
           <ChannelsView token={token} agents={agents} />
+        )}
+
+        {view === 'settings' && (
+          <ModelProviderSettings
+            status={modelProvider}
+            loading={modelProviderLoading}
+            onConfigure={() => {
+              setModelProviderError('');
+              setModelProviderOpen(true);
+            }}
+            onRevoke={revokeModelProvider}
+          />
         )}
       </section>
 
@@ -2448,6 +2577,17 @@ function App() {
         />
       )}
 
+      {modelProviderOpen && (
+        <ModelProviderModal
+          saving={modelProviderSaving}
+          error={modelProviderError}
+          onClose={() => {
+            if (!modelProviderSaving) setModelProviderOpen(false);
+          }}
+          onSave={saveModelProvider}
+        />
+      )}
+
       {toast.visible && <div className="toast">{toast.message}</div>}
     </main>
   );
@@ -2510,7 +2650,7 @@ function AuthScreen({
       setLocalError(t('auth.emailRequired'));
       return;
     }
-    if (mode === 'register' && nextPassword.length < 6) {
+    if (mode === 'register' && nextPassword.length < 10) {
       setLocalError(t('auth.passwordMinLength'));
       return;
     }
@@ -2731,6 +2871,7 @@ function Sidebar({
     { key: 'ideas', icon: 'lightbulb', label: t('nav.ideas'), badge: 0 },
     { key: 'channels', icon: 'hub', label: t('nav.channels'), badge: 0 },
     { key: 'lib', icon: 'folder_open', label: t('nav.lib'), badge: 0 },
+    { key: 'settings', icon: 'settings', label: t('nav.settings'), badge: 0 },
   ];
 
   const toggleLanguage = () => {

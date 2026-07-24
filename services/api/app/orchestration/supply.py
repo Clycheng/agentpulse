@@ -169,7 +169,7 @@ def provision(
     # Set status → provisioning
     conn.execute(
         "UPDATE agent_specs SET status = 'provisioning', updated_at = ? WHERE id = ?",
-        ("provisioning", spec_id),
+        (now, spec_id),
     )
 
     try:
@@ -219,28 +219,28 @@ def provision(
             )
             any_credential_missing = True
 
-        # Determine final status
+        enabled_keys = [
+            cap["capability_key"]
+            for cap in conn.execute(
+                "SELECT capability_key FROM agent_capabilities "
+                "WHERE agent_id = ? AND status = 'enabled'",
+                (agent_id,),
+            ).fetchall()
+        ]
+
         if any_credential_missing:
             final_status = "blocked_on_credentials"
         else:
-            # All capabilities enabled — generate profile and provision
-            profile_name = _generate_profile_name(conn, agent_id, spec["workspace_id"])
+            profile_name = spec["hermes_profile"] or _generate_profile_name(
+                conn, agent_id, spec["workspace_id"]
+            )
 
             # Build bundle from enabled capabilities
-            enabled_keys = [
-                cap["capability_key"]
-                for cap in conn.execute(
-                    "SELECT capability_key FROM agent_capabilities WHERE agent_id = ? AND status = 'enabled'",
-                    (agent_id,),
-                ).fetchall()
-            ]
             bundle = resolve_bundle(enabled_keys)
 
             # Call provisioner: create profile, write persona (SOUL), configure
-            # model/tools, install skills, and hand it the DeepSeek key so the
-            # employee can actually run the moment it's ready.
-            from app.core.config import settings
-
+            # model/tools and install skills. Model credentials are injected
+            # into each ACP subprocess by RunService; they never live in profile.
             provisioner.create_profile(profile_name)
             provisioner.write_soul(profile_name, _build_soul(conn, agent_id, spec))
             provisioner.configure(
@@ -251,11 +251,6 @@ def provision(
             )
             if bundle["skills"]:
                 provisioner.install_skills(profile_name, bundle["skills"])
-            if settings.deepseek_api_key:
-                provisioner.write_credentials(
-                    profile_name, {"DEEPSEEK_API_KEY": settings.deepseek_api_key}
-                )
-
             # Update spec
             conn.execute(
                 "UPDATE agent_specs SET hermes_profile = ?, status = 'ready', updated_at = ? WHERE id = ?",

@@ -47,7 +47,7 @@ class DeepSeekChatClient:
         make the model less likely to follow the actual instruction."""
         if not self.api_key:
             raise DeepSeekNotConfigured(
-                "DeepSeek API Key 未配置，请设置 AGENTPULSE_DEEPSEEK_API_KEY"
+                "DeepSeek API Key 未配置，请先在 AgentPulse 中完成模型设置"
             )
 
         system_prompt = (
@@ -115,7 +115,7 @@ class DeepSeekChatClient:
         """
         if not self.api_key:
             raise DeepSeekNotConfigured(
-                "DeepSeek API Key 未配置，请设置 AGENTPULSE_DEEPSEEK_API_KEY"
+                "DeepSeek API Key 未配置，请先在 AgentPulse 中完成模型设置"
             )
 
         payload = {

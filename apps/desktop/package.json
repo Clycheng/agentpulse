@@ -29,10 +29,10 @@
   "devDependencies": {
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
-    "concurrently": "^9.1.0",
+    "concurrently": "9.2.4",
     "cross-env": "^7.0.3",
-    "electron": "33.4.11",
-    "electron-builder": "^25.1.8",
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3",
     "typescript": "^5.7.2",
     "wait-on": "^8.0.1"
   },
@@ -48,6 +48,7 @@
       "buildResources": "resources"
     },
     "mac": {
+      "artifactName": "AgentPulse-mac-${arch}.${ext}",
       "icon": "resources/icon.icns",
       "category": "public.app-category.productivity",
       "target": [
@@ -57,6 +58,7 @@
       "identity": null
     },
     "win": {
+      "artifactName": "AgentPulse-windows-${arch}.${ext}",
       "icon": "resources/icon.ico",
       "target": [
         "nsis"

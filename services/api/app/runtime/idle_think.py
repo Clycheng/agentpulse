@@ -200,6 +200,18 @@ async def trigger_reflection(
         timeout=timeout,
     )
 
+    from app.services.model_credentials import (
+        ModelCredentialRequired,
+        runtime_model_environment,
+    )
+
+    try:
+        ctx.environment.update(runtime_model_environment(conn, workspace_id))
+    except ModelCredentialRequired:
+        _stamp_reflected(conn, agent_id)
+        conn.commit()
+        return []
+
     parts: list[str] = []
     try:
         async for event in backend.run(ctx, permission_resolver=None):

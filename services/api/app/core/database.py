@@ -62,9 +62,16 @@ def _translate_placeholders(sql: str, dialect: str) -> str:
 
 
 class Database:
-    def __init__(self, conn: Any, dialect: str):
+    def __init__(
+        self,
+        conn: Any,
+        dialect: str,
+        pool: "psycopg_pool.ConnectionPool | None" = None,
+    ):
         self.conn = conn
         self.dialect = dialect
+        self._pool = pool
+        self._closed = False
 
     def execute(self, sql: str, params: Params = ()) -> Result:
         if self.dialect == "postgres":
@@ -85,7 +92,13 @@ class Database:
         self.conn.rollback()
 
     def close(self) -> None:
-        self.conn.close()
+        if self._closed:
+            return
+        self._closed = True
+        if self._pool is not None:
+            self._pool.putconn(self.conn)
+        else:
+            self.conn.close()
 
     def _execute_postgres(self, sql: str, params: Params) -> Result:
         translated_sql = _translate_placeholders(sql, "postgres")
@@ -129,7 +142,7 @@ def connect() -> Database:
         return connect_sqlite(database_url)
     pool = _pg_pool_instance()
     conn = pool.getconn()
-    return Database(conn, "postgres")
+    return Database(conn, "postgres", pool=pool)
 
 
 def connect_sqlite(database_url: str) -> Database:
@@ -163,9 +176,6 @@ def get_db() -> Generator[Database, None, None]:
         raise
     finally:
         conn.close()
-        # Return the connection to the pool (no-op for SQLite)
-        if _pg_pool is not None and hasattr(conn, "conn"):
-            _pg_pool.putconn(conn.conn)  # type: ignore[arg-type]
 
 def shutdown_db() -> None:
     """Close the PostgreSQL pool gracefully (call on app shutdown)."""
@@ -205,6 +215,20 @@ def init_postgres(conn: Database) -> None:
           password_hash TEXT NOT NULL,
           display_name TEXT NOT NULL,
           created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS request_rate_limits (
+          bucket TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rate_limit_bucket_time
+          ON request_rate_limits(bucket, occurred_at);
+
+        CREATE TABLE IF NOT EXISTS site_event_daily (
+          event_name TEXT NOT NULL,
+          event_day TEXT NOT NULL,
+          count INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(event_name, event_day)
         );
 
         CREATE TABLE IF NOT EXISTS official_talent_categories (
@@ -541,6 +565,20 @@ def init_postgres(conn: Database) -> None:
           UNIQUE(agent_id, credential_name)
         );
 
+        CREATE TABLE IF NOT EXISTS workspace_model_credentials (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          provider TEXT NOT NULL CHECK(provider IN ('deepseek')),
+          encrypted_api_key TEXT NOT NULL,
+          model TEXT NOT NULL,
+          validation_status TEXT NOT NULL DEFAULT 'valid'
+            CHECK(validation_status IN ('valid','invalid')),
+          last_validated_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(workspace_id, provider)
+        );
+
         CREATE TABLE IF NOT EXISTS business_tool_policies (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -682,6 +720,20 @@ def init_sqlite(conn: Database) -> None:
           password_hash TEXT NOT NULL,
           display_name TEXT NOT NULL,
           created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS request_rate_limits (
+          bucket TEXT NOT NULL,
+          occurred_at BIGINT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rate_limit_bucket_time
+          ON request_rate_limits(bucket, occurred_at);
+
+        CREATE TABLE IF NOT EXISTS site_event_daily (
+          event_name TEXT NOT NULL,
+          event_day TEXT NOT NULL,
+          count BIGINT NOT NULL DEFAULT 0,
+          PRIMARY KEY(event_name, event_day)
         );
 
         CREATE TABLE IF NOT EXISTS official_talent_categories (
@@ -1018,6 +1070,20 @@ def init_sqlite(conn: Database) -> None:
           UNIQUE(agent_id, credential_name)
         );
 
+        CREATE TABLE IF NOT EXISTS workspace_model_credentials (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          provider TEXT NOT NULL CHECK(provider IN ('deepseek')),
+          encrypted_api_key TEXT NOT NULL,
+          model TEXT NOT NULL,
+          validation_status TEXT NOT NULL DEFAULT 'valid'
+            CHECK(validation_status IN ('valid','invalid')),
+          last_validated_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(workspace_id, provider)
+        );
+
         CREATE TABLE IF NOT EXISTS business_tool_policies (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -1242,6 +1308,7 @@ def reset_database_for_tests() -> None:
                 """
                 DROP TABLE IF EXISTS business_actions CASCADE;
                 DROP TABLE IF EXISTS business_tool_policies CASCADE;
+                DROP TABLE IF EXISTS workspace_model_credentials CASCADE;
                 DROP TABLE IF EXISTS agent_credentials CASCADE;
                 DROP TABLE IF EXISTS task_dependencies CASCADE;
                 DROP TABLE IF EXISTS task_plans CASCADE;
@@ -1269,6 +1336,7 @@ def reset_database_for_tests() -> None:
                 """
                 DROP TABLE IF EXISTS business_actions;
                 DROP TABLE IF EXISTS business_tool_policies;
+                DROP TABLE IF EXISTS workspace_model_credentials;
                 DROP TABLE IF EXISTS agent_credentials;
                 DROP TABLE IF EXISTS task_dependencies;
                 DROP TABLE IF EXISTS task_plans;

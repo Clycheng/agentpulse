@@ -8,5 +8,5 @@
     "types": ["node"],
     "noEmit": false
   },
-  "include": ["*.ts"]
+  "include": ["*.ts", "*.cts"]
 }

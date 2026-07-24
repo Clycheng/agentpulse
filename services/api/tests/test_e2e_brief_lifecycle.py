@@ -29,7 +29,7 @@ def setup(tmp_path, monkeypatch):
         "/api/auth/register",
         json={
             "email": "boss@test.com",
-            "password": "test1234",
+            "password": "test123456",
             "display_name": "老板",
             "workspace_name": "测试公司",
         },
